@@ -1,0 +1,166 @@
+{
+  "$defs": {
+    "ChangeType": {
+      "enum": [
+        "CREATE",
+        "UPDATE",
+        "DELETE",
+        "MOVE"
+      ],
+      "title": "ChangeType",
+      "type": "string"
+    },
+    "JsonValue": {},
+    "SourceArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "path_hint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path Hint"
+        },
+        "source_artifact_id": {
+          "title": "Source Artifact Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_artifact_id",
+        "display_name"
+      ],
+      "title": "SourceArtifactRef",
+      "type": "object"
+    },
+    "SourceType": {
+      "enum": [
+        "GOOGLE_DRIVE",
+        "GITHUB",
+        "LOCAL"
+      ],
+      "title": "SourceType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact": {
+      "$ref": "#/$defs/SourceArtifactRef"
+    },
+    "change_type": {
+      "$ref": "#/$defs/ChangeType"
+    },
+    "contract_version": {
+      "const": "1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "event_fingerprint": {
+      "title": "Event Fingerprint",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "mount_id": {
+      "title": "Mount Id",
+      "type": "string"
+    },
+    "observed_at": {
+      "format": "date-time",
+      "title": "Observed At",
+      "type": "string"
+    },
+    "previous_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SourceArtifactRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "previous_revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Previous Revision"
+    },
+    "provider_event_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider Event Id"
+    },
+    "revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Revision"
+    },
+    "risk_workspace_id": {
+      "title": "Risk Workspace Id",
+      "type": "string"
+    },
+    "safe_metadata": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Safe Metadata",
+      "type": "object"
+    },
+    "source_type": {
+      "$ref": "#/$defs/SourceType"
+    },
+    "source_workspace_id": {
+      "title": "Source Workspace Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "contract_version",
+    "event_id",
+    "event_fingerprint",
+    "risk_workspace_id",
+    "mount_id",
+    "source_workspace_id",
+    "source_type",
+    "artifact",
+    "change_type",
+    "observed_at",
+    "safe_metadata"
+  ],
+  "title": "SourceChange",
+  "type": "object"
+}

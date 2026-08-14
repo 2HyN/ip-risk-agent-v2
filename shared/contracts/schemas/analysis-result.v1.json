@@ -1,0 +1,381 @@
+{
+  "$defs": {
+    "AnalysisCoverage": {
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "NONE"
+      ],
+      "title": "AnalysisCoverage",
+      "type": "string"
+    },
+    "AnalysisStatus": {
+      "enum": [
+        "SUCCEEDED",
+        "FAILED",
+        "INCONCLUSIVE",
+        "SKIPPED"
+      ],
+      "title": "AnalysisStatus",
+      "type": "string"
+    },
+    "AnalysisType": {
+      "enum": [
+        "PATENT",
+        "LICENSE"
+      ],
+      "title": "AnalysisType",
+      "type": "string"
+    },
+    "AnalysisVersions": {
+      "additionalProperties": false,
+      "properties": {
+        "analyzer_version": {
+          "title": "Analyzer Version",
+          "type": "string"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
+        "policy_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy Version"
+        },
+        "prompt_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Version"
+        },
+        "rag_corpus_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rag Corpus Version"
+        }
+      },
+      "required": [
+        "analyzer_version"
+      ],
+      "title": "AnalysisVersions",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "evidence_type": {
+          "$ref": "#/$defs/EvidenceType"
+        },
+        "excerpt": {
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "metadata_safe": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Metadata Safe",
+          "type": "object"
+        },
+        "reference": {
+          "title": "Reference",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "evidence_type",
+        "excerpt",
+        "reference",
+        "metadata_safe"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "EvidenceType": {
+      "enum": [
+        "SOURCE_EXCERPT",
+        "PATENT_CLAIM",
+        "PATENT_ABSTRACT",
+        "LICENSE_REFERENCE",
+        "RAG_REFERENCE",
+        "PACKAGE_METADATA"
+      ],
+      "title": "EvidenceType",
+      "type": "string"
+    },
+    "JsonValue": {},
+    "LicenseCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "ecosystem": {
+          "title": "Ecosystem",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "normalized_license_expression": {
+          "title": "Normalized License Expression",
+          "type": "string"
+        },
+        "normalized_package_name": {
+          "title": "Normalized Package Name",
+          "type": "string"
+        },
+        "policy_outcome": {
+          "$ref": "#/$defs/LicensePolicyOutcome"
+        },
+        "resolved_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Version"
+        },
+        "uncertainty_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncertainty Flags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ecosystem",
+        "normalized_package_name",
+        "normalized_license_expression",
+        "policy_outcome",
+        "evidence_ids",
+        "uncertainty_flags"
+      ],
+      "title": "LicenseCandidate",
+      "type": "object"
+    },
+    "LicensePolicyOutcome": {
+      "enum": [
+        "NO_ACTION",
+        "NOTICE_REQUIRED",
+        "REVIEW_REQUIRED",
+        "POLICY_CONFLICT",
+        "UNKNOWN"
+      ],
+      "title": "LicensePolicyOutcome",
+      "type": "string"
+    },
+    "PatentCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "matched_elements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched Elements",
+          "type": "array"
+        },
+        "normalized_application_number": {
+          "title": "Normalized Application Number",
+          "type": "string"
+        },
+        "provider_metadata_safe": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Provider Metadata Safe",
+          "type": "object"
+        },
+        "suggested_review_priority": {
+          "$ref": "#/$defs/ReviewPriority"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "normalized_application_number",
+        "title",
+        "suggested_review_priority",
+        "matched_elements",
+        "evidence_ids",
+        "provider_metadata_safe"
+      ],
+      "title": "PatentCandidate",
+      "type": "object"
+    },
+    "ProviderFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "safe_message": {
+          "title": "Safe Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "category",
+        "retryable",
+        "safe_message"
+      ],
+      "title": "ProviderFailure",
+      "type": "object"
+    },
+    "ReviewPriority": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ],
+      "title": "ReviewPriority",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "analysis_job_id": {
+      "title": "Analysis Job Id",
+      "type": "string"
+    },
+    "analysis_type": {
+      "$ref": "#/$defs/AnalysisType"
+    },
+    "artifact_id": {
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "candidates": {
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PatentCandidate"
+          },
+          {
+            "$ref": "#/$defs/LicenseCandidate"
+          }
+        ]
+      },
+      "title": "Candidates",
+      "type": "array"
+    },
+    "completed_at": {
+      "format": "date-time",
+      "title": "Completed At",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "coverage": {
+      "$ref": "#/$defs/AnalysisCoverage"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "provider_failures": {
+      "items": {
+        "$ref": "#/$defs/ProviderFailure"
+      },
+      "title": "Provider Failures",
+      "type": "array"
+    },
+    "revision": {
+      "title": "Revision",
+      "type": "string"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/AnalysisStatus"
+    },
+    "versions": {
+      "$ref": "#/$defs/AnalysisVersions"
+    }
+  },
+  "required": [
+    "contract_version",
+    "analysis_job_id",
+    "artifact_id",
+    "revision",
+    "analysis_type",
+    "status",
+    "coverage",
+    "candidates",
+    "evidence",
+    "provider_failures",
+    "versions",
+    "started_at",
+    "completed_at"
+  ],
+  "title": "AnalysisResult",
+  "type": "object"
+}

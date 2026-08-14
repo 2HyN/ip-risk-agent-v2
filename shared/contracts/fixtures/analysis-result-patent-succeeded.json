@@ -1,0 +1,49 @@
+{
+  "contract_version": "1",
+  "analysis_job_id": "job-001",
+  "artifact_id": "artifact-search",
+  "revision": "abc123",
+  "analysis_type": "PATENT",
+  "status": "SUCCEEDED",
+  "coverage": "COMPLETE",
+  "candidates": [
+    {
+      "normalized_application_number": "KR1020260000001",
+      "title": "Synthetic Candidate Ranking Method",
+      "suggested_review_priority": "MEDIUM",
+      "matched_elements": ["deterministic candidate ranking"],
+      "evidence_ids": ["source:changed-1", "patent:kr-1:claim-1"],
+      "provider_metadata_safe": {
+        "jurisdiction": "KR",
+        "synthetic": true
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "source:changed-1",
+      "evidence_type": "SOURCE_EXCERPT",
+      "excerpt": "def rank_candidates(items): return sorted(items)",
+      "reference": "artifact-search#changed-1",
+      "metadata_safe": {"line_start": 120}
+    },
+    {
+      "evidence_id": "patent:kr-1:claim-1",
+      "evidence_type": "PATENT_CLAIM",
+      "excerpt": "A synthetic method for ordering candidate records.",
+      "reference": "https://example.invalid/patents/KR1020260000001#claim-1",
+      "metadata_safe": {"claim": 1}
+    }
+  ],
+  "provider_failures": [],
+  "versions": {
+    "analyzer_version": "patent-analyzer-v1",
+    "model_id": "synthetic-model",
+    "prompt_version": "patent-compare-v1",
+    "policy_version": null,
+    "rag_corpus_version": null
+  },
+  "started_at": "2026-08-14T01:05:00Z",
+  "completed_at": "2026-08-14T01:05:02Z"
+}
+

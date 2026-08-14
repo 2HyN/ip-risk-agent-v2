@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ip-risk-agent"
+version = "0.0.0"
+description = "Secure Human-in-the-Loop IP Risk Management System"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "pydantic==2.13.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["shared/contracts/python", "backend/src"]
+include = ["iprisk_contracts*", "ip_risk_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["shared/contracts/tests"]
+pythonpath = ["shared/contracts/python", "backend/src", "."]
+addopts = "--strict-config --strict-markers -ra -p no:cacheprovider"

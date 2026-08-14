@@ -1,0 +1,47 @@
+{
+  "contract_version": "1",
+  "analysis_job_id": "job-004",
+  "artifact_id": "artifact-package",
+  "revision": "pkg-2",
+  "analysis_type": "LICENSE",
+  "status": "SUCCEEDED",
+  "coverage": "PARTIAL",
+  "candidates": [
+    {
+      "ecosystem": "pypi",
+      "normalized_package_name": "synthetic-lib",
+      "resolved_version": null,
+      "normalized_license_expression": "LicenseRef-Unknown",
+      "policy_outcome": "UNKNOWN",
+      "evidence_ids": ["pkg:pypi:synthetic-lib"],
+      "uncertainty_flags": ["UNRESOLVED_VERSION", "NON_STANDARD_LICENSE"]
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "pkg:pypi:synthetic-lib",
+      "evidence_type": "PACKAGE_METADATA",
+      "excerpt": "Synthetic metadata is incomplete.",
+      "reference": "https://example.invalid/packages/synthetic-lib",
+      "metadata_safe": {"synthetic": true}
+    }
+  ],
+  "provider_failures": [
+    {
+      "provider": "RAG_ENGINE",
+      "category": "PROVIDER_UNAVAILABLE",
+      "retryable": true,
+      "safe_message": "Reference explanation is temporarily unavailable."
+    }
+  ],
+  "versions": {
+    "analyzer_version": "license-analyzer-v1",
+    "model_id": null,
+    "prompt_version": null,
+    "policy_version": "global-license-policy-v1",
+    "rag_corpus_version": "synthetic-corpus-v1"
+  },
+  "started_at": "2026-08-14T01:08:00Z",
+  "completed_at": "2026-08-14T01:08:02Z"
+}
+

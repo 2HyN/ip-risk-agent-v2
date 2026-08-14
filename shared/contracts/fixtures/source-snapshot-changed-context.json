@@ -1,0 +1,40 @@
+{
+  "contract_version": "1",
+  "risk_workspace_id": "vws-synthetic",
+  "mount_id": "mount-github",
+  "source_workspace_id": "source-github",
+  "source_type": "GITHUB",
+  "source_artifact_id": "repo-42:main:src/search.py",
+  "resolved_revision": "abc123",
+  "retrieved_at": "2026-08-14T01:03:00Z",
+  "display_name": "search.py",
+  "logical_path_hint": "src/search.py",
+  "mime_type": "text/x-python",
+  "artifact_kind": "SOURCE_CODE",
+  "content_scope": "CHANGESET_WITH_CONTEXT",
+  "text_segments": [
+    {
+      "segment_id": "changed-1",
+      "text": "def rank_candidates(items):",
+      "line_start": 120,
+      "line_end": 120,
+      "segment_kind": "CHANGED"
+    },
+    {
+      "segment_id": "context-1",
+      "text": "    return sorted(items, key=score)",
+      "line_start": 121,
+      "line_end": 121,
+      "segment_kind": "CONTEXT"
+    }
+  ],
+  "checksum": "sha256:snapshot-synthetic",
+  "byte_size": 8192,
+  "source_access_receipt": {
+    "access_type": "FULL_CONTENT",
+    "provider_request_id": "github-request-1",
+    "content_bytes": 8192,
+    "occurred_at": "2026-08-14T01:03:00Z"
+  }
+}
+

@@ -1,0 +1,25 @@
+{
+  "contract_version": "1",
+  "event_id": "evt-github-001",
+  "provider_event_id": "delivery-123",
+  "event_fingerprint": "repo-42:main:abc123:src/search.py",
+  "risk_workspace_id": "vws-synthetic",
+  "mount_id": "mount-github",
+  "source_workspace_id": "source-github",
+  "source_type": "GITHUB",
+  "artifact": {
+    "source_artifact_id": "repo-42:main:src/search.py",
+    "display_name": "search.py",
+    "path_hint": "src/search.py"
+  },
+  "previous_artifact": null,
+  "change_type": "UPDATE",
+  "revision": "abc123",
+  "previous_revision": "def456",
+  "observed_at": "2026-08-14T01:01:00+00:00",
+  "safe_metadata": {
+    "repository_id": 42,
+    "tracked_branch": "main"
+  }
+}
+

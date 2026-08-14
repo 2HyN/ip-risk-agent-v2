@@ -1,0 +1,248 @@
+{
+  "$defs": {
+    "ArtifactKind": {
+      "enum": [
+        "TEXT",
+        "SOURCE_CODE",
+        "MANIFEST",
+        "LOCKFILE",
+        "DOCUMENT_TEXT",
+        "UNKNOWN"
+      ],
+      "title": "ArtifactKind",
+      "type": "string"
+    },
+    "ContentScope": {
+      "enum": [
+        "FULL_TEXT",
+        "CHANGESET_WITH_CONTEXT",
+        "METADATA_ONLY",
+        "UNSUPPORTED"
+      ],
+      "title": "ContentScope",
+      "type": "string"
+    },
+    "SegmentKind": {
+      "enum": [
+        "FULL",
+        "CHANGED",
+        "CONTEXT"
+      ],
+      "title": "SegmentKind",
+      "type": "string"
+    },
+    "SourceAccessReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "access_type": {
+          "$ref": "#/$defs/SourceAccessType"
+        },
+        "content_bytes": {
+          "minimum": 0,
+          "title": "Content Bytes",
+          "type": "integer"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "provider_request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Request Id"
+        }
+      },
+      "required": [
+        "access_type",
+        "content_bytes",
+        "occurred_at"
+      ],
+      "title": "SourceAccessReceipt",
+      "type": "object"
+    },
+    "SourceAccessType": {
+      "enum": [
+        "METADATA",
+        "DIFF",
+        "PARTIAL_CONTENT",
+        "FULL_CONTENT"
+      ],
+      "title": "SourceAccessType",
+      "type": "string"
+    },
+    "SourceType": {
+      "enum": [
+        "GOOGLE_DRIVE",
+        "GITHUB",
+        "LOCAL"
+      ],
+      "title": "SourceType",
+      "type": "string"
+    },
+    "TextSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "line_end": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line End"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Start"
+        },
+        "segment_id": {
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "segment_kind": {
+          "$ref": "#/$defs/SegmentKind"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "segment_id",
+        "text",
+        "segment_kind"
+      ],
+      "title": "TextSegment",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_kind": {
+      "$ref": "#/$defs/ArtifactKind"
+    },
+    "byte_size": {
+      "minimum": 0,
+      "title": "Byte Size",
+      "type": "integer"
+    },
+    "checksum": {
+      "title": "Checksum",
+      "type": "string"
+    },
+    "content_scope": {
+      "$ref": "#/$defs/ContentScope"
+    },
+    "contract_version": {
+      "const": "1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "display_name": {
+      "title": "Display Name",
+      "type": "string"
+    },
+    "logical_path_hint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Logical Path Hint"
+    },
+    "mime_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mime Type"
+    },
+    "mount_id": {
+      "title": "Mount Id",
+      "type": "string"
+    },
+    "resolved_revision": {
+      "title": "Resolved Revision",
+      "type": "string"
+    },
+    "retrieved_at": {
+      "format": "date-time",
+      "title": "Retrieved At",
+      "type": "string"
+    },
+    "risk_workspace_id": {
+      "title": "Risk Workspace Id",
+      "type": "string"
+    },
+    "source_access_receipt": {
+      "$ref": "#/$defs/SourceAccessReceipt"
+    },
+    "source_artifact_id": {
+      "title": "Source Artifact Id",
+      "type": "string"
+    },
+    "source_type": {
+      "$ref": "#/$defs/SourceType"
+    },
+    "source_workspace_id": {
+      "title": "Source Workspace Id",
+      "type": "string"
+    },
+    "text_segments": {
+      "items": {
+        "$ref": "#/$defs/TextSegment"
+      },
+      "title": "Text Segments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "contract_version",
+    "risk_workspace_id",
+    "mount_id",
+    "source_workspace_id",
+    "source_type",
+    "source_artifact_id",
+    "resolved_revision",
+    "retrieved_at",
+    "display_name",
+    "artifact_kind",
+    "content_scope",
+    "text_segments",
+    "checksum",
+    "byte_size",
+    "source_access_receipt"
+  ],
+  "title": "SourceSnapshot",
+  "type": "object"
+}

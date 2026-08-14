@@ -1,0 +1,40 @@
+{
+  "contract_version": "1",
+  "analysis_job_id": "job-002",
+  "artifact_id": "artifact-package",
+  "revision": "pkg-1",
+  "analysis_type": "LICENSE",
+  "status": "SUCCEEDED",
+  "coverage": "COMPLETE",
+  "candidates": [
+    {
+      "ecosystem": "npm",
+      "normalized_package_name": "synthetic-package",
+      "resolved_version": "1.2.3",
+      "normalized_license_expression": "MIT",
+      "policy_outcome": "NOTICE_REQUIRED",
+      "evidence_ids": ["pkg:npm:synthetic-package:1.2.3"],
+      "uncertainty_flags": []
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "pkg:npm:synthetic-package:1.2.3",
+      "evidence_type": "PACKAGE_METADATA",
+      "excerpt": "Synthetic package metadata declares MIT.",
+      "reference": "https://example.invalid/packages/synthetic-package/1.2.3",
+      "metadata_safe": {"synthetic": true}
+    }
+  ],
+  "provider_failures": [],
+  "versions": {
+    "analyzer_version": "license-analyzer-v1",
+    "model_id": null,
+    "prompt_version": null,
+    "policy_version": "global-license-policy-v1",
+    "rag_corpus_version": null
+  },
+  "started_at": "2026-08-14T01:06:00Z",
+  "completed_at": "2026-08-14T01:06:01Z"
+}
+

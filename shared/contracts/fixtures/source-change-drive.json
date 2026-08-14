@@ -1,0 +1,25 @@
+{
+  "contract_version": "1",
+  "event_id": "evt-drive-001",
+  "provider_event_id": "drive-change-9001",
+  "event_fingerprint": "drive:file-123:rev-7",
+  "risk_workspace_id": "vws-synthetic",
+  "mount_id": "mount-drive",
+  "source_workspace_id": "source-drive",
+  "source_type": "GOOGLE_DRIVE",
+  "artifact": {
+    "source_artifact_id": "file-123",
+    "display_name": "Synthetic Architecture Notes",
+    "path_hint": "architecture-notes.txt"
+  },
+  "previous_artifact": null,
+  "change_type": "UPDATE",
+  "revision": "rev-7",
+  "previous_revision": "rev-6",
+  "observed_at": "2026-08-14T01:00:00Z",
+  "safe_metadata": {
+    "selected_by_picker": true,
+    "revision_number": 7
+  }
+}
+

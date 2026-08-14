@@ -1,0 +1,25 @@
+{
+  "contract_version": "1",
+  "event_id": "evt-local-001",
+  "provider_event_id": null,
+  "event_fingerprint": "device-7:mount-local:src/parser.py:sha256-1",
+  "risk_workspace_id": "vws-synthetic",
+  "mount_id": "mount-local",
+  "source_workspace_id": "source-local",
+  "source_type": "LOCAL",
+  "artifact": {
+    "source_artifact_id": "local-opaque-parser",
+    "display_name": "parser.py",
+    "path_hint": "src/parser.py"
+  },
+  "previous_artifact": null,
+  "change_type": "CREATE",
+  "revision": "sha256-1",
+  "previous_revision": null,
+  "observed_at": "2026-08-14T01:02:00Z",
+  "safe_metadata": {
+    "device_id": "device-7",
+    "staging_ref": "staging-opaque-1"
+  }
+}
+

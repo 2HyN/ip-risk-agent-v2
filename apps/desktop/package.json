@@ -1,0 +1,17 @@
+{
+  "name": "@iprisk/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "verify:resolution": "node ../../scripts/verify_typescript_resolution.mjs"
+  },
+  "dependencies": {
+    "@iprisk/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

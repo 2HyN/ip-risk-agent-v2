@@ -1,0 +1,216 @@
+{
+  "$defs": {
+    "AnalysisSecurityContext": {
+      "additionalProperties": false,
+      "properties": {
+        "analysis_input_checksum": {
+          "title": "Analysis Input Checksum",
+          "type": "string"
+        },
+        "approved": {
+          "title": "Approved",
+          "type": "boolean"
+        },
+        "original_checksum": {
+          "title": "Original Checksum",
+          "type": "string"
+        },
+        "policy_version": {
+          "title": "Policy Version",
+          "type": "string"
+        },
+        "redaction_count": {
+          "minimum": 0,
+          "title": "Redaction Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "approved",
+        "policy_version",
+        "redaction_count",
+        "original_checksum",
+        "analysis_input_checksum"
+      ],
+      "title": "AnalysisSecurityContext",
+      "type": "object"
+    },
+    "AnalysisType": {
+      "enum": [
+        "PATENT",
+        "LICENSE"
+      ],
+      "title": "AnalysisType",
+      "type": "string"
+    },
+    "ArtifactKind": {
+      "enum": [
+        "TEXT",
+        "SOURCE_CODE",
+        "MANIFEST",
+        "LOCKFILE",
+        "DOCUMENT_TEXT",
+        "UNKNOWN"
+      ],
+      "title": "ArtifactKind",
+      "type": "string"
+    },
+    "ContentScope": {
+      "enum": [
+        "FULL_TEXT",
+        "CHANGESET_WITH_CONTEXT",
+        "METADATA_ONLY",
+        "UNSUPPORTED"
+      ],
+      "title": "ContentScope",
+      "type": "string"
+    },
+    "SegmentKind": {
+      "enum": [
+        "FULL",
+        "CHANGED",
+        "CONTEXT"
+      ],
+      "title": "SegmentKind",
+      "type": "string"
+    },
+    "TextSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "line_end": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line End"
+        },
+        "line_start": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line Start"
+        },
+        "segment_id": {
+          "title": "Segment Id",
+          "type": "string"
+        },
+        "segment_kind": {
+          "$ref": "#/$defs/SegmentKind"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "segment_id",
+        "text",
+        "segment_kind"
+      ],
+      "title": "TextSegment",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "analysis_job_id": {
+      "title": "Analysis Job Id",
+      "type": "string"
+    },
+    "artifact_id": {
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "artifact_kind": {
+      "$ref": "#/$defs/ArtifactKind"
+    },
+    "content_scope": {
+      "$ref": "#/$defs/ContentScope"
+    },
+    "contract_version": {
+      "const": "1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "logical_path": {
+      "title": "Logical Path",
+      "type": "string"
+    },
+    "mime_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mime Type"
+    },
+    "mount_id": {
+      "title": "Mount Id",
+      "type": "string"
+    },
+    "requested_analyzers": {
+      "items": {
+        "$ref": "#/$defs/AnalysisType"
+      },
+      "title": "Requested Analyzers",
+      "type": "array"
+    },
+    "revision": {
+      "title": "Revision",
+      "type": "string"
+    },
+    "risk_workspace_id": {
+      "title": "Risk Workspace Id",
+      "type": "string"
+    },
+    "security_context": {
+      "$ref": "#/$defs/AnalysisSecurityContext"
+    },
+    "text_segments": {
+      "items": {
+        "$ref": "#/$defs/TextSegment"
+      },
+      "title": "Text Segments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "contract_version",
+    "analysis_job_id",
+    "risk_workspace_id",
+    "mount_id",
+    "artifact_id",
+    "logical_path",
+    "revision",
+    "artifact_kind",
+    "requested_analyzers",
+    "content_scope",
+    "text_segments",
+    "security_context",
+    "created_at"
+  ],
+  "title": "AnalysisArtifact",
+  "type": "object"
+}

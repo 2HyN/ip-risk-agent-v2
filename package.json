@@ -1,0 +1,19 @@
+{
+  "name": "ip-risk-agent",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": "24.19.0",
+    "pnpm": "11.19.0"
+  },
+  "scripts": {
+    "generate": "python scripts/generate_contracts.py",
+    "typecheck": "pnpm --filter @iprisk/contracts typecheck && pnpm --filter @iprisk/frontend typecheck && pnpm --filter @iprisk/desktop typecheck",
+    "build": "pnpm --filter @iprisk/contracts build && pnpm --filter @iprisk/frontend build && pnpm --filter @iprisk/desktop build",
+    "verify:resolution": "pnpm --filter @iprisk/frontend verify:resolution && pnpm --filter @iprisk/desktop verify:resolution"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

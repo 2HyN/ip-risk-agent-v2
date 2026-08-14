@@ -1,0 +1,29 @@
+{
+  "contract_version": "1",
+  "analysis_job_id": "job-003",
+  "artifact_id": "artifact-search",
+  "revision": "abc124",
+  "analysis_type": "PATENT",
+  "status": "FAILED",
+  "coverage": "NONE",
+  "candidates": [],
+  "evidence": [],
+  "provider_failures": [
+    {
+      "provider": "KIPRIS",
+      "category": "TIMEOUT",
+      "retryable": true,
+      "safe_message": "Patent search provider timed out."
+    }
+  ],
+  "versions": {
+    "analyzer_version": "patent-analyzer-v1",
+    "model_id": null,
+    "prompt_version": null,
+    "policy_version": null,
+    "rag_corpus_version": null
+  },
+  "started_at": "2026-08-14T01:07:00Z",
+  "completed_at": "2026-08-14T01:07:05Z"
+}
+
