@@ -139,6 +139,13 @@ class InMemoryUserRepository(_Repository):
             raise _missing("user", user.id)
         if previous.google_subject != user.google_subject:
             raise UniqueConstraintViolation("Google subject is immutable")
+        if user.session_version not in {
+            previous.session_version,
+            previous.session_version + 1,
+        }:
+            raise UniqueConstraintViolation(
+                "user session version may only remain stable or increment once"
+            )
         subject_owner = self._state.users_by_google_subject.get(user.google_subject)
         if subject_owner not in (None, user.id):
             raise _duplicate("Google subject", user.google_subject)
@@ -159,8 +166,20 @@ class InMemoryWorkspaceRepository(_Repository):
 
     async def save(self, workspace: RiskWorkspace) -> None:
         self._open()
-        if workspace.id not in self._state.workspaces:
+        previous = self._state.workspaces.get(workspace.id)
+        if previous is None:
             raise _missing("workspace", workspace.id)
+        if (
+            previous.created_at != workspace.created_at
+            or (
+                previous.global_ignore_text != workspace.global_ignore_text
+                and previous.security_policy_version
+                == workspace.security_policy_version
+            )
+        ):
+            raise UniqueConstraintViolation(
+                "workspace creation identity is immutable and policy text requires a new version"
+            )
         self._state.workspaces[workspace.id] = workspace
 
     async def list_for_user(self, user_id: str) -> tuple[RiskWorkspace, ...]:

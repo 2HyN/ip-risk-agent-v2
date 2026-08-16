@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timedelta
 
 from ip_risk_agent.application.repositories import (
     ControlUnitOfWork,
     ControlUnitOfWorkFactory,
     RecordNotFoundError,
 )
-from ip_risk_agent.core.memberships import Membership, MembershipRole
+from ip_risk_agent.core.audit import AuditEvent, AuditEventType
+from ip_risk_agent.core.common import ActorType, DomainInvariantError, normalize_utc
+from ip_risk_agent.core.memberships import (
+    Membership,
+    MembershipRole,
+    VwsAction,
+    authorize_vws_action,
+    require_authorized,
+)
 from ip_risk_agent.core.mounts import (
     MountMutationPlan,
     MountRemovalPlan,
@@ -40,6 +49,10 @@ from ip_risk_agent.core.workspaces import (
 
 Clock = Callable[[], datetime]
 IdFactory = Callable[[str], str]
+
+
+class WorkspaceUpdateConflictError(DomainInvariantError):
+    pass
 
 
 class WorkspaceAdministrationService:
@@ -274,6 +287,64 @@ class WorkspaceAdministrationService:
             await uow.commit()
         return plan
 
+    async def update_workspace(
+        self,
+        *,
+        risk_workspace_id: str,
+        actor_user_id: str,
+        expected_updated_at: datetime,
+        name: str | None = None,
+        description: str | None = None,
+        description_provided: bool = False,
+    ):
+        expected_updated_at = normalize_utc(
+            expected_updated_at,
+            "workspace_update.expected_updated_at",
+        )
+        async with self._unit_of_work_factory() as uow:
+            actor = await _require_membership(uow, risk_workspace_id, actor_user_id)
+            require_authorized(
+                authorize_vws_action(
+                    actor_user_id=actor_user_id,
+                    risk_workspace_id=risk_workspace_id,
+                    membership=actor,
+                    action=VwsAction.VWS_SECURITY_MANAGE,
+                )
+            )
+            workspace = await _require_workspace(uow, risk_workspace_id)
+            if workspace.updated_at != expected_updated_at:
+                raise WorkspaceUpdateConflictError("workspace update version conflict")
+            next_name = workspace.name if name is None else name
+            next_description = (
+                description if description_provided else workspace.description
+            )
+            if next_name == workspace.name and next_description == workspace.description:
+                return workspace
+            occurred_at = max(
+                normalize_utc(self._clock(), "workspace_update.clock"),
+                workspace.updated_at + timedelta(microseconds=1),
+            )
+            workspace = replace(
+                workspace,
+                name=next_name,
+                description=next_description,
+                updated_at=occurred_at,
+            )
+            await uow.workspaces.save(workspace)
+            await uow.audit.append(
+                AuditEvent(
+                    id=self._id_factory("audit"),
+                    risk_workspace_id=risk_workspace_id,
+                    event_type=AuditEventType.WORKSPACE_UPDATED,
+                    actor_type=ActorType.USER,
+                    actor_user_id=actor_user_id,
+                    occurred_at=occurred_at,
+                    metadata_safe={"workspace_name": workspace.name},
+                )
+            )
+            await uow.commit()
+        return workspace
+
     async def rename_mount(
         self,
         *,
@@ -384,4 +455,4 @@ async def _membership_and_mount(
     return membership, mount
 
 
-__all__ = ["WorkspaceAdministrationService"]
+__all__ = ["WorkspaceAdministrationService", "WorkspaceUpdateConflictError"]

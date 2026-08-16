@@ -16,25 +16,33 @@ Phase 0~3에서는 신규 package가 필요하지 않아 추가 설치를 수행
 | Phase | Package | 검증 버전 | 검증 결과 |
 |---|---|---:|---|
 | 4 | `google-cloud-firestore` | `2.28.1` | CPython 3.14.7 설치/import, async client/transaction API inspection, `pip check`, fake backend 전체 persistence test 통과 |
+| 9 | `fastapi` | `0.141.1` | Pydantic 2.13.4/CPython 3.14.7 import, router factory/OpenAPI 생성, Control API test 통과 |
+| 9 | `authlib` | `1.7.2` | Google discovery 기반 OIDC state/nonce/ID token 처리와 PKCE 설정 API inspection, fake provider login test 통과 |
+| 9 | `httpx` | `0.28.1` | Authlib async OAuth/OIDC runtime 호환 및 `pip check` 통과 |
+| 9 | `itsdangerous` | `2.2.0` | signed cursor와 Starlette signed session dependency 호환 검증 |
+| 9 | `httpx2` | `2.10.0` | Starlette 1.6.0 TestClient 권장 development dependency, API suite 경고 없이 통과 |
 
 Phase 4 검증 환경에서 `google-cloud-firestore==2.28.1`을 설치했다. 직접 dependency인 `grpcio==1.83.0`은 CPython 3.14 Windows wheel로 설치됐고 전체 dependency graph는 `pip check`를 통과했다. Root `pyproject.toml`과 lockfile은 Agent 1 소유 범위가 아니므로 수정하지 않았으며, Integration 단계의 최종 pin 후보는 `google-cloud-firestore==2.28.1`이다.
+
+Phase 9 검증 환경에서는 `fastapi==0.141.1`, `authlib==1.7.2`, `httpx==0.28.1`, `itsdangerous==2.2.0`과 API test 전용 `httpx2==2.10.0`을 설치했다. FastAPI가 선택한 `starlette==1.6.0` 및 전체 dependency graph가 CPython 3.14.7에서 `pip check`와 Control API suite를 통과했다. Authlib OIDC runtime은 `httpx`, Starlette TestClient는 현행 권장인 `httpx2`를 사용하므로 두 package는 역할이 다르다. Root manifest와 lockfile은 수정하지 않았고 Integration 단계 pin 후보로만 기록한다.
 
 ## Python runtime dependencies
 
 | Package/capability | Purpose | Requirement |
 |---|---|---|
-| FastAPI | Control-owned HTTP API와 dependency injection | Pydantic 2.13.4 및 Python 3.14.7 호환 |
+| FastAPI | Control-owned HTTP API와 dependency injection | `fastapi==0.141.1` 검증 완료 |
 | Uvicorn | 개발 및 Cloud Run ASGI runtime | 선택한 FastAPI/Starlette와 호환 |
 | Google Cloud Firestore client | Canonical Firestore repositories와 transaction | `google-cloud-firestore==2.28.1` 검증 완료 |
-| Authlib 또는 동등 OIDC client | Google OIDC authorization-code flow, discovery, state/nonce 검증 | Google OIDC 및 async Web flow 지원 |
-| HTTPX 또는 동등 async HTTP client | OIDC discovery/token/userinfo 통신과 API test client | 선택한 FastAPI/Auth library와 호환 |
-| itsdangerous 또는 동등 signing capability | Secure application session/state signing | Starlette session 사용 시 필요 |
+| Authlib 또는 동등 OIDC client | Google OIDC authorization-code flow, discovery, state/nonce/ID token 검증과 PKCE | `authlib==1.7.2` 검증 완료 |
+| HTTPX 또는 동등 async HTTP client | OIDC discovery/token/userinfo 통신 | `httpx==0.28.1` 검증 완료 |
+| itsdangerous 또는 동등 signing capability | Secure application session/state와 cursor signing | `itsdangerous==2.2.0` 검증 완료 |
 
 ## Python development dependencies
 
 | Package/capability | Purpose | Requirement |
 |---|---|---|
 | pytest-asyncio | Async application/repository/API test | pytest 9.1.1 및 Python 3.14.7 호환 |
+| HTTPX2 | Starlette TestClient transport | `httpx2==2.10.0` 검증 완료 |
 | Firestore emulator support | Transaction, deterministic ID, concurrency persistence test | production credential 불필요 |
 
 ## Frontend runtime dependencies

@@ -179,6 +179,13 @@ class FirestoreUserRepository(_Repository):
         previous = await _required(self.get(user.id), "user", user.id)
         if previous.google_subject != user.google_subject:
             raise UniqueConstraintViolation("Google subject is immutable")
+        if user.session_version not in {
+            previous.session_version,
+            previous.session_version + 1,
+        }:
+            raise UniqueConstraintViolation(
+                "user session version may only remain stable or increment once"
+            )
         await claim_unique_key(
             self._session,
             collection=USERS,
@@ -197,6 +204,18 @@ class FirestoreWorkspaceRepository(_Repository):
         await self._add(RISK_WORKSPACES, workspace.id, workspace, workspace_to_document)
 
     async def save(self, workspace: RiskWorkspace) -> None:
+        previous = await _required(self.get(workspace.id), "workspace", workspace.id)
+        if (
+            previous.created_at != workspace.created_at
+            or (
+                previous.global_ignore_text != workspace.global_ignore_text
+                and previous.security_policy_version
+                == workspace.security_policy_version
+            )
+        ):
+            raise UniqueConstraintViolation(
+                "workspace creation identity is immutable and policy text requires a new version"
+            )
         await self._save(RISK_WORKSPACES, workspace.id, workspace, workspace_to_document)
 
     async def list_for_user(self, user_id: str) -> tuple[RiskWorkspace, ...]:

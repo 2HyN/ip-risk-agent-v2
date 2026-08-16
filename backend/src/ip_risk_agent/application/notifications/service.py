@@ -110,8 +110,8 @@ async def _require_user(uow: ControlUnitOfWork, user_id: str) -> None:
 
 
 def _require_limit(limit: int) -> None:
-    if isinstance(limit, bool) or limit < 1 or limit > 500:
-        raise ValueError("notification limit must be between 1 and 500")
+    if isinstance(limit, bool) or limit < 1 or limit > 10_000:
+        raise ValueError("notification limit must be between 1 and 10000")
 
 
 __all__ = [

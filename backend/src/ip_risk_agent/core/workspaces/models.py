@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from ip_risk_agent.core.common import normalize_utc, require_chronological, require_non_empty
+from ip_risk_agent.core.common import (
+    DomainInvariantError,
+    normalize_utc,
+    require_chronological,
+    require_non_empty,
+)
 
 
 class RiskWorkspaceStatus(StrEnum):
@@ -26,6 +31,7 @@ class RiskWorkspace:
     updated_at: datetime
     description: str | None = None
     status: RiskWorkspaceStatus = RiskWorkspaceStatus.ACTIVE
+    global_ignore_text: str = ""
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -50,3 +56,11 @@ class RiskWorkspace:
         )
         object.__setattr__(self, "created_at", created_at)
         object.__setattr__(self, "updated_at", updated_at)
+        if "\x00" in self.global_ignore_text:
+            raise DomainInvariantError(
+                "risk_workspace.global_ignore_text cannot contain NUL"
+            )
+        if len(self.global_ignore_text.encode("utf-8")) > 64_000:
+            raise DomainInvariantError(
+                "risk_workspace.global_ignore_text exceeds 64 KiB"
+            )

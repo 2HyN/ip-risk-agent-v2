@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 8 — Human review, History, Audit, Notification |
-| 다음 개발 Phase | Phase 9 — Google App Login과 Control API |
-| 전체 진행률 | 9/14 Phase 완료 |
+| 현재 완료 Phase | Phase 9 — Google App Login과 Control API |
+| 다음 개발 Phase | Phase 10 — ControlPlaneFacade와 Integration surface |
+| 전체 진행률 | 10/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -46,9 +46,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - `application/security_gate`에는 canonical context 검증, deny-only `.ipriskignore`, file/size policy, secret redaction, deterministic minimization/routing/checksum과 SourceAccess 기록이 구현됐다.
 - `application/risk_reconcile`에는 AnalysisResult canonical context 검증, per-analysis-type outcome 수용, minimal evidence retention, authoritative Risk set reconciliation과 결과 기반 Audit/Notification 기록이 구현됐다.
 - `application/risk_review`, `application/history`, `application/notifications`에는 versioned human review, 세 canonical history stream의 권한 기반 safe projection/export, 사용자별 in-app inbox와 idempotent read 처리가 구현됐다.
-- `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐다. API 영역은 아직 skeleton이다.
+- `application/auth`, `application/security_policy`와 `api/**`에는 Google OIDC identity upsert, server-revocable signed session, VWS security policy persistence와 전체 Control-owned FastAPI router factory가 구현됐다.
+- `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐고, Control-owned API 영역은 Phase 9 router/factory까지 구현됐다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~8 Domain, policy, repository transaction, Firestore persistence와 Control application orchestration test 159개가 구현됐으며 현재 환경에서는 158개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~9 Domain, policy, repository/Firestore persistence, application orchestration와 Control API test 168개가 구현됐으며 현재 환경에서는 167개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -76,7 +77,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 6 | Security Gate | 완료 |
 | 7 | AnalysisResult intake와 Risk reconciliation | 완료 |
 | 8 | Human review, History, Audit, Notification | 완료 |
-| 9 | Google App Login과 Control API | 미구현 |
+| 9 | Google App Login과 Control API | 완료 |
 | 10 | ControlPlaneFacade와 Integration surface | 미구현 |
 | 11 | Product Web UI | 미구현 |
 | 12 | 관측성, 보안 hardening과 전체 검증 | 미구현 |
@@ -502,14 +503,14 @@ pnpm run verify:resolution
 - Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
 - 공식 생성 후 generated tracked diff: 0
 
-### Phase 9 — Google App Login과 Control API
+### Phase 9 — Google App Login과 Control API `[완료]`
 
-1. Google OIDC discovery/authorization-code flow를 provider adapter 뒤에 구현한다.
-2. state/nonce/redirect 검증 후 `google_subject` 기준 User upsert와 last-login update를 수행한다.
-3. Drive OAuth credential과 섞이지 않는 application session을 만든다.
-4. secure, HTTP-only, SameSite cookie와 logout/session revocation 정책을 적용한다.
-5. 공통 authentication/authorization dependency와 safe API error model을 만든다.
-6. 아래 Control API를 feature별 router factory로 구현한다.
+1. [x] Google OIDC discovery/authorization-code+PKCE flow를 Authlib provider adapter 뒤에 구현했다.
+2. [x] state/nonce/fixed redirect와 ID token 검증 후 verified `google_subject` 기준 User upsert와 last-login update를 수행한다.
+3. [x] Drive OAuth credential과 섞이지 않고 user ID/session version/CSRF만 담는 application session을 만들었다.
+4. [x] secure, HTTP-only, SameSite cookie와 logout 시 server-side session version revocation 정책을 적용했다.
+5. [x] 공통 authentication/authorization/CSRF dependency, signed cursor와 safe API error model을 만들었다.
+6. [x] 아래 Control API를 feature별 router factory로 구현했다.
    - `/api/v1/auth/**`
    - `/api/v1/workspaces/**` 및 members
    - Workspace별 Mount metadata read/admin
@@ -517,14 +518,32 @@ pnpm run verify:resolution
    - activity/audit/source-access
    - security/ipriskignore/data-access-summary
    - `/api/v1/notifications/**`
-7. request/response Pydantic DTO는 `extra="forbid"`를 사용하고 domain/entity를 그대로 노출하지 않는다.
-8. raw source endpoint를 만들지 않으며 Open Original은 Integration이 Source Plane locator action을 연결할 수 있는 opaque action boundary만 제공한다.
-9. router를 `main.py`에 직접 등록하지 않고 Integration이 사용할 factory/export를 제공한다.
+7. [x] request/response Pydantic DTO는 `extra="forbid"`를 사용하고 safe field만 명시적으로 projection한다.
+8. [x] raw source endpoint를 만들지 않으며 Open Original은 Integration이 Source Plane locator action을 연결할 수 있는 opaque action boundary만 제공한다.
+9. [x] router를 `main.py`에 직접 등록하지 않고 Integration이 사용할 `ControlApiBundle` factory/export를 제공한다.
 
 완료 조건:
 
 - 모든 VWS route가 authenticated user → membership → permission 순서로 검사된다.
 - raw provider error, token, internal stack이 API 응답에 노출되지 않는다.
+
+구현 결과:
+
+- `application/auth/**`: verified Google identity upsert, concurrent callback retry, session resolution/revocation
+- `api/auth/**`: Authlib discovery/state/nonce/ID token/PKCE adapter와 login/callback/logout/me routes
+- `api/common.py`: signed session principal, CSRF, opaque ETag, signed cursor와 safe exception handlers
+- `application/security_policy/**`: VWS `.ipriskignore` persistence/version CAS/AuditEvent/data-access summary
+- `api/{workspaces,risks,history,security,notifications}/**`: strict Control API DTO와 router factory
+- `api/factory.py`: Integration이 FastAPI app에 명시적으로 설치하는 secure SessionMiddleware/router bundle
+- `tests/control/test_control_api.py`: fake OIDC, cookie/CSRF/revocation, route ownership, ETag/cursor, safe error/response와 opaque original action 검증
+
+검증 결과:
+
+- Phase 1~9 Control tests: 167 passed, 1 skipped(emulator 미설정)
+- Frozen Contract + Control tests: 194 passed, 1 skipped(emulator 미설정)
+- Phase 9 API 및 persistence focused tests: 45 passed
+- Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
+- 공식 생성 후 generated tracked diff: 0
 
 ### Phase 10 — ControlPlaneFacade와 Integration surface
 
@@ -697,6 +716,114 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
 
 ## 9. 작업 현황 로그
+
+### 2026-08-16 — 직전 미완료 보완 및 Phase 9 완료
+
+#### 구현 완료 항목
+
+1. **Phase 8의 API 연결 미완료 항목 보완**
+   - Phase 8에서 application use case와 safe projection까지만 제공했던 history, audit, source access, notification 조회를 인증 principal, strict DTO, signed cursor pagination, safe error response가 적용된 Control API로 연결했다.
+   - workspace, review, security policy의 서로 다른 optimistic concurrency precondition을 각각 `updated_at`, review version, security policy version으로 명시하고 응답 ETag와 함께 노출했다.
+2. **Google identity와 canonical user 연결**
+   - 검증 완료된 Google email만 허용하는 `AuthenticationService`를 추가했다.
+   - Google subject 기반 deterministic user ID, identity/last-login 갱신, disabled user 차단, unique/UoW conflict의 제한적 재시도를 구현했다.
+3. **Authlib 기반 Google OIDC Authorization Code flow**
+   - discovery document, `openid email profile` scope, state, nonce, PKCE S256, ID token 검증을 사용하는 OIDC client adapter를 구현했다.
+   - redirect URI와 로그인 완료 redirect는 서버 설정의 고정 URL만 사용하며 요청 파라미터로 임의 redirect를 받지 않는다.
+   - provider access/refresh token은 callback 처리 중 로컬 변수로만 사용하고 저장소·세션·응답에 보존하지 않는다.
+4. **서명 세션과 서버 측 세션 폐기**
+   - production default가 `Secure`, `HttpOnly`, `SameSite=Lax`, 8시간인 signed session middleware 구성을 추가했다.
+   - 로그인 전 세션에는 OIDC state/nonce/PKCE만 임시 저장하고, callback 성공 후에는 canonical user ID, session version, CSRF token만 남긴다.
+   - `User.session_version`과 repository monotonic invariant를 추가해 logout 시 기존 signed session을 서버에서 무효화한다.
+5. **공통 API 보안 기반**
+   - canonical user/session resolution, `X-CSRF-Token` 검증, strict request DTO(`extra=forbid`), 안정적인 status mapping과 입력/provider 내부정보를 제거한 safe error handler를 구현했다.
+   - pagination cursor는 scope와 offset을 함께 서명해 다른 endpoint에서의 재사용과 변조를 차단한다.
+6. **Workspace 및 membership API**
+   - workspace create/list/get/update/delete, active member list, invitation create, member role update/remove를 구현했다.
+   - mutating endpoint에 CSRF와 application permission check를 적용하고 workspace update에 timestamp precondition과 audit event를 추가했다.
+7. **Source mount API**
+   - mount list/get/alias update/disable/remove를 기존 lifecycle service와 연결했다.
+   - source credential이나 raw provider payload는 DTO에 포함하지 않는다.
+8. **Risk API**
+   - analysis/lifecycle/review filter가 있는 risk list, detail, review update, timeline을 구현했다.
+   - detail에는 safe evidence와 latest analysis job/revision만 제공하며 raw source content 대신 opaque `SOURCE_OPEN_ORIGINAL` action과 artifact ID만 반환한다.
+9. **History/Audit/Source Access API**
+   - activity, audit, source-access page와 audit export endpoint를 구현했다.
+   - Phase 8 sanitizer를 DTO 경계에서 다시 적용해 provider request, token, path 형태의 민감 필드가 repository 입력에 섞여 있어도 응답에 포함되지 않도록 했다.
+10. **Security policy와 data-access summary API**
+    - `.ipriskignore` deny-only 검증, line-ending normalization, content hash 기반 policy version, expected-version conflict, no-op 처리를 구현했다.
+    - canonical collection을 늘리지 않고 policy text/version을 `RiskWorkspace`에 함께 저장하며, audit에는 pattern 원문 없이 version과 rule count만 기록한다.
+    - mount/source-access/retention/persistence posture를 설명하는 data-access summary를 추가했다.
+11. **Notification API**
+    - 현재 사용자 전용 inbox, unread count, mark-read를 구현하고 metadata를 응답 직전에 재-sanitize했다.
+12. **Control API 조립 표면**
+    - 기존 FastAPI app에 Agent 1 소유 router, session middleware, error handler만 설치하는 `ControlApiBundle`/factory를 추가했다.
+    - Agent 2 source-connection endpoint, internal callback/worker route, 최종 `main.py` composition은 변경하지 않았다.
+13. **의존성 호환성 확인**
+    - Python 3.14.7 환경에서 FastAPI 0.141.1, Starlette 1.6.0, Authlib 1.7.2, itsdangerous 2.2.0, httpx 0.28.1, httpx2 2.10.0 조합을 설치·검증했다.
+    - root manifest/lock은 integration owner 영역으로 유지하고 Agent 1 dependency handoff 문서에 정확한 버전과 용도를 기록했다.
+14. **회귀 및 보안 테스트**
+    - OIDC state/nonce/PKCE lifecycle, signed cookie flags, CSRF, strict DTO, safe provider errors, unverified email 거부, logout session revocation을 검증했다.
+    - workspace/security/risk/review/history/audit/data-access/notification의 권한·pagination·ETag·redaction과 OpenAPI route ownership을 검증했다.
+    - in-memory/Firestore mapper 양쪽에서 session version 및 workspace policy text/version invariant parity를 검증했다.
+
+#### 미구현 항목 및 사유
+
+1. **실제 Google 계정과의 외부 OIDC 왕복 테스트**
+   - repository에 Google client secret을 두지 않는 원칙과 현재 실행 환경에 staging credential이 없는 조건 때문에 fake provider로 protocol/security behavior를 검증했다. 실제 consent screen, callback domain, key rotation 검증은 integration/staging 환경에서 수행해야 한다.
+2. **production app registration과 배포 서버 composition**
+   - 최종 FastAPI app 생성, Uvicorn/Cloud Run entrypoint, Agent 2 router와의 조립은 integration owner 범위다. Agent 1은 기존 app에 설치 가능한 bundle까지만 제공했다.
+3. **Open Original의 실제 source action 실행**
+   - Agent 1은 raw content나 provider URL을 직접 반환하지 않는 opaque action descriptor만 제공했다. 실제 원본 열기/내보내기 실행은 Phase 10 및 Agent 2 source adapter와의 명시적 경계에서 연결한다.
+4. **SourceConnection 및 source operation endpoint**
+   - Google Drive 연결, OAuth token custody, sync/callback은 Agent 2 소유이므로 route를 만들지 않았다.
+5. **초대 자동 수락의 로그인 callback 연결**
+   - invitation acceptance application service는 존재하지만 현재 repository에는 안전한 normalized-email invitation lookup contract와 명시적 acceptance route가 없다. callback에서 암묵적으로 workspace membership을 변경하지 않고 후속 UX/API 설계 시 명시적 승인 흐름으로 추가한다.
+6. **Firestore native cursor pagination**
+   - Phase 9은 API 계약과 cursor 위·변조 방지를 우선해 서명된 offset cursor를 사용하며 내부 materialization은 10,000건으로 제한했다. production index와 규모를 반영한 native document cursor는 Phase 12 performance/observability 검증에서 교체한다.
+7. **CORS, TrustedHost, forwarded-header, rate-limit 설정**
+   - 허용 origin/host, proxy topology, ingress rate-limit은 배포 환경 정보가 필요한 integration/Phase 12 범위이므로 app bundle에 임의 정책을 강제하지 않았다.
+8. **기존 production document migration**
+   - `User.session_version`과 `RiskWorkspace.global_ignore_text`를 strict required field로 추가했으나 아직 production data/schema v1 migration 요구가 확정되지 않았다. 실제 데이터가 존재하면 integration 전에 one-time migration과 rollback plan이 필요하다.
+9. **Firestore emulator 실행**
+   - emulator endpoint가 없는 환경이므로 emulator integration test는 skip 상태다. in-memory 및 Firestore serialization/UoW test로 동작 parity를 검증했다.
+10. **예상하지 못한 5xx의 구조화 logging/correlation**
+    - client safe error는 구현했지만 trace/correlation ID와 중앙 로그 sink는 Phase 12 observability 범위다.
+
+#### 추가 검토가 필요한 사항
+
+1. **세션 폐기 범위**
+   - stateless signed cookie만으로는 즉시 폐기가 불가능한 문제를 `session_version`으로 개선했다. 현재 logout은 보수적으로 해당 사용자의 기존 세션을 모두 폐기하므로 향후 per-device session 요구가 생기면 별도 session record가 필요하다.
+2. **PKCE 적용**
+   - state/nonce만으로도 기본 보호는 가능하지만 재검토 결과 authorization code 탈취 방어를 강화할 합리적 여지가 있어 Phase 9에서 S256 PKCE까지 포함했다.
+3. **security policy 저장 위치**
+   - 16개 canonical collection 제약과 transaction/audit 원자성을 함께 만족하도록 workspace document에 저장했다. policy 원문은 Security 권한 API에서만 읽고 audit/export에는 포함하지 않는다. 문서 크기 증가 추이는 Phase 12에서 관측한다.
+4. **pagination scale**
+   - scope-bound signed cursor로 API 안정성은 확보했지만 offset/materialization 비용은 대규모 workspace에서 증가한다. 실제 index shape와 사용량을 근거로 Phase 12에서 native cursor 전환 여부를 결정한다.
+5. **precondition/ETag 표현의 차이**
+   - workspace timestamp, review version, policy content version처럼 domain마다 authoritative version이 달라 단일 숫자 version으로 강제하지 않았다. 공개 ETag는 opaque hash로 통일했다.
+6. **Security 설정 조회 권한**
+   - workspace viewer는 현재 적용 policy와 data posture를 볼 수 있고 owner/security manager만 변경할 수 있도록 정했다. policy pattern 자체를 더 제한해야 한다는 제품 요구가 생기면 별도 permission 분리가 필요하다.
+7. **응답 경계 재-sanitization**
+   - 저장소가 이미 안전한 projection을 제공하더라도 notification metadata와 source-access fields를 API 직전에 다시 정제한다. 이는 defense-in-depth이며 raw provider payload를 허용하는 계약으로 해석하면 안 된다.
+8. **Google token custody**
+   - App Login token은 source token과 분리하고 persistence/session에 저장하지 않는다. 향후 Google Workspace 도메인 제한이 필요하면 verified hosted-domain claim 정책을 별도 추가해야 한다.
+9. **RiskEvent hash chain**
+   - timeline 조회는 완료했지만 tamper-evident event hash chain은 현재 schema를 바꾸는 작업이므로 Phase 12 observability/integrity 검토로 유지한다.
+
+#### 검증 결과
+
+- Phase 9 API/persistence focused tests: `45 passed`
+- Agent 1 control suite: `167 passed, 1 skipped`
+- shared contracts + Agent 1 control suite: `194 passed, 1 skipped`
+- `pnpm run generate`: 통과, generated contracts tracked diff 없음
+- `pnpm typecheck`: 통과
+- `pnpm verify:resolution`: 통과
+- `.venv/Scripts/python.exe -m pip check`: 통과
+
+#### 제안 커밋 메시지
+
+- `feat: add Google login and Control API routers`
 
 ### 2026-08-16 — 직전 Phase 보완 및 Phase 8 완료
 

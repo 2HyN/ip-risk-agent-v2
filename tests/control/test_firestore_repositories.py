@@ -884,3 +884,47 @@ def test_firestore_history_scope_and_notification_read_invariants() -> None:
                 await uow.notifications.save(notification)
 
     run(scenario())
+
+
+def test_firestore_session_and_security_policy_versions_are_monotonic() -> None:
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        factory = FirestoreControlUnitOfWorkFactory(backend)
+        user = make_user("session-user")
+        workspace = RiskWorkspace(
+            "vws-policy",
+            "Workspace",
+            user.id,
+            "security-v1",
+            "retention-v1",
+            NOW,
+            NOW,
+        )
+        async with factory() as uow:
+            await uow.users.add(user)
+            await uow.workspaces.add(workspace)
+            await uow.commit()
+
+        async with factory() as uow:
+            with pytest.raises(UniqueConstraintViolation, match="session version"):
+                await uow.users.save(replace(user, session_version=2))
+            with pytest.raises(UniqueConstraintViolation, match="new version"):
+                await uow.workspaces.save(
+                    replace(workspace, global_ignore_text="/Backend/private/**\n")
+                )
+
+        updated_user = replace(user, session_version=1)
+        updated_workspace = replace(
+            workspace,
+            security_policy_version="security-v2",
+            global_ignore_text="/Backend/private/**\n",
+        )
+        async with factory() as uow:
+            await uow.users.save(updated_user)
+            await uow.workspaces.save(updated_workspace)
+            await uow.commit()
+        async with factory() as uow:
+            assert await uow.users.get(user.id) == updated_user
+            assert await uow.workspaces.get(workspace.id) == updated_workspace
+
+    run(scenario())

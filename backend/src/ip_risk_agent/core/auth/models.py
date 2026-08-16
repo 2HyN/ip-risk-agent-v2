@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from ip_risk_agent.core.common import normalize_utc, require_chronological, require_non_empty
+from ip_risk_agent.core.common import (
+    DomainInvariantError,
+    normalize_utc,
+    require_chronological,
+    require_non_empty,
+)
 
 
 class UserStatus(StrEnum):
@@ -24,6 +29,7 @@ class User:
     last_login_at: datetime
     avatar_url: str | None = None
     status: UserStatus = UserStatus.ACTIVE
+    session_version: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", require_non_empty(self.id, "user.id"))
@@ -48,3 +54,11 @@ class User:
         )
         object.__setattr__(self, "created_at", created_at)
         object.__setattr__(self, "last_login_at", last_login_at)
+        if (
+            isinstance(self.session_version, bool)
+            or not isinstance(self.session_version, int)
+            or self.session_version < 0
+        ):
+            raise DomainInvariantError(
+                "user.session_version must be a non-negative integer"
+            )

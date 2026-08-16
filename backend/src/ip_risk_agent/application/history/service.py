@@ -91,6 +91,58 @@ class HistoryQueryService:
         )
         return WorkspaceActivity(risk_workspace_id, entries)
 
+    async def list_audit_events(
+        self,
+        *,
+        risk_workspace_id: str,
+        actor_user_id: str,
+        limit: int = 100,
+    ) -> WorkspaceActivity:
+        _require_limit(limit)
+        async with self._unit_of_work_factory() as uow:
+            await _authorize(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                actor_user_id=actor_user_id,
+                action=VwsAction.AUDIT_VIEW,
+            )
+            events = await uow.audit.list_for_workspace(risk_workspace_id)
+        entries = tuple(
+            _audit_entry(event, self._safety)
+            for event in sorted(
+                events,
+                key=lambda event: (event.occurred_at, event.id),
+                reverse=True,
+            )[:limit]
+        )
+        return WorkspaceActivity(risk_workspace_id, entries)
+
+    async def list_source_access_events(
+        self,
+        *,
+        risk_workspace_id: str,
+        actor_user_id: str,
+        limit: int = 100,
+    ) -> WorkspaceActivity:
+        _require_limit(limit)
+        async with self._unit_of_work_factory() as uow:
+            await _authorize(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                actor_user_id=actor_user_id,
+                action=VwsAction.AUDIT_VIEW,
+            )
+            events = await uow.audit.list_source_access(risk_workspace_id)
+        entries = tuple(
+            _access_entry(event, self._safety)
+            for event in sorted(
+                events,
+                key=lambda event: (event.occurred_at, event.id),
+                reverse=True,
+            )[:limit]
+        )
+        return WorkspaceActivity(risk_workspace_id, entries)
+
     async def export_workspace_history(
         self,
         *,
@@ -244,8 +296,8 @@ def _newest(events: tuple[RiskEvent, ...], limit: int) -> tuple[RiskEvent, ...]:
 
 
 def _require_limit(limit: int) -> None:
-    if isinstance(limit, bool) or limit < 1 or limit > 500:
-        raise ValueError("history limit must be between 1 and 500")
+    if isinstance(limit, bool) or limit < 1 or limit > 10_000:
+        raise ValueError("history limit must be between 1 and 10000")
 
 
 __all__ = ["HistoryQueryService"]

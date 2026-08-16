@@ -126,6 +126,7 @@ def user_to_document(value: User) -> Document:
         created_at=value.created_at,
         last_login_at=value.last_login_at,
         status=value.status,
+        session_version=value.session_version,
     )
 
 
@@ -142,6 +143,7 @@ def user_from_document(document: Mapping[str, object]) -> User:
             "created_at",
             "last_login_at",
             "status",
+            "session_version",
         ),
     )
     return User(
@@ -153,6 +155,7 @@ def user_from_document(document: Mapping[str, object]) -> User:
         created_at=_datetime(data["created_at"]),
         last_login_at=_datetime(data["last_login_at"]),
         status=UserStatus(data["status"]),
+        session_version=_int(data["session_version"]),
     )
 
 
@@ -168,6 +171,7 @@ def workspace_to_document(value: RiskWorkspace) -> Document:
         created_at=value.created_at,
         updated_at=value.updated_at,
         status=value.status,
+        global_ignore_text=value.global_ignore_text,
     )
 
 
@@ -185,6 +189,7 @@ def workspace_from_document(document: Mapping[str, object]) -> RiskWorkspace:
             "created_at",
             "updated_at",
             "status",
+            "global_ignore_text",
         ),
     )
     return RiskWorkspace(
@@ -197,6 +202,7 @@ def workspace_from_document(document: Mapping[str, object]) -> RiskWorkspace:
         created_at=_datetime(data["created_at"]),
         updated_at=_datetime(data["updated_at"]),
         status=RiskWorkspaceStatus(data["status"]),
+        global_ignore_text=str(data["global_ignore_text"]),
     )
 
 

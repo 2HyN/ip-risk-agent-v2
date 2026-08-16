@@ -52,6 +52,17 @@ def test_user_requires_google_subject_and_aware_timestamps() -> None:
             NOW,
         )
 
+    with pytest.raises(DomainInvariantError, match="non-negative integer"):
+        User(
+            "u1",
+            "google-subject",
+            "user@example.com",
+            "User",
+            NOW,
+            NOW,
+            session_version="1",  # type: ignore[arg-type]
+        )
+
 
 def test_role_permissions_are_monotonic_and_exclude_raw_source_authority() -> None:
     viewer = permissions_for(MembershipRole.VIEWER)
