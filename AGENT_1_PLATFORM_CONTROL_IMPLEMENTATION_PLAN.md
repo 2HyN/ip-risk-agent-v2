@@ -4,14 +4,16 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 1 — 공통 Domain 기반과 불변식 |
-| 다음 개발 Phase | Phase 2 — 인증, Role/Permission, VWS와 Mount 권한 |
-| 전체 진행률 | 2/14 Phase 완료 |
+| 현재 완료 Phase | Phase 2 — 인증, Role/Permission, VWS와 Mount 권한 |
+| 다음 개발 Phase | Phase 3 — Repository protocol과 In-memory transaction 기반 |
+| 전체 진행률 | 3/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
 
 Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 커밋과 push를 실행하지 않고, 매 개발 요청 종료 시 제안 커밋 메시지만 제공한다.
+
+중대한 문제 사항이 아닌 추가 검토 항목은 Agent 1이 자체 검사와 독자적 판단으로 처리하고 구현·테스트·현황 문서에 기록한다. 개발자가 이후 Phase 지시와 함께 수정 방향을 전달하면 해당 결정을 재검토한다.
 
 ## 1. 문서 목적
 
@@ -57,7 +59,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 |---|---|---|
 | 0 | 기준점 보호와 개발 게이트 확정 | 완료 |
 | 1 | 공통 Domain 기반과 불변식 | 완료 |
-| 2 | 인증, Role/Permission, VWS와 Mount 권한 | 미구현 |
+| 2 | 인증, Role/Permission, VWS와 Mount 권한 | 완료 |
 | 3 | Repository protocol과 In-memory transaction | 미구현 |
 | 4 | Firestore canonical persistence | 미구현 |
 | 5 | SourceChange intake와 AnalysisJob orchestration | 미구현 |
@@ -219,19 +221,39 @@ pnpm run verify:resolution
 - `pnpm run verify:resolution`: 통과
 - 전체 test 후 generated tracked diff: 0
 
-### Phase 2 — 인증, Role/Permission, VWS와 Mount 권한
+### Phase 2 — 인증, Role/Permission, VWS와 Mount 권한 `[완료]`
 
-1. `OWNER`, `SOURCE_MANAGER`, `RISK_REVIEWER`, `VIEWER`를 permission set으로 매핑한다.
-2. `authorize_vws_action` service를 만들고 인증, membership status, permission, resource ownership을 순서대로 검증한다.
-3. Workspace 생성 시 Owner membership을 원자적으로 생성하는 use case를 구현한다.
-4. 멤버 초대, role 변경, 제거, ownership transfer와 workspace 삭제 guard를 구현한다.
-5. Source Manager의 own-mount 관리 규칙과 Owner의 administrative disable/remove 권한을 분리한다.
-6. Provider credential authority를 VWS role로 추론하지 않고, credential 필요 작업에는 Source Plane의 별도 authority 확인이 필요하다는 decision/context를 반환한다.
-7. 제거된 Source Manager의 Mount를 `MANAGER_ACTION_REQUIRED` 등 non-active 상태로 전환하고 AuditEvent와 Owner notification을 생성한다.
+1. [x] `OWNER`, `SOURCE_MANAGER`, `RISK_REVIEWER`, `VIEWER`를 permission set으로 매핑했다.
+2. [x] `authorize_vws_action` service에서 membership, status, permission, VWS/Mount ownership을 순서대로 검증한다.
+3. [x] Workspace + deterministic Owner membership + AuditEvent를 하나의 mutation plan으로 생성한다. 실제 atomic persistence는 Phase 3 Unit of Work가 적용한다.
+4. [x] pending email invitation 생성/수락/취소, role 변경, 제거, ownership transfer와 workspace deletion guard를 구현했다.
+5. [x] Source Manager own-mount rename/operation 권한과 Owner administrative disable/remove를 분리했다.
+6. [x] Provider credential 필요 작업은 Control 허용 여부와 별도로 `provider_authority_required=true`를 반환하고 명시적 owner mismatch를 거부한다.
+7. [x] Source Manager 제거 또는 하위 role 강등 시 Mount를 보존한 채 `MANAGER_ACTION_REQUIRED`로 전환하고 Owner notification/AuditEvent를 생성한다.
 
 완료 조건:
 
-- Role matrix, own-mount 제한, Owner의 provider credential impersonation 금지가 unit test로 고정된다.
+- [x] Role matrix, own-mount 제한, Owner의 provider credential impersonation 금지가 unit test로 고정됐다.
+
+구현 파일군:
+
+- `core/memberships/authorization.py`: VWS action policy와 provider-authority separation
+- `core/memberships/identity.py`: deterministic membership/invitation identity와 email normalization
+- `core/memberships/models.py`: pending invitation lifecycle
+- `core/workspaces/services.py`: workspace/member/invitation mutation plans
+- `core/mounts/services.py`: rename/disable/remove mutation plans
+- `tests/control/test_authorization.py`: Role/action/authority matrix
+- `tests/control/test_workspace_policies.py`: workspace/member/invitation lifecycle
+- `tests/control/test_mount_policies.py`: own-mount와 Owner administration
+
+검증 결과:
+
+- Phase 1~2 Control tests: 62 passed
+- Frozen Contract + Control tests: 89 passed
+- Python compileall: 통과
+- `pnpm run typecheck`: 통과
+- `pnpm run verify:resolution`: 통과
+- 전체 test 후 generated tracked diff: 0
 
 ### Phase 3 — Repository protocol과 In-memory transaction 기반
 
@@ -553,7 +575,107 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 
 ## 9. 작업 현황 로그
 
+### 2026-08-16 — Phase 1 보완 및 Phase 2 완료
+
+#### 구현 완료 항목
+
+1. 추가 검토 처리 정책을 확정했다.
+   - 중대하지 않은 검토 사항은 Agent 1이 자체 판단으로 구현·검증한다.
+   - 결과와 판단 근거는 답변과 이 문서에 기록한다.
+   - 개발자가 다음 Phase 지시와 함께 변경 방향을 주면 해당 결정을 재검토한다.
+2. Pending invitation 표현을 확정했다.
+   - 새 collection을 추가하지 않는다.
+   - `MembershipInvitation`을 memberships persistence boundary에 함께 저장할 domain record로 정의했다.
+   - email은 trim + Unicode casefold만 수행하고 Google/Gmail별 dot·plus rewriting은 하지 않는다.
+   - deterministic ID는 `VWS + normalized email`로 생성한다.
+3. Invitation lifecycle을 구현했다.
+   - Owner의 non-owner role 초대
+   - OIDC layer가 제공하는 verified email과 invitation email 일치 검증
+   - expiration 검증 후 ACTIVE Membership 생성
+   - pending invitation 취소
+   - OWNER 지정은 ownership transfer로만 허용
+4. `authorize_vws_action`을 구현했다.
+   - actor와 Membership identity 일치
+   - ACTIVE Membership
+   - permission mapping
+   - Mount/VWS 관계
+   - own-mount requirement
+   - Owner-only administrative action
+5. Provider authority를 Application Role과 분리했다.
+   - `SOURCE_MOUNT`, source operation, reconnect, scope manage는 provider authority 재검증 필요를 반환한다.
+   - Control context에 credential owner가 주어졌을 때 actor와 다르면 즉시 거부한다.
+   - Owner라도 타인의 Mount scope/reconnect를 수행하지 못한다.
+6. Workspace/member mutation plan을 구현했다.
+   - Workspace + Owner membership + audit 생성
+   - Role 변경과 direct OWNER assignment 차단
+   - Ownership transfer 시 Workspace와 두 Membership 동시 변경
+   - MVP에서 이전 Owner는 SOURCE_MANAGER로 유지
+   - Workspace deletion은 즉시 삭제하지 않고 DELETING 상태로 전환
+7. Source Manager 제거/강등 안전 처리를 구현했다.
+   - Mount와 Risk history를 삭제하지 않는다.
+   - 활성 custodian Mount를 `MANAGER_ACTION_REQUIRED`로 전환한다.
+   - disabled Mount는 기존 상태를 보존한다.
+   - Owner에게 in-app notification을 생성한다.
+8. Mount 관리 plan을 구현했다.
+   - Source Manager의 own-mount rename
+   - Owner의 모든 Mount administrative disable/remove
+   - rename 후 Mount/SourceWorkspace identity 유지
+9. Phase 1~2 Control test 62개와 전체 Frozen+Control test 89개를 통과했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. Mutation plan의 실제 저장과 원자성은 미구현이다.
+   - Phase 2는 repository-independent domain decision을 완료했다. Workspace/Owner Membership/Audit, ownership transfer, member removal/Mount/Notification은 Phase 3 Unit of Work가 한 transaction으로 적용해야 한다.
+2. Cross-record uniqueness와 동시성 처리는 미구현이다.
+   - membership/invitation deterministic ID는 생성하지만 duplicate invite, alias collision, simultaneous ownership transfer를 저장소에서 차단하려면 Phase 3 repository compare-and-set이 필요하다.
+3. Invitation acceptance에서 `verified_email`의 실제 신뢰 근원은 미구현이다.
+   - domain service는 OIDC layer가 검증한 email만 받는다는 port contract를 전제로 한다. Google token 검증과 session binding은 Phase 9 범위다.
+4. Source Provider의 실제 credential authority 검증은 미구현이다.
+   - Control은 `provider_authority_required`와 명백한 mismatch만 판단한다. 실제 Drive/GitHub/Local authority는 Agent 2/Integration이 반드시 재검증한다.
+5. Mount remove는 delete intent와 AuditEvent만 생성하며 실제 record 삭제/retention 처리는 미구현이다.
+   - Risk/history 보존 규칙과 repository transaction을 함께 적용해야 하므로 Phase 3~4 범위다.
+6. Workspace deletion은 DELETING projection까지만 구현됐다.
+   - canonical data retention, async cleanup과 최종 DELETED 전환은 persistence/orchestration 정책이 필요한 후속 Phase다.
+7. Google User upsert, session, API middleware는 미구현이다.
+   - Domain authorization 입력은 이미 인증된 actor ID를 전제로 하며 OIDC/API 연결은 Phase 9에서 수행한다.
+8. 신규 dependency 설치는 수행하지 않았다.
+   - Phase 2도 표준 library와 기존 Contract만으로 구현 가능했다. Phase 3 역시 in-memory protocol까지는 신규 package 없이 시작할 수 있다.
+
+#### 추가 검토가 필요한 사항
+
+1. Phase 3 memberships repository는 `Membership | MembershipInvitation`을 같은 canonical collection에 저장하되 명시적인 record discriminator를 사용해야 한다.
+   - 새 canonical collection은 만들지 않는다. mapper가 두 record를 잘못 역직렬화하지 않는 repository contract test를 추가한다.
+2. Role change/member removal plan의 `candidate_mounts`는 해당 VWS에서 target user가 custodian인 Mount 전체여야 한다.
+   - Phase 3 application service가 transaction 안에서 전부 조회하고 plan에 전달하도록 강제한다. 부분 목록을 caller가 임의 제공하는 public API는 만들지 않는다.
+3. Invitation accept의 expiration check와 duplicate Membership 생성은 같은 transaction에서 재검증해야 한다.
+   - pure plan의 시간 검증만으로 concurrent accept를 막을 수 없으므로 Phase 3 compare-and-set 대상이다.
+4. Ownership transfer 시 이전 Owner를 SOURCE_MANAGER로 유지하기로 결정했다.
+   - 기존 provider/Mount custodianship을 잃지 않는 보수적 MVP 정책이다. 다른 role이 필요하면 개발자의 후속 지시와 함께 변경한다.
+5. Email normalization은 provider-independent casefold만 사용한다.
+   - Gmail dot/plus 규칙을 application identity에 적용하면 다른 provider/domain 의미를 훼손할 수 있으므로 사용하지 않는다.
+6. Authorization denial은 현재 typed reason과 exception을 제공한다.
+   - Phase 9 API error category 매핑 시 raw membership/provider 정보를 노출하지 않도록 safe message table을 별도로 둔다.
+
+#### 검증 결과
+
+```text
+shared/contracts/tests + tests/control                 89 passed
+tests/control                                          62 passed
+Python compileall                                      PASS
+pnpm run typecheck                                     PASS
+pnpm run verify:resolution                             PASS
+generated files tracked diff after tests              NONE
+```
+
+#### 제안 커밋 메시지
+
+```text
+feat: implement VWS authorization and workspace control policies
+```
+
 ### 2026-08-16 — Phase 0 보완 및 Phase 1 완료
+
+아래 미구현/검토 항목은 Phase 1 종료 당시의 상태다. Phase 2에서 해결된 내용은 위 최신 로그를 우선한다.
 
 #### 구현 완료 항목
 

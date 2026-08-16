@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from ip_risk_agent.core.common import normalize_utc, require_chronological, require_non_empty
+from ip_risk_agent.core.common import (
+    DomainInvariantError,
+    normalize_utc,
+    require_chronological,
+    require_non_empty,
+)
 
 
 class MembershipRole(StrEnum):
@@ -20,6 +25,13 @@ class MembershipStatus(StrEnum):
     INVITED = "INVITED"
     ACTIVE = "ACTIVE"
     REMOVED = "REMOVED"
+
+
+class InvitationStatus(StrEnum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REVOKED = "REVOKED"
+    EXPIRED = "EXPIRED"
 
 
 class Permission(StrEnum):
@@ -84,3 +96,54 @@ class Membership:
         )
         object.__setattr__(self, "created_at", created_at)
         object.__setattr__(self, "updated_at", updated_at)
+
+
+@dataclass(frozen=True, slots=True)
+class MembershipInvitation:
+    """Pending email invitation persisted in the memberships storage boundary."""
+
+    id: str
+    risk_workspace_id: str
+    email: str
+    role: MembershipRole
+    status: InvitationStatus
+    invited_by: str
+    created_at: datetime
+    updated_at: datetime
+    expires_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for field_name in ("id", "risk_workspace_id", "invited_by"):
+            object.__setattr__(
+                self,
+                field_name,
+                require_non_empty(getattr(self, field_name), f"membership_invitation.{field_name}"),
+            )
+        normalized_email = require_non_empty(self.email, "membership_invitation.email").casefold()
+        local, separator, domain = normalized_email.rpartition("@")
+        if not separator or not local or not domain:
+            raise DomainInvariantError(
+                "membership_invitation.email must contain a local part and domain"
+            )
+        if self.role is MembershipRole.OWNER:
+            raise DomainInvariantError("OWNER must be assigned through ownership transfer")
+        object.__setattr__(self, "email", normalized_email)
+        created_at = normalize_utc(self.created_at, "membership_invitation.created_at")
+        updated_at = normalize_utc(self.updated_at, "membership_invitation.updated_at")
+        require_chronological(
+            created_at,
+            updated_at,
+            earlier_name="membership_invitation.created_at",
+            later_name="membership_invitation.updated_at",
+        )
+        object.__setattr__(self, "created_at", created_at)
+        object.__setattr__(self, "updated_at", updated_at)
+        if self.expires_at is not None:
+            expires_at = normalize_utc(self.expires_at, "membership_invitation.expires_at")
+            require_chronological(
+                created_at,
+                expires_at,
+                earlier_name="membership_invitation.created_at",
+                later_name="membership_invitation.expires_at",
+            )
+            object.__setattr__(self, "expires_at", expires_at)
