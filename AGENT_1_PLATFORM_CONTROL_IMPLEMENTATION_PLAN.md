@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 6 — Security Gate |
-| 다음 개발 Phase | Phase 7 — AnalysisResult intake와 Risk reconciliation |
-| 전체 진행률 | 7/14 Phase 완료 |
+| 현재 완료 Phase | Phase 7 — AnalysisResult intake와 Risk reconciliation |
+| 다음 개발 Phase | Phase 8 — Human review, History, Audit, Notification |
+| 전체 진행률 | 8/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -44,9 +44,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - `application/repositories`에는 async repository/UoW contract와 transactional in-memory 구현이 있고, `application/workspace_admin`에는 Phase 2 plan의 원자적 적용 service가 구현됐다.
 - `application/process_change`와 `application/analysis_jobs`에는 SourceChange 관계 검증, idempotent Artifact/ChangeEvent/AnalysisJob 저장, raw-free queue port와 retry-safe job orchestration이 구현됐다.
 - `application/security_gate`에는 canonical context 검증, deny-only `.ipriskignore`, file/size policy, secret redaction, deterministic minimization/routing/checksum과 SourceAccess 기록이 구현됐다.
+- `application/risk_reconcile`에는 AnalysisResult canonical context 검증, per-analysis-type outcome 수용, minimal evidence retention, authoritative Risk set reconciliation과 결과 기반 Audit/Notification 기록이 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐다. API 영역은 아직 skeleton이다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~6 Domain, policy, repository transaction, Firestore persistence, SourceChange orchestration과 Security Gate test 143개가 구현됐으며 현재 환경에서는 142개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~7 Domain, policy, repository transaction, Firestore persistence, SourceChange/Security Gate/AnalysisResult orchestration test 155개가 구현됐으며 현재 환경에서는 154개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -72,7 +73,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 4 | Firestore canonical persistence | 완료 |
 | 5 | SourceChange intake와 AnalysisJob orchestration | 완료 |
 | 6 | Security Gate | 완료 |
-| 7 | AnalysisResult intake와 Risk reconciliation | 미구현 |
+| 7 | AnalysisResult intake와 Risk reconciliation | 완료 |
 | 8 | Human review, History, Audit, Notification | 미구현 |
 | 9 | Google App Login과 Control API | 미구현 |
 | 10 | ControlPlaneFacade와 Integration surface | 미구현 |
@@ -429,28 +430,45 @@ pnpm run verify:resolution
 - Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
 - 공식 생성 및 전체 test 후 generated tracked diff: 0
 
-### Phase 7 — AnalysisResult intake와 Risk reconciliation
+### Phase 7 — AnalysisResult intake와 Risk reconciliation `[완료]`
 
-1. `accept_analysis_result(AnalysisResult)`를 구현한다.
-2. Job 존재 여부, artifact ID, revision, requested analysis type을 검증한다.
-3. AnalysisResult의 status/coverage/provider failure/version summary를 AnalysisJob에 반영한다. 별도 임의 canonical collection은 추가하지 않는다.
-4. Evidence를 minimal retention policy로 정규화하고 excerpt 길이, safe metadata와 reference를 제한한다.
-5. Patent와 License candidate의 stable risk key를 결정론적으로 생성한다.
-6. `SUCCEEDED + COMPLETE`일 때만 active risk set과 candidate set을 transaction 안에서 reconcile한다.
+1. [x] `accept_analysis_result(AnalysisResult)`를 구현했다.
+2. [x] Job 존재 여부, artifact ID, revision, requested analysis type과 canonical ChangeEvent/Artifact/ArtifactState 관계를 검증한다.
+3. [x] AnalysisResult의 status/coverage/provider failure/version summary를 AnalysisJob의 analysis type별 outcome에 반영했다. 별도 임의 canonical collection은 추가하지 않았다.
+4. [x] Evidence를 minimal retention policy로 정규화하고 excerpt 길이, safe metadata와 reference를 제한했다.
+5. [x] Patent와 License candidate의 stable risk key 및 Risk/Evidence/Event ID를 결정론적으로 생성했다.
+6. [x] `SUCCEEDED + COMPLETE`일 때만 active risk set과 candidate set을 transaction 안에서 reconcile한다.
    - 교집합: `EXISTING`, evidence/last_seen 갱신
    - 신규: `NEW`, DETECTED event
    - 사라짐: `RESOLVED`, RESOLVED event
    - 과거 RESOLVED 재등장: active `EXISTING`, REOPENED event
-7. FAILED, INCONCLUSIVE, SKIPPED, PARTIAL, NONE은 old-only resolution을 절대 실행하지 않는다.
-8. duplicate AnalysisResult acceptance가 evidence/event를 중복 추가하지 않도록 result identity/idempotency를 둔다.
-9. multi-analyzer Job aggregate 상태를 각 analysis type 결과와 독립적으로 계산한다.
-10. high/reopened/failure 조건에 Notification과 필요한 AuditEvent를 생성한다.
+7. [x] FAILED, INCONCLUSIVE, SKIPPED, PARTIAL, NONE은 old-only resolution을 절대 실행하지 않는다.
+8. [x] duplicate AnalysisResult acceptance가 evidence/event를 중복 추가하지 않도록 result fingerprint와 analysis type별 append-only outcome을 둔다.
+9. [x] multi-analyzer Job aggregate 상태를 각 analysis type 결과와 독립적으로 계산한다.
+10. [x] high/reopened/failure 조건에 Notification과 필요한 AuditEvent를 생성한다.
 
 완료 조건:
 
 - zero-candidate complete success만 기존 Risk를 resolve할 수 있다.
 - provider failure와 incomplete coverage가 기존 Risk를 보존한다.
 - alias rename, DELETE, review disposition이 machine Risk identity/lifecycle을 오염시키지 않는다.
+
+구현 결과:
+
+- `application/risk_reconcile/service.py`: 결과 검증, idempotent intake, authoritative set reconciliation, aggregate completion, Audit/Notification
+- `application/risk_reconcile/retention.py`: evidence/reference/metadata/summary/provider failure의 bounded redaction policy
+- `application/analysis_jobs/**`: analysis type별 immutable outcome summary와 retry 시 attempt outcome 초기화
+- `core/risk/identity.py`: stable Risk/RiskEvidence/RiskEvent ID
+- `application/repositories/**`, `persistence/core_firestore/**`: outcome append-only 및 Risk identity 불변식, strict Firestore mapper
+- `tests/control/test_analysis_result_reconciliation.py`: authoritative/non-authoritative, lifecycle, duplicate, stale, multi-analyzer, retention 검증
+- `tests/control/test_firestore_mappers.py`: nested AnalysisOutcome strict round-trip
+
+검증 결과:
+
+- Phase 1~7 Control tests: 154 passed, 1 skipped(emulator 미설정)
+- Frozen Contract + Control tests: 181 passed, 1 skipped(emulator 미설정)
+- Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
+- 공식 생성 후 generated tracked diff: 0
 
 ### Phase 8 — Human review, History, Audit, Notification
 
@@ -661,6 +679,114 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
 
 ## 9. 작업 현황 로그
+
+### 2026-08-16 — 이전 Phase 보완 및 Phase 7 완료
+
+#### 구현 완료 항목
+
+1. `AnalysisResultIntakeService.accept_analysis_result()`를 canonical 결과 수용 경계로 구현했다.
+   - AnalysisJob, ChangeEvent, Artifact, ArtifactState와 RiskWorkspace를 같은 Unit of Work에서 읽고 Job/Event/Artifact ID 및 revision 관계를 교차 검증한다.
+   - 새 결과는 RUNNING Job과 PROCESSING ChangeEvent에만 허용하며, requested analysis type과 ArtifactState latest revision이 일치하지 않으면 transaction 전체를 거부한다.
+   - result 시작 시각이 현재 Job attempt보다 빠르면 이전 attempt의 늦은 결과로 판단해 거부한다.
+2. 별도 canonical collection 없이 AnalysisJob 안에 analysis type별 `AnalysisOutcome`을 추가했다.
+   - result fingerprint, status, coverage, analyzer/model/prompt/policy/RAG version summary, 시작/완료 시각과 bounded provider failure summary만 보존한다.
+   - outcome key는 requested analysis type이어야 하고 terminal result-bearing Job은 모든 요청 type outcome을 가져야 한다.
+   - repository는 동일 attempt의 outcome을 append-only로 강제하며, FAILED retry는 기존 attempt outcome을 명시적으로 비운다.
+3. AnalysisResult idempotency와 충돌 정책을 구현했다.
+   - 전체 Frozen result를 canonical JSON으로 직렬화해 SHA-256 fingerprint를 만든다.
+   - 같은 analysis type과 같은 fingerprint의 redelivery는 `DUPLICATE`로 안전하게 ACK하고 Risk/Evidence/Event/Audit/Notification을 다시 만들지 않는다.
+   - 같은 analysis type에 다른 fingerprint가 이미 수용된 경우 ambiguous overwrite 대신 오류로 거부한다.
+4. bounded evidence retention policy를 구현했다.
+   - candidate가 실제 참조한 Evidence만 RiskEvidence로 남기며 사용되지 않은 evidence payload는 저장하지 않는다.
+   - excerpt와 summary는 secret redaction 뒤 길이를 제한한다.
+   - HTTP(S) reference의 credential/userinfo와 local absolute path를 거부하고 URL query를 제거한다.
+   - metadata key/value, 중첩 깊이, item 수와 최종 JSON byte를 제한하며 credential 성격의 key는 값 전체를 `[REDACTED_SECRET]`로 대체한다.
+5. Patent와 License stable Risk identity를 확정했다.
+   - Patent application number는 Unicode NFKC/casefold 후 공백·하이픈·underscore를 제거한다.
+   - License는 ecosystem/package의 NFKC/casefold, version trim, license expression의 whitespace 정규화와 uppercase를 적용한다.
+   - canonical risk key로 Risk ID를, Risk+Job+result evidence ID로 RiskEvidence ID를, Risk+result fingerprint+event type으로 RiskEvent ID를 결정론적으로 생성한다.
+6. authoritative Risk set reconciliation을 구현했다.
+   - 오직 `SUCCEEDED + COMPLETE` 결과만 candidate set을 authoritative truth로 사용한다.
+   - 신규 candidate는 NEW/DETECTED, 계속 존재하는 candidate는 EXISTING/CONFIRMED, 사라진 active candidate는 RESOLVED/RESOLVED, 과거 RESOLVED의 재등장은 EXISTING/REOPENED로 기록한다.
+   - zero-candidate complete success도 유효한 authoritative 결과이므로 해당 analysis type의 기존 active Risk를 해소한다.
+   - machine lifecycle 갱신 시 기존 human review disposition을 그대로 보존한다.
+7. non-authoritative 결과가 Risk truth를 변경하지 못하도록 고정했다.
+   - FAILED, INCONCLUSIVE, SKIPPED 또는 PARTIAL/NONE coverage는 Risk 생성·갱신·해소 및 successful revision 갱신을 수행하지 않는다.
+   - provider failure가 있거나 FAILED인 경우 safe category 중심 `ANALYSIS_FAILED` AuditEvent와 owner in-app Notification을 남긴다.
+8. suggested priority와 Risk event/notification을 연결했다.
+   - Patent priority는 Frozen candidate 값을 사용한다.
+   - License policy outcome은 conflict/review-required=HIGH, notice/unknown=MEDIUM, no-action=LOW로 결정적으로 투영한다.
+   - priority 변경은 `PRIORITY_CHANGED` RiskEvent로 분리하며 신규/상향 HIGH와 REOPENED는 deterministic owner Notification을 생성한다.
+9. multi-analyzer Job aggregate를 구현했다.
+   - 일부 requested type만 도착한 동안 Job/Event는 RUNNING/PROCESSING을 유지하되 해당 analysis type의 authoritative reconciliation은 즉시 완료한다.
+   - 모든 type이 도착한 뒤 하나라도 FAILED이면 Job/Event를 FAILED로, 모두 complete success이면 SUCCEEDED/DONE으로, 나머지는 INCONCLUSIVE/DONE으로 종료한다.
+10. repository와 Firestore 불변식을 보완했다.
+    - In-memory와 Firestore 모두 AnalysisJob source identity, requested-type narrowing, per-attempt outcome append-only를 동일하게 강제한다.
+    - Risk의 key뿐 아니라 workspace/artifact/analysis type/first-seen identity도 immutable로 강제한다.
+    - nested AnalysisOutcome/provider failure/version summary strict mapper와 round-trip test를 추가했다.
+11. Phase 6에서 보류했던 Analyzer 결과 수용, result identity/status/coverage, Risk reconciliation을 이번 Phase에서 완료했다.
+12. authoritative/non-authoritative matrix, duplicate/conflict, lifecycle 재등장, review 보존, license normalization, multi-analyzer aggregate, stale rollback, evidence redaction과 canonical context corruption을 회귀 테스트로 고정했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. Human review 변경 use case와 timeline/history query는 아직 구현하지 않았다.
+   - Phase 7은 analyzer가 갱신하는 machine lifecycle에서 기존 review disposition을 보존하는 데 집중했다. actor/precondition/comment를 받는 review 변경과 append-only history projection은 Phase 8 범위에서 구현한다.
+2. Notification list/read와 사용자별 조회 projection은 아직 구현하지 않았다.
+   - Phase 7은 발생 조건과 canonical in-app Notification 생성까지만 완료했다. 수신자 filtering, unread/read 전환과 조회 surface는 Phase 8에서 구현한다.
+3. Audit/Risk/SourceAccess 세 history stream의 통합 activity query와 safe export는 아직 구현하지 않았다.
+   - event 저장 경계는 준비됐지만 사용자용 정렬·pagination·직렬화는 Phase 8~9 범위다.
+4. AnalysisResult 원본 전체와 사용되지 않은 evidence는 의도적으로 저장하지 않는다.
+   - 명세의 16개 canonical collection과 data minimization 원칙을 지키기 위해 Job에는 결과 fingerprint/outcome summary만, RiskEvidence에는 candidate가 참조한 bounded evidence만 남긴다. 원본 보존이 통합 요구사항으로 생기면 별도 collection을 임의 추가하지 않고 contract/schema 변경 절차를 따른다.
+5. 실제 Analyzer 호출과 result delivery/retry adapter는 구현하지 않았다.
+   - Agent 3과 Integration 소유 경계다. Agent 1은 `accept_analysis_result()`의 in-process application surface와 retry-safe semantics를 제공한다.
+6. 실제 Firestore Emulator에서 Phase 7 service 전체를 실행하지 못했다.
+   - 현재 환경에 `FIRESTORE_EMULATOR_HOST`가 없다. strict mapper, fake transactional backend, Risk atomic persistence와 repository invariant test는 통과했고 emulator test entry는 유지한다.
+7. 대규모 Risk/Evidence query의 cursor pagination과 batch 성능 검증은 아직 하지 않았다.
+   - 현재 repository contract는 artifact/type 범위의 deterministic tuple query다. API pagination은 Phase 9, index/scale/관측성은 Phase 12에서 실제 조회 shape과 함께 검증한다.
+8. 실제 email/push 등의 외부 알림 전송은 구현하지 않았다.
+   - 현재 canonical 요구사항은 in-app Notification이며 외부 delivery provider는 Agent 1 명세에 없다. Integration 요구가 확정되기 전에는 side effect를 추가하지 않는다.
+
+#### 추가 검토가 필요한 사항
+
+1. 이전 Phase에서 기록한 “multi-analyzer result 상태와 Risk reconciliation” 항목은 analysis-type truth와 aggregate execution 상태를 분리하는 방식으로 해결했다.
+   - 한 type의 complete success는 해당 type Risk에 즉시 authoritative하지만 Job은 모든 requested type outcome이 모일 때까지 RUNNING이다. 다른 type의 실패가 이미 성공한 type의 truth를 되돌리지는 않는다.
+2. result idempotency는 별도 Result document가 아니라 AnalysisJob nested outcome으로 구현했다.
+   - canonical collection 추가를 피하면서 `(job, analysis_type)`당 한 결과를 강제한다. 동일 fingerprint는 ACK하고 상이한 fingerprint는 overwrite하지 않아 ambiguous analyzer redelivery를 fail-closed 처리한다.
+3. FAILED Job retry에서 기존 outcome을 비우는 결정을 재검토해 유지·보완했다.
+   - 새 attempt가 이전 attempt 결과와 섞이지 않게 하고, 새 `started_at`보다 오래된 늦은 결과를 거부한다. 향후 type별 독립 retry가 필요해지면 현재 Job 단위 retry와 다른 explicit contract가 필요하다.
+4. authoritative 판단은 기존 pure domain rule인 `SUCCEEDED + COMPLETE`를 단일 source로 재사용한다.
+   - provider failure가 포함된 complete success는 모순으로 거부한다. partial/inconclusive result에 candidate가 포함돼도 관찰 정보로만 취급하고 canonical Risk에는 반영하지 않는다.
+5. evidence reference는 query를 제거하고 fragment는 유지한다.
+   - query에는 signed URL/token이 섞일 위험이 높고 fragment는 문서 내 claim/section locator로 유용하기 때문이다. opaque provider locator가 필요한 경우에도 credential-free reference만 허용한다.
+6. provider failure의 provider/category/message도 Frozen 필드명이 `safe`라고 해서 그대로 신뢰하지 않는다.
+   - Phase 6 secret redactor와 retention cap을 다시 적용하고 Audit/Notification에는 provider 이름이나 원문 메시지 대신 category 집합만 넣는다.
+7. License priority mapping은 보수적으로 REVIEW_REQUIRED까지 HIGH로 두었다.
+   - 정책 결정이 없는 REVIEW_REQUIRED를 낮추면 사용자 검토가 누락될 수 있다. 실제 policy UX에서 과도한 알림이 확인되면 Phase 11~12에서 사용자 설정과 함께 재평가한다.
+8. 새 Risk가 HIGH이면 HIGH notification을 생성하지만 기존 HIGH가 다시 확인된 경우에는 반복 알림을 만들지 않는다.
+   - priority가 비-HIGH에서 HIGH로 올라가거나 Risk가 REOPENED일 때만 새 알림을 생성해 analyzer 반복 실행에 따른 소음을 제한한다.
+9. RiskEvent hash chain은 이번 Phase에 추가하지 않았다.
+   - append-only repository와 deterministic event identity는 확보했다. History의 조회·내보내기 위변조 요구를 Phase 8에서 확인한 뒤 기존 schema 안에서 가능한 integrity metadata를 검토한다.
+10. 이전 Phase의 Firestore emulator, policy persistence, structured logging 검토 항목을 다시 살폈다.
+    - Phase 7 범위에서 더 안전하게 해결할 새 방안은 발견되지 않았다. 각각 Phase 8~9의 policy/history API와 Phase 12 hardening/CI 환경에서 계속 다룬다.
+
+#### 검증 결과
+
+```text
+Phase 7 focused reconciliation/mapper tests             32 passed
+tests/control                                           154 passed, 1 skipped
+shared/contracts/tests + tests/control                  181 passed, 1 skipped
+pnpm run generate                                       PASS
+generated files tracked diff after generation/tests    NONE
+Python compileall                                       PASS
+pip check                                               PASS
+pnpm run typecheck                                      PASS
+pnpm run verify:resolution                              PASS
+git diff --check                                        PASS
+```
+
+#### 제안 커밋 메시지
+
+`feat: reconcile AnalysisResults into canonical Risks`
 
 ### 2026-08-16 — 이전 Phase 보완 및 Phase 6 완료
 

@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from iprisk_contracts import (
+    AnalysisCoverage,
+    AnalysisStatus,
     AnalysisType,
     ChangeType,
     ReviewPriority,
     SourceAccessType,
     SourceType,
 )
-from ip_risk_agent.application.analysis_jobs import AnalysisJob, AnalysisJobStatus
+from ip_risk_agent.application.analysis_jobs import (
+    AnalysisJob,
+    AnalysisJobStatus,
+    AnalysisOutcome,
+    ProviderFailureSummary,
+)
 from ip_risk_agent.application.process_change import ChangeEvent, ChangeEventStatus
 from ip_risk_agent.core.artifacts import (
     Artifact,
@@ -294,6 +301,50 @@ def test_all_canonical_records_round_trip_strictly(value, encoder, decoder) -> N
     assert document["schema_version"] == 1
     assert isinstance(document["record_kind"], str)
     assert decoder(document) == value
+
+
+def test_analysis_job_result_outcome_round_trips_strictly() -> None:
+    started_at = NOW + timedelta(seconds=1)
+    completed_at = NOW + timedelta(seconds=2)
+    outcome = AnalysisOutcome(
+        analysis_type=AnalysisType.PATENT,
+        result_fingerprint="sha256:result-1",
+        status=AnalysisStatus.INCONCLUSIVE,
+        coverage=AnalysisCoverage.PARTIAL,
+        analyzer_version="patent-v1",
+        started_at=started_at,
+        completed_at=completed_at,
+        provider_failures=(
+            ProviderFailureSummary(
+                provider="kipris",
+                category="TIMEOUT",
+                retryable=True,
+                safe_message="provider request timed out",
+            ),
+        ),
+        model_id="model-v1",
+        prompt_version="prompt-v1",
+        policy_version="policy-v1",
+        rag_corpus_version="corpus-v1",
+    )
+    job = AnalysisJob(
+        id="job-with-outcome",
+        change_event_id="change-with-outcome",
+        artifact_id="artifact-1",
+        revision="revision-1",
+        requested_analysis_types=(AnalysisType.PATENT, AnalysisType.LICENSE),
+        status=AnalysisJobStatus.RUNNING,
+        created_at=NOW,
+        started_at=started_at,
+        analysis_outcomes={AnalysisType.PATENT: outcome},
+    )
+
+    document = analysis_job_to_document(job)
+
+    assert document["analysis_outcomes"]["PATENT"]["provider_failures"][0][
+        "safe_message"
+    ] == "provider request timed out"
+    assert analysis_job_from_document(document) == job
 
 
 def test_mapper_rejects_unknown_fields_and_schema_versions() -> None:

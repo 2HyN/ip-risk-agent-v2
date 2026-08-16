@@ -54,6 +54,7 @@ def requeue_analysis_job(job: AnalysisJob) -> AnalysisJob:
         started_at=None,
         completed_at=None,
         failure_safe=None,
+        analysis_outcomes={},
     )
 
 

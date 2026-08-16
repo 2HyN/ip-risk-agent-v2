@@ -8,13 +8,20 @@ from enum import StrEnum
 from typing import Any
 
 from iprisk_contracts import (
+    AnalysisCoverage,
+    AnalysisStatus,
     AnalysisType,
     ChangeType,
     ReviewPriority,
     SourceAccessType,
     SourceType,
 )
-from ip_risk_agent.application.analysis_jobs.models import AnalysisJob, AnalysisJobStatus
+from ip_risk_agent.application.analysis_jobs.models import (
+    AnalysisJob,
+    AnalysisJobStatus,
+    AnalysisOutcome,
+    ProviderFailureSummary,
+)
 from ip_risk_agent.application.process_change.models import ChangeEvent, ChangeEventStatus
 from ip_risk_agent.core.artifacts import (
     Artifact,
@@ -595,6 +602,10 @@ def analysis_job_to_document(value: AnalysisJob) -> Document:
         started_at=value.started_at,
         completed_at=value.completed_at,
         failure_safe=value.failure_safe,
+        analysis_outcomes={
+            analysis_type.value: _analysis_outcome_to_value(outcome)
+            for analysis_type, outcome in value.analysis_outcomes.items()
+        },
     )
 
 
@@ -613,8 +624,10 @@ def analysis_job_from_document(document: Mapping[str, object]) -> AnalysisJob:
             "started_at",
             "completed_at",
             "failure_safe",
+            "analysis_outcomes",
         ),
     )
+    outcomes = _mapping(data["analysis_outcomes"])
     return AnalysisJob(
         id=str(data["id"]),
         change_event_id=str(data["change_event_id"]),
@@ -628,6 +641,85 @@ def analysis_job_from_document(document: Mapping[str, object]) -> AnalysisJob:
         started_at=_optional_datetime(data["started_at"]),
         completed_at=_optional_datetime(data["completed_at"]),
         failure_safe=_optional_str(data["failure_safe"]),
+        analysis_outcomes={
+            AnalysisType(key): _analysis_outcome_from_value(value)
+            for key, value in outcomes.items()
+        },
+    )
+
+
+def _analysis_outcome_to_value(value: AnalysisOutcome) -> Document:
+    return {
+        "analysis_type": value.analysis_type.value,
+        "result_fingerprint": value.result_fingerprint,
+        "status": value.status.value,
+        "coverage": value.coverage.value,
+        "analyzer_version": value.analyzer_version,
+        "started_at": value.started_at,
+        "completed_at": value.completed_at,
+        "provider_failures": [
+            {
+                "provider": failure.provider,
+                "category": failure.category,
+                "retryable": failure.retryable,
+                "safe_message": failure.safe_message,
+            }
+            for failure in value.provider_failures
+        ],
+        "model_id": value.model_id,
+        "prompt_version": value.prompt_version,
+        "policy_version": value.policy_version,
+        "rag_corpus_version": value.rag_corpus_version,
+    }
+
+
+def _analysis_outcome_from_value(value: object) -> AnalysisOutcome:
+    data = _mapping(value)
+    expected = {
+        "analysis_type",
+        "result_fingerprint",
+        "status",
+        "coverage",
+        "analyzer_version",
+        "started_at",
+        "completed_at",
+        "provider_failures",
+        "model_id",
+        "prompt_version",
+        "policy_version",
+        "rag_corpus_version",
+    }
+    if set(data) != expected:
+        raise DocumentMappingError("invalid analysis outcome fields")
+    failures: list[ProviderFailureSummary] = []
+    for raw_failure in _list(data["provider_failures"]):
+        failure = _mapping(raw_failure)
+        if set(failure) != {"provider", "category", "retryable", "safe_message"}:
+            raise DocumentMappingError("invalid provider failure summary fields")
+        retryable = failure["retryable"]
+        if not isinstance(retryable, bool):
+            raise DocumentMappingError("provider failure retryable must be boolean")
+        failures.append(
+            ProviderFailureSummary(
+                provider=str(failure["provider"]),
+                category=str(failure["category"]),
+                retryable=retryable,
+                safe_message=str(failure["safe_message"]),
+            )
+        )
+    return AnalysisOutcome(
+        analysis_type=AnalysisType(data["analysis_type"]),
+        result_fingerprint=str(data["result_fingerprint"]),
+        status=AnalysisStatus(data["status"]),
+        coverage=AnalysisCoverage(data["coverage"]),
+        analyzer_version=str(data["analyzer_version"]),
+        started_at=_datetime(data["started_at"]),
+        completed_at=_datetime(data["completed_at"]),
+        provider_failures=tuple(failures),
+        model_id=_optional_str(data["model_id"]),
+        prompt_version=_optional_str(data["prompt_version"]),
+        policy_version=_optional_str(data["policy_version"]),
+        rag_corpus_version=_optional_str(data["rag_corpus_version"]),
     )
 
 

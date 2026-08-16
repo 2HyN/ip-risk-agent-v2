@@ -3,6 +3,27 @@
 from ip_risk_agent.core.common import stable_key
 
 
+def risk_id_for(risk_key: str) -> str:
+    return stable_key("risk", (risk_key,))
+
+
+def risk_evidence_id_for(
+    risk_id: str, analysis_job_id: str, evidence_id_from_result: str
+) -> str:
+    return stable_key(
+        "risk-evidence",
+        (risk_id, analysis_job_id, evidence_id_from_result),
+    )
+
+
+def risk_event_id_for(
+    risk_id: str,
+    result_fingerprint: str,
+    event_type: str,
+) -> str:
+    return stable_key("risk-event", (risk_id, result_fingerprint, event_type))
+
+
 def patent_risk_key(artifact_id: str, normalized_application_number: str) -> str:
     return stable_key("risk-patent", (artifact_id, normalized_application_number))
 

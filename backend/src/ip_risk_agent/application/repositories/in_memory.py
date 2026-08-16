@@ -14,7 +14,7 @@ from typing import TypeVar
 
 from iprisk_contracts import AnalysisType
 
-from ip_risk_agent.application.analysis_jobs.models import AnalysisJob
+from ip_risk_agent.application.analysis_jobs.models import AnalysisJob, AnalysisJobStatus
 from ip_risk_agent.application.process_change.models import ChangeEvent
 from ip_risk_agent.core.artifacts import Artifact, ArtifactState
 from ip_risk_agent.core.audit import AuditEvent, SourceAccessEvent
@@ -473,6 +473,18 @@ class InMemoryAnalysisJobRepository(_Repository):
             raise UniqueConstraintViolation(
                 "analysis job requested types may only be narrowed"
             )
+        is_failed_requeue = (
+            previous.status is AnalysisJobStatus.FAILED
+            and job.status is AnalysisJobStatus.QUEUED
+            and not job.analysis_outcomes
+        )
+        if not is_failed_requeue and any(
+            job.analysis_outcomes.get(analysis_type) != outcome
+            for analysis_type, outcome in previous.analysis_outcomes.items()
+        ):
+            raise UniqueConstraintViolation(
+                "analysis job outcomes are append-only within an attempt"
+            )
         self._state.analysis_jobs[job.id] = job
 
     async def list_for_change(self, change_event_id: str) -> tuple[AnalysisJob, ...]:
@@ -507,8 +519,14 @@ class InMemoryRiskRepository(_Repository):
         previous = self._state.risks.get(risk.id)
         if previous is None:
             raise _missing("risk", risk.id)
-        if previous.risk_key != risk.risk_key:
-            raise UniqueConstraintViolation("risk key is immutable")
+        if (
+            previous.risk_key != risk.risk_key
+            or previous.risk_workspace_id != risk.risk_workspace_id
+            or previous.artifact_id != risk.artifact_id
+            or previous.analysis_type is not risk.analysis_type
+            or previous.first_seen_at != risk.first_seen_at
+        ):
+            raise UniqueConstraintViolation("risk canonical identity is immutable")
         risk_key_owner = self._state.risks_by_key.get(risk.risk_key)
         if risk_key_owner not in (None, risk.id):
             raise _duplicate("risk key", risk.risk_key)
