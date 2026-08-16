@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 2 — 인증, Role/Permission, VWS와 Mount 권한 |
-| 다음 개발 Phase | Phase 3 — Repository protocol과 In-memory transaction 기반 |
-| 전체 진행률 | 3/14 Phase 완료 |
+| 현재 완료 Phase | Phase 3 — Repository protocol과 In-memory transaction 기반 |
+| 다음 개발 Phase | Phase 4 — Firestore canonical persistence |
+| 전체 진행률 | 4/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -36,9 +36,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 ### 2.2 현재 구조 요약
 
 - Backend는 `backend/src/ip_risk_agent` 아래에 Control, Source, Intelligence, Integration namespace가 분리되어 있다.
-- Agent 1의 `core`와 ChangeEvent/AnalysisJob application state에는 Phase 1 Domain 모델과 순수 불변식이 구현됐다. Repository, persistence와 API 영역은 아직 skeleton이다.
+- Agent 1의 `core`에는 Phase 1~2 Domain 모델, identity, lifecycle과 authorization/mutation plan이 구현됐다.
+- `application/repositories`에는 async repository/UoW contract와 transactional in-memory 구현이 있고, `application/workspace_admin`에는 Phase 2 plan의 원자적 적용 service가 구현됐다. Firestore persistence와 API 영역은 아직 skeleton이다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1 Domain/identity/lifecycle test 32개가 구현됐다.
+- `tests/control`에는 Phase 1~3 Domain, policy, repository transaction과 workspace administration test 73개가 구현됐다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -60,7 +61,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 0 | 기준점 보호와 개발 게이트 확정 | 완료 |
 | 1 | 공통 Domain 기반과 불변식 | 완료 |
 | 2 | 인증, Role/Permission, VWS와 Mount 권한 | 완료 |
-| 3 | Repository protocol과 In-memory transaction | 미구현 |
+| 3 | Repository protocol과 In-memory transaction | 완료 |
 | 4 | Firestore canonical persistence | 미구현 |
 | 5 | SourceChange intake와 AnalysisJob orchestration | 미구현 |
 | 6 | Security Gate | 미구현 |
@@ -225,7 +226,7 @@ pnpm run verify:resolution
 
 1. [x] `OWNER`, `SOURCE_MANAGER`, `RISK_REVIEWER`, `VIEWER`를 permission set으로 매핑했다.
 2. [x] `authorize_vws_action` service에서 membership, status, permission, VWS/Mount ownership을 순서대로 검증한다.
-3. [x] Workspace + deterministic Owner membership + AuditEvent를 하나의 mutation plan으로 생성한다. 실제 atomic persistence는 Phase 3 Unit of Work가 적용한다.
+3. [x] Workspace + deterministic Owner membership + AuditEvent를 하나의 mutation plan으로 생성하고 Phase 3 Unit of Work가 원자적으로 적용한다.
 4. [x] pending email invitation 생성/수락/취소, role 변경, 제거, ownership transfer와 workspace deletion guard를 구현했다.
 5. [x] Source Manager own-mount rename/operation 권한과 Owner administrative disable/remove를 분리했다.
 6. [x] Provider credential 필요 작업은 Control 허용 여부와 별도로 `provider_authority_required=true`를 반환하고 명시적 owner mismatch를 거부한다.
@@ -255,23 +256,43 @@ pnpm run verify:resolution
 - `pnpm run verify:resolution`: 통과
 - 전체 test 후 generated tracked diff: 0
 
-### Phase 3 — Repository protocol과 In-memory transaction 기반
+### Phase 3 — Repository protocol과 In-memory transaction 기반 `[완료]`
 
-1. User, Workspace, Membership, Mount, Artifact, ChangeEvent, AnalysisJob, Risk, Audit, SourceAccess, Notification repository protocol을 정의한다.
-2. 여러 aggregate를 원자적으로 바꾸기 위한 Unit of Work/transaction protocol을 정의한다.
-3. 아래 deterministic uniqueness strategy를 protocol 수준에서 명시한다.
+1. [x] User, Workspace, Membership, Source metadata, Mount, Artifact, ChangeEvent, AnalysisJob, Risk, Audit, SourceAccess, Notification async repository protocol을 정의했다.
+2. [x] 여러 aggregate를 원자적으로 바꾸기 위한 `ControlUnitOfWork`와 factory protocol을 정의했다.
+3. [x] 아래 deterministic uniqueness strategy를 in-memory transaction에서 강제했다.
    - Membership: `(vws_id, user_id)`
    - ChangeEvent: `event_fingerprint`
    - Artifact: `(source_workspace_id, source_artifact_id)`
    - Risk: stable `risk_key`
    - VWS Mount alias: `(vws_id, normalized_alias)`
-4. In-memory repository와 transaction fake를 구현해 이후 모든 application test의 기본 저장소로 사용한다.
-5. append-only event repository는 update/delete API 자체를 노출하지 않는다.
+4. [x] 격리 snapshot, 명시적 commit/rollback, store revision 기반 optimistic conflict를 제공하는 in-memory repository를 구현했다.
+5. [x] AuditEvent, SourceAccessEvent, RiskEvent repository는 append/list만 제공하고 event update/delete API를 노출하지 않는다.
+6. [x] Phase 2의 workspace/member/mount mutation plan을 transaction 안에서 적용하는 `WorkspaceAdministrationService`를 구현했다.
+7. [x] Source Manager 강등/제거 시 대상 사용자의 Mount 전체를 transaction 내부에서 조회해 plan에 전달하도록 public application path를 고정했다.
 
 완료 조건:
 
-- Firestore 없이 Agent 1 전체 use case를 실행할 기반이 마련된다.
-- duplicate/concurrency 조건을 재현하는 unit test helper가 존재한다.
+- [x] Firestore 없이 Agent 1 application use case를 실행할 persistence-neutral 기반이 마련됐다.
+- [x] duplicate, rollback과 concurrent lost-update 조건을 재현하는 in-memory test 기반이 존재한다.
+
+구현 파일군:
+
+- `application/repositories/protocols.py`: persistence-neutral async repository/UoW protocol
+- `application/repositories/errors.py`: not-found, unique, concurrency, closed-transaction 오류
+- `application/repositories/in_memory.py`: indexed snapshot store와 optimistic Unit of Work
+- `application/workspace_admin/service.py`: Phase 2 mutation plan의 원자적 적용 계층
+- `tests/control/test_in_memory_repositories.py`: transaction/uniqueness/append-only repository 검증
+- `tests/control/test_workspace_admin_service.py`: cross-aggregate atomicity와 rollback 검증
+
+검증 결과:
+
+- Phase 1~3 Control tests: 73 passed
+- Frozen Contract + Control tests: 100 passed
+- Python compileall: 통과
+- `pnpm run typecheck`: 통과
+- `pnpm run verify:resolution`: 통과
+- 공식 생성 및 전체 test 후 generated tracked diff: 0
 
 ### Phase 4 — Firestore canonical persistence
 
@@ -575,7 +596,122 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 
 ## 9. 작업 현황 로그
 
+### 2026-08-16 — Phase 2 보완 및 Phase 3 완료
+
+#### 구현 완료 항목
+
+1. Phase 2 mutation plan의 실제 원자적 적용 경로를 완성했다.
+   - Workspace, Owner Membership, AuditEvent 생성을 한 Unit of Work에서 commit한다.
+   - invitation 생성/수락/취소와 Membership 변환을 transaction으로 묶었다.
+   - ownership transfer는 Workspace와 이전/신규 Owner Membership 및 AuditEvent를 함께 commit한다.
+   - member role 변경/제거, 관련 Mount 상태, Owner Notification과 AuditEvent를 함께 commit한다.
+   - Mount rename/disable/remove와 AuditEvent를 함께 commit한다.
+   - 중간 unique violation 또는 domain error가 발생하면 snapshot 전체를 폐기한다.
+2. Phase 2의 부분 `candidate_mounts` 입력 위험을 application service에서 제거했다.
+   - caller가 Mount 목록을 제공하지 않는다.
+   - role 변경/멤버 제거 transaction 안에서 `(VWS, target user)`에 해당하는 Mount 전체를 repository로 조회한다.
+   - active/non-disabled owned Mount만 domain plan 규칙에 따라 `MANAGER_ACTION_REQUIRED`로 바뀐다.
+3. persistence-neutral async repository protocol을 정의했다.
+   - User, Workspace, Membership/Invitation, SourceConnection/SourceWorkspace metadata, Mount
+   - Artifact/ArtifactState, ChangeEvent, AnalysisJob
+   - Risk/RiskEvidence/RiskEvent, AuditEvent/SourceAccessEvent, Notification
+   - 모든 repository는 SDK 타입 없이 domain/application 모델만 사용한다.
+4. `ControlUnitOfWork`/factory protocol과 typed repository error를 정의했다.
+   - explicit commit/rollback
+   - record not found
+   - unique constraint violation
+   - optimistic concurrency conflict
+   - closed transaction access
+5. deterministic in-memory store를 구현했다.
+   - transaction 시작 시 독립 snapshot과 base revision을 얻는다.
+   - commit 시 store revision을 비교해 lost update를 거부한다.
+   - commit되지 않은 context exit와 예외 경로는 전체 rollback한다.
+   - 반환 목록은 ID 또는 `(occurred_at, id)` 기준으로 정렬해 테스트 결정성을 유지한다.
+6. cross-record unique index를 구현했다.
+   - User Google subject
+   - Membership deterministic record ID
+   - Mount `(risk_workspace_id, casefold(normalized_alias))`
+   - SourceWorkspace의 단일 Mount
+   - Artifact `(source_workspace_id, source_artifact_id)`
+   - ChangeEvent `event_fingerprint`
+   - Risk `risk_key`
+7. identity를 구성하는 저장 필드의 변경을 차단했다.
+   - Google subject, Membership VWS/User, Invitation VWS/email
+   - Mount VWS/SourceWorkspace
+   - Artifact source identity, ChangeEvent fingerprint, Risk key
+   - 이 필드가 변경되면 기존 deterministic ID/index와 모순되므로 update가 아니라 새 identity로 처리해야 한다.
+8. append-only event 경계를 API 형태로 강제했다.
+   - AuditEvent, SourceAccessEvent와 RiskEvent에는 append/list만 제공한다.
+   - event save/update/delete/remove API는 존재하지 않는다.
+   - 중복 event ID append는 unique violation이다.
+9. 자체 검토에서 발견한 `WorkspaceRepository.list_for_user()`의 잠재 오류를 보완했다.
+   - 존재하지 않는 `Membership.is_active` 편의 속성 대신 canonical `MembershipStatus.ACTIVE`를 직접 검사한다.
+   - active membership을 가진 사용자의 VWS만 반환하는 회귀 테스트를 추가했다.
+10. 신규 dependency 없이 Phase 3 Control 테스트 11건을 추가하고 전체 검증을 통과했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. Firestore production repository와 document mapper는 미구현이다.
+   - Phase 3은 persistence-neutral contract와 fake를 완성하는 범위다. 명세의 canonical collection, transaction, document serialization과 Firestore SDK 격리는 Phase 4에서 구현한다.
+2. `Membership | MembershipInvitation`의 영속 document discriminator는 미구현이다.
+   - In-memory 저장소는 Python runtime type으로 두 record를 안전하게 구분한다. Firestore에서는 runtime type이 사라지므로 Phase 4 mapper가 같은 `memberships` collection 안에 명시적 `record_kind`를 기록하고 잘못된 역직렬화를 거부해야 한다.
+3. In-memory/Firestore 공용 repository contract test fixture와 emulator parity 검증은 미구현이다.
+   - 현재 suite는 in-memory contract와 실패 조건을 고정한다. Firestore adapter가 존재해야 같은 scenario factory를 재사용할 수 있으므로 Phase 4에서 emulator fixture와 함께 추출한다.
+4. Firestore의 세부 optimistic transaction/CAS와 재시도 정책은 미구현이다.
+   - In-memory fake는 store 전체 revision으로 lost update를 보수적으로 차단한다. document 단위 precondition, transaction retry와 충돌 오류 변환은 Phase 4가 담당한다.
+5. Source metadata와 Mount/Artifact/ChangeEvent 사이의 전체 referential integrity는 아직 application use case로 연결하지 않았다.
+   - repository는 저장과 unique index만 담당한다. 실제 SourceChange 입력 관계 검증, Mount 처리 가능 상태와 Artifact upsert 규칙은 Phase 5 intake 범위에서 transaction 안에 구현한다.
+6. AnalysisJob claim/finish의 compare-and-set과 queue enqueue는 미구현이다.
+   - repository의 기본 add/save/list contract만 준비했다. retry-safe orchestration과 queue payload 제한은 Phase 5 범위다.
+7. Risk reconciliation과 review 단위의 세밀한 optimistic update는 미구현이다.
+   - Risk/RiskEvidence/RiskEvent 저장 경계만 제공한다. AnalysisResult reconciliation은 Phase 7, human review version check는 Phase 8에서 완료한다.
+8. Google OIDC가 보증한 identity와 transaction을 연결한 User upsert는 미구현이다.
+   - Google subject unique/immutable 저장 규칙은 완료했지만 token 검증, last-login update와 session binding은 Phase 9 범위다.
+9. 동시성 충돌의 자동 재시도는 구현하지 않았다.
+   - 현재 application service는 `ConcurrencyConflictError`를 호출자에게 명시적으로 전달한다. 무조건 재시도하면 ID/시간 또는 외부 side effect를 중복 생성할 수 있으므로 Phase 4 transaction adapter 및 Phase 9 API 정책에서 idempotency가 보장된 연산만 제한적으로 재시도한다.
+10. 신규 dependency 설치는 수행하지 않았다.
+    - async protocol, in-memory snapshot/lock과 test는 Python 3.14.7 표준 library 및 기존 pytest로 구현 가능했다. Firestore package 선택과 실제 Python 3.14.7 호환성 검사는 Phase 4에서 수행한다.
+
+#### 추가 검토가 필요한 사항
+
+1. In-memory transaction은 document별 version이 아니라 store 전체 revision을 사용한다.
+   - 서로 무관한 두 write도 동시에 commit하면 한쪽이 conflict가 된다. 테스트 fake에서는 lost update를 확실히 드러내는 보수적 선택이며, production 성능/충돌 범위는 Phase 4 Firestore transaction이 canonical document read set에 맞춰 제한한다.
+2. SourceWorkspace는 MVP에서 동시에 하나의 Mount만 가질 수 있도록 global unique index를 두었다.
+   - `SourceWorkspace -> exactly one VWS Mount` 명세를 따른 결정이다. 향후 공유 Mount 요구가 생기면 schema migration이므로 단순히 index만 제거하지 않고 identity/authorization/history 영향을 함께 검토해야 한다.
+3. Mount alias uniqueness는 trim/path validation 후 Unicode casefold key를 사용한다.
+   - `Backend`와 `backend`를 같은 VWS에서 충돌로 처리하고 다른 VWS에서는 허용한다. Firestore가 같은 normalization 함수를 그대로 사용하도록 Phase 4 contract test에 포함한다.
+4. Deterministic identity field는 repository save에서 immutable로 취급한다.
+   - key 변경을 허용해 secondary index만 옮기면 stable ID 정의와 불일치하므로 거부한다. rename이 허용되는 Mount alias는 identity가 아니라 presentation field라 예외적으로 변경 가능하다.
+5. In-memory Membership/Invitation 구분은 runtime type 기반이다.
+   - 이 방식은 fake 내부에서는 canonical collection을 추가하지 않고 안전하다. Phase 4에서는 명시적 discriminator와 strict mapper validation으로 대체되며, 외부 API에 discriminator 저장 형식을 노출하지 않는다.
+6. append-only는 repository surface와 duplicate ID 검사로 강제했다.
+   - Python object 자체는 frozen dataclass이고 과거 event를 바꾸는 save/delete method가 없다. Phase 4 Firestore security/application write path에서도 create-only semantics를 재검증해야 한다.
+7. `WorkspaceAdministrationService`는 Notification이 실제 필요한지 확정하기 전에 notification ID를 할당할 수 있다.
+   - 사용되지 않은 ID gap은 canonical state나 결정성에 영향을 주지 않으며 단순하고 side-effect-free한 factory를 전제로 한다. 향후 ID factory가 외부 I/O를 수행하게 해서는 안 된다.
+8. repository는 cross-aggregate business rule을 임의로 중복 구현하지 않는다.
+   - unique/identity/append-only invariant만 저장소가 강제하고 authorization, lifecycle과 SourceChange 관계 검증은 application/domain 계층에 유지한다.
+
+#### 검증 결과
+
+```text
+pnpm run generate                                      PASS
+shared/contracts/tests + tests/control                 100 passed
+tests/control                                          73 passed
+Python compileall                                      PASS
+pnpm run typecheck                                     PASS
+pnpm run verify:resolution                             PASS
+generated files tracked diff after generation/tests   NONE
+```
+
+#### 제안 커밋 메시지
+
+```text
+feat: add transactional Control Plane repositories
+```
+
 ### 2026-08-16 — Phase 1 보완 및 Phase 2 완료
+
+아래 미구현/검토 항목은 Phase 2 종료 당시의 상태다. Phase 3에서 해결된 내용은 위 최신 로그를 우선한다.
 
 #### 구현 완료 항목
 
