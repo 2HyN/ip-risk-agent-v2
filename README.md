@@ -10,7 +10,8 @@ Secure Human-in-the-Loop IP Risk Management System for Local Directory, GitHub R
 
 ### 필수 버전
 
-- **Python**: 프로젝트 `pyproject.toml`의 `requires-python` 범위 사용
+- **Python**: CPython `3.14.7` 고정
+- **Python compatibility**: `>=3.14,<3.15`
 - **Pydantic**: `2.13.4` 고정
 - **pytest**: `9.1.1` 고정
 - **Node.js**: `24.19.0`
@@ -208,20 +209,26 @@ git clone <REMOTE_REPOSITORY_URL>
 cd ip-risk-agent-v2
 ```
 
-### Python 가상환경
+### Python 버전 확인
 
-Windows PowerShell:
+프로젝트 가상환경을 만들기 전에 Python 3.14.7이 설치되어 있는지 확인한다.
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```bash
+py -V:3.14.7 --version
 ```
+
+설치되어 있지 않다면:
+
+```bash
+py install 3.14.7
+```
+
+### Python 가상환경
 
 Git Bash:
 
 ```bash
-py -3.12 -m venv .venv
+py -V:3.14.7 -m venv .venv
 source .venv/Scripts/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
@@ -230,6 +237,7 @@ python -m pip install -e ".[dev]"
 설치된 버전을 확인한다.
 
 ```bash
+python --version
 python -c "import pydantic; print(pydantic.__version__)"
 pytest --version
 ```
@@ -237,6 +245,7 @@ pytest --version
 다음 버전이어야 한다.
 
 ```text
+Python 3.14.7
 Pydantic 2.13.4
 pytest 9.1.1
 ```
