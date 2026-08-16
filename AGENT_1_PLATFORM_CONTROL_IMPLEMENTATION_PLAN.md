@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 3 — Repository protocol과 In-memory transaction 기반 |
-| 다음 개발 Phase | Phase 4 — Firestore canonical persistence |
-| 전체 진행률 | 4/14 Phase 완료 |
+| 현재 완료 Phase | Phase 4 — Firestore canonical persistence |
+| 다음 개발 Phase | Phase 5 — SourceChange intake와 AnalysisJob orchestration |
+| 전체 진행률 | 5/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -37,9 +37,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 
 - Backend는 `backend/src/ip_risk_agent` 아래에 Control, Source, Intelligence, Integration namespace가 분리되어 있다.
 - Agent 1의 `core`에는 Phase 1~2 Domain 모델, identity, lifecycle과 authorization/mutation plan이 구현됐다.
-- `application/repositories`에는 async repository/UoW contract와 transactional in-memory 구현이 있고, `application/workspace_admin`에는 Phase 2 plan의 원자적 적용 service가 구현됐다. Firestore persistence와 API 영역은 아직 skeleton이다.
+- `application/repositories`에는 async repository/UoW contract와 transactional in-memory 구현이 있고, `application/workspace_admin`에는 Phase 2 plan의 원자적 적용 service가 구현됐다.
+- `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐다. API 영역은 아직 skeleton이다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~3 Domain, policy, repository transaction과 workspace administration test 73개가 구현됐다.
+- `tests/control`에는 Phase 1~4 Domain, policy, repository transaction, mapper와 Firestore persistence test 104개가 구현됐으며 현재 환경에서는 103개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -62,7 +63,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 1 | 공통 Domain 기반과 불변식 | 완료 |
 | 2 | 인증, Role/Permission, VWS와 Mount 권한 | 완료 |
 | 3 | Repository protocol과 In-memory transaction | 완료 |
-| 4 | Firestore canonical persistence | 미구현 |
+| 4 | Firestore canonical persistence | 완료 |
 | 5 | SourceChange intake와 AnalysisJob orchestration | 미구현 |
 | 6 | Security Gate | 미구현 |
 | 7 | AnalysisResult intake와 Risk reconciliation | 미구현 |
@@ -294,24 +295,46 @@ pnpm run verify:resolution
 - `pnpm run verify:resolution`: 통과
 - 공식 생성 및 전체 test 후 generated tracked diff: 0
 
-### Phase 4 — Firestore canonical persistence
+### Phase 4 — Firestore canonical persistence `[완료]`
 
-1. 명세의 16개 canonical collection만 사용해 Firestore document mapper와 repository를 구현한다.
-2. Domain model과 Firestore document dict 사이의 명시적 mapper를 두고 SDK 타입이 core/application으로 새지 않게 한다.
-3. deterministic document ID 또는 transaction lookup으로 uniqueness를 보장한다.
-4. 다음 원자 연산을 구현한다.
+1. [x] 명세의 16개 canonical collection만 사용해 Firestore document mapper와 repository를 구현했다.
+2. [x] Domain model과 Firestore document dict 사이의 strict mapper를 두고 SDK 타입을 `persistence/core_firestore/backend.py` 아래에 격리했다.
+3. [x] canonical collection 내부 deterministic unique-key sentinel과 transaction `create` 충돌로 uniqueness를 보장했다.
+4. [x] 다음 원자 연산을 repository/UoW와 기존 application service로 실행·검증했다.
    - Workspace + Owner membership 생성
    - Source Manager 제거 + Mount 상태 + Audit + Notification
    - ChangeEvent idempotent insert + Artifact upsert
    - Risk projection + Evidence + append-only RiskEvent reconciliation
    - optimistic review update + review event
-5. Firestore emulator를 사용할 수 있는 test fixture를 만들되 실제 production credential을 요구하지 않는다.
-6. 필요한 composite index 목록은 delivery 문서에 wiring/deploy 요청으로 기록한다.
+5. [x] `FIRESTORE_EMULATOR_HOST`가 설정되면 anonymous credential로 production async transaction을 검증하는 emulator test를 추가했다.
+6. [x] 필요한 composite index 후보를 코드로 선언하고 dependency/현황 문서에 wiring 요청을 기록했다.
 
 완료 조건:
 
-- In-memory와 Firestore repository가 같은 contract test suite를 통과한다.
-- SDK 없이 domain test, emulator로 persistence test를 독립 실행할 수 있다.
+- [x] In-memory와 Firestore repository가 공용 commit/rollback/lookup/uniqueness contract scenario를 통과한다.
+- [x] SDK 없이 domain test가 독립 실행되고, emulator 설정 시 production Firestore persistence test를 별도로 실행할 경로가 존재한다.
+
+구현 파일군:
+
+- `persistence/core_firestore/schema.py`: 16개 collection과 composite index declaration
+- `persistence/core_firestore/mappers.py`: 17개 domain record의 strict 양방향 mapper
+- `persistence/core_firestore/unique_keys.py`: canonical collection 내부 hashed unique sentinel
+- `persistence/core_firestore/backend.py`: Google AsyncClient transaction과 SDK error translation
+- `persistence/core_firestore/session.py`: read/query expectation, read-your-writes와 buffered atomic commit
+- `persistence/core_firestore/repositories.py`: Phase 3 repository protocol의 Firestore 구현
+- `tests/control/test_firestore_mappers.py`: 전체 record round-trip/strictness/discriminator 검증
+- `tests/control/test_firestore_repositories.py`: fake atomic backend 기반 transaction/uniqueness/parity 검증
+- `tests/control/test_firestore_emulator.py`: 실제 Emulator가 설정된 환경용 production adapter test
+
+검증 결과:
+
+- Phase 1~4 Control tests: 103 passed, 1 skipped(emulator 미설정)
+- Frozen Contract + Control tests: 130 passed, 1 skipped(emulator 미설정)
+- Google Cloud Firestore 2.28.1 import 및 `pip check`: 통과
+- Python compileall: 통과
+- `pnpm run typecheck`: 통과
+- `pnpm run verify:resolution`: 통과
+- 공식 생성 및 전체 test 후 generated tracked diff: 0
 
 ### Phase 5 — SourceChange intake와 AnalysisJob orchestration
 
@@ -596,7 +619,134 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 
 ## 9. 작업 현황 로그
 
+### 2026-08-16 — 이전 Phase 보완 및 Phase 4 완료
+
+#### 구현 완료 항목
+
+1. Phase 3 repository contract의 Firestore parity 경로를 보완했다.
+   - 같은 `WorkspaceAdministrationService`를 in-memory와 Firestore UoW에 주입할 수 있다.
+   - 두 구현이 동일한 commit, implicit rollback, lookup과 unique violation contract scenario를 통과한다.
+   - Firestore 구현이 Phase 3 protocol의 모든 repository method surface를 제공함을 확인했다.
+2. 정확히 16개의 canonical collection을 코드 상수로 고정했다.
+   - `users`, `risk_workspaces`, `memberships`, `source_connections`, `source_workspaces`
+   - `workspace_mounts`, `artifacts`, `artifact_states`, `change_events`, `analysis_jobs`
+   - `risks`, `risk_evidence`, `risk_events`, `audit_events`, `source_access_events`, `notifications`
+   - unique 처리나 emulator 편의를 위한 별도 collection을 추가하지 않았다.
+3. 모든 canonical domain record의 strict document mapper를 구현했다.
+   - 모든 document는 `schema_version=1`과 명시적 `record_kind`를 가진다.
+   - unknown/missing field와 미지원 schema version을 거부한다.
+   - Domain의 enum, UTC datetime, immutable safe mapping/tuple을 Firestore-compatible 값으로 변환하고 역변환 시 Domain constructor validation을 다시 통과시킨다.
+   - document path ID와 record identity가 다르면 repository가 corruption으로 거부한다.
+4. Phase 2~3 검토 항목이었던 Membership/Invitation persisted discriminator를 완료했다.
+   - 두 record를 같은 `memberships` collection에 저장한다.
+   - 각각 `membership`, `membership_invitation` record kind를 사용한다.
+   - list/query는 record kind를 명시하고 잘못된 kind의 direct lookup을 거부한다.
+5. Firestore에서 실제 동시 unique 삽입을 막는 deterministic unique-key sentinel을 구현했다.
+   - User Google subject
+   - Mount `(VWS, normalized/casefold alias)`와 SourceWorkspace 단일 Mount
+   - Artifact `(source_workspace_id, source_artifact_id)`
+   - ChangeEvent `event_fingerprint`
+   - Risk `risk_key`
+   - sentinel ID는 stable hash이며 raw unique component를 sentinel document에 중복 저장하지 않는다.
+   - sentinel은 대상 canonical collection 내부의 `record_kind=unique_key` document이므로 collection 목록을 늘리지 않는다.
+6. query 부재 검사만으로는 생길 수 있는 phantom unique race를 제거했다.
+   - 경쟁 transaction이 같은 sentinel을 `create`하면 한 transaction만 성공한다.
+   - alias rename/remove 시 이전 sentinel 해제와 신규 sentinel 획득을 Mount write와 같은 transaction에서 수행한다.
+   - sentinel이 missing owner를 가리키거나 namespace/shape가 잘못되면 mapping corruption으로 거부한다.
+7. Google Firestore SDK를 격리한 production backend를 구현했다.
+   - `google.cloud.firestore_v1.AsyncClient`와 transaction 객체는 `backend.py` 밖으로 노출하지 않는다.
+   - application/core/repository protocol은 SDK 타입을 import하지 않는다.
+   - AlreadyExists, NotFound, Aborted/FailedPrecondition과 retry exhaustion을 Agent 1 repository error로 변환한다.
+8. public SDK API만 사용하는 optimistic transaction session을 구현했다.
+   - application read는 local cache/overlay로 read-your-writes를 제공한다.
+   - 최초 document/query 결과를 expectation으로 기록한다.
+   - commit callback의 Firestore transaction 안에서 모든 expectation을 다시 읽고 비교한 뒤 buffered create/set/delete를 적용한다.
+   - lost update나 query phantom이 있으면 write 전에 `ConcurrencyConflictError`로 중단한다.
+   - Google SDK의 private `_begin`/`_rollback` API에는 의존하지 않는다.
+9. Phase 4 핵심 원자 연산을 검증했다.
+   - Workspace + Owner Membership + Audit
+   - invitation 생성/수락
+   - Source Manager 제거 + Mount 보존/상태 전환 + Notification + Audit
+   - Artifact/ArtifactState + ChangeEvent + AnalysisJob
+   - Risk + RiskEvidence + append-only RiskEvent
+   - optimistic Risk review projection + review event에서 stale transaction 거부
+10. append-only 경계를 Firestore repository에서도 유지했다.
+    - AuditEvent, SourceAccessEvent, RiskEvent는 append/list만 제공한다.
+    - create 충돌은 과거 event overwrite가 아니라 unique violation이다.
+11. Firestore dependency를 독자적으로 선택하고 Python 3.14.7 호환성을 확인했다.
+    - `google-cloud-firestore==2.28.1` 설치/import 성공
+    - package `Requires-Python >=3.10`
+    - `grpcio==1.83.0` CPython 3.14 Windows wheel 설치 성공
+    - 전체 dependency graph `pip check` 통과
+    - Root manifest/lockfile은 수정하지 않고 Integration pin 후보만 dependency 문서에 기록했다.
+12. 실제 Emulator 검증 경로를 추가했다.
+    - `FIRESTORE_EMULATOR_HOST`가 설정된 경우 `AnonymousCredentials`와 격리된 test project/user ID를 사용한다.
+    - production `AsyncClient -> GoogleFirestoreBackend -> Firestore UoW` 경로로 create/read transaction을 실행하고 생성 record를 정리한다.
+
+#### 구현 미완료 항목 및 사유
+
+1. 현재 로컬 환경에서 실제 Firestore Emulator test 실행은 완료하지 못했다.
+   - `FIRESTORE_EMULATOR_HOST`, `gcloud`와 Firebase CLI가 구성되어 있지 않아 test 1건이 명시적으로 skip됐다. test 코드와 credential-free 실행 경로는 구현됐으며 Integration/CI가 Emulator host를 제공하면 자동 실행된다.
+2. composite index의 실제 배포는 수행하지 않았다.
+   - 필요한 query field 조합은 `REQUIRED_COMPOSITE_INDEXES`로 선언했다. `deploy/**`와 production project 설정은 Agent 1 소유 범위가 아니므로 Integration 단계에서 index 파일/배포 설정으로 반영해야 한다.
+3. Root dependency pin과 lockfile 갱신은 수행하지 않았다.
+   - 사용자 지시 및 Agent 소유 경계에 따라 검증 버전만 `agent-deliverables/agent-1-dependencies.md`에 기록했다. Integration 단계에서 다른 Agent package와 충돌을 검토한 뒤 반영한다.
+4. 기존 Firestore document의 schema migration/backfill 도구는 구현하지 않았다.
+   - 현재 프로젝트에는 production data나 이전 schema가 없으며 모든 새 document가 version 1로 시작한다. 향후 mapper version이 증가할 때 migration 계획이 별도로 필요하다.
+5. 실제 `register_source_change` idempotent use case는 미구현이다.
+   - Phase 4에서는 Artifact/ChangeEvent/AnalysisJob을 같은 transaction에서 저장할 primitive와 uniqueness를 완성했다. SourceChange 관계 검증, CREATE/UPDATE/MOVE/DELETE와 queue 연결은 Phase 5에서 구현한다.
+6. AnalysisResult 기반 Risk set reconciliation use case는 미구현이다.
+   - Risk/Evidence/Event atomic persistence는 검증했다. authoritative result 판정과 set reconcile은 Phase 7 범위다.
+7. Human review API의 명시적 client version/precondition은 미구현이다.
+   - 현재 UoW는 read document 전체를 재검증해 stale write를 차단한다. API request version과 safe conflict response는 Phase 8~9에서 추가한다.
+8. Firestore Security Rules 및 IAM 배포는 수행하지 않았다.
+   - application repository는 append-only/create-only 경계를 강제하지만, deploy-level deny 정책은 Integration 소유 설정과 production service account 설계가 필요하다.
+9. pagination/cursor 기반 large collection query는 미구현이다.
+   - 현재 repository protocol은 deterministic tuple 반환을 사용한다. 실제 API pagination은 Phase 9, scale/관측성 검증은 Phase 12에서 query contract를 확장한다.
+
+#### 추가 검토가 필요한 사항
+
+1. unique sentinel은 별도 collection 대신 해당 canonical collection에 함께 저장한다.
+   - canonical collection 제한과 강한 uniqueness를 동시에 만족하는 선택이다. 따라서 sentinel이 존재하는 collection의 list query는 반드시 domain `record_kind`를 filter해야 하며, direct unique lookup만 sentinel을 읽는다.
+2. unique sentinel에는 raw Google subject, event fingerprint, risk key 또는 source identity component를 저장하지 않는다.
+   - stable hash document ID와 namespace/owner ID만 저장해 중복 민감 식별자 노출을 줄였다. 실제 domain document에는 명세상 필요한 canonical field가 계속 존재한다.
+3. Firestore UoW는 transaction 밖에서 application read를 수행한 뒤 commit transaction 안에서 동일 document/query를 재검증한다.
+   - arbitrary application callback을 SDK transaction decorator 안에서 실행하거나 SDK private API에 의존하지 않기 위한 구조다. 비교 후 write가 같은 server transaction에 있으므로 stale state는 commit되지 않는다.
+4. expectation은 update timestamp가 아니라 canonical document 전체 값을 비교한다.
+   - 값이 동일하게 되돌아온 경우에는 유효한 동일 상태로 간주한다. Phase 8에서 사용자에게 노출할 명시적 revision token이 필요하면 별도 version field를 도입한다.
+5. strict mapper는 unknown field를 거부한다.
+   - 무계획 schema drift를 조기에 드러내는 대신 rolling deployment에서 신규/구버전 reader 호환 계획이 필요하다. version 2 도입 시 dual-read 또는 순차 배포 전략을 반드시 정의한다.
+6. Source Manager가 매우 많은 Mount를 소유하면 한 Firestore transaction의 read/write 한도에 접근할 수 있다.
+   - 원자성 때문에 단순 batch 분할은 허용할 수 없다. Phase 9/12에서 workspace/mount 규모 제한 또는 asynchronous state-machine 전환 필요성을 실제 제품 한도와 함께 검토한다.
+7. production SDK adapter의 Emulator test는 현재 환경에서 실행되지 않았다.
+   - fake backend는 transaction semantics, mapper와 repository 동작을 검증하지만 wire protocol/emulator 동작을 대체하지 않는다. Integration 전에 Emulator test 통과를 필수 gate로 유지한다.
+8. composite index declaration은 application query 기준 후보 목록이다.
+   - Emulator/production이 equality index merge로 처리하는 항목도 있을 수 있다. 실제 index error와 query explain 결과를 확인한 뒤 최소 index만 배포한다.
+9. Firestore package 2.28.1은 현재 Python 3.14.7 환경에서 설치·검증됐다.
+   - Integration pin 시 Google auth/grpc/protobuf dependency가 다른 Agent와 충돌하는지 다시 확인하며, 충돌이 없으면 이 버전을 우선 반영한다.
+
+#### 검증 결과
+
+```text
+tests/control                                          103 passed, 1 skipped
+shared/contracts/tests + tests/control                 130 passed, 1 skipped
+Firestore mapper/repository tests                      30 passed
+Firestore emulator production-adapter test             1 skipped (host 미설정)
+google-cloud-firestore                                 2.28.1 / Python >=3.10
+grpcio                                                 1.83.0 CPython 3.14 wheel
+pip check                                              PASS
+Python compileall                                      PASS
+```
+
+#### 제안 커밋 메시지
+
+```text
+feat: implement canonical Firestore persistence
+```
+
 ### 2026-08-16 — Phase 2 보완 및 Phase 3 완료
+
+아래 미구현/검토 항목은 Phase 3 종료 당시의 상태다. Firestore mapper, persisted discriminator, 공용 repository contract scenario와 emulator 실행 경로 등 Phase 4에서 해결된 내용은 위 최신 로그를 우선한다.
 
 #### 구현 완료 항목
 

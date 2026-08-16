@@ -9,7 +9,15 @@
 
 Agent 1은 각 feature 구현에 필요한 package를 독자적으로 선택하고 현재 `.venv`/workspace에서 호환성을 검사해 설치할 수 있다. 선택 버전과 검사 결과는 이 문서에 누적한다. Root manifest와 최종 lockfile pin은 Integration 단계에서 다른 Plane과의 충돌 여부를 확인해 최대한 반영한다. 모든 선택은 Python 3.14.7 또는 Node.js 24.19.0과 호환되어야 한다.
 
-Phase 0~2에서는 신규 package가 필요하지 않아 추가 설치를 수행하지 않았다.
+Phase 0~3에서는 신규 package가 필요하지 않아 추가 설치를 수행하지 않았다.
+
+## 검증 완료 dependency 선택
+
+| Phase | Package | 검증 버전 | 검증 결과 |
+|---|---|---:|---|
+| 4 | `google-cloud-firestore` | `2.28.1` | CPython 3.14.7 설치/import, async client/transaction API inspection, `pip check`, fake backend 전체 persistence test 통과 |
+
+Phase 4 검증 환경에서 `google-cloud-firestore==2.28.1`을 설치했다. 직접 dependency인 `grpcio==1.83.0`은 CPython 3.14 Windows wheel로 설치됐고 전체 dependency graph는 `pip check`를 통과했다. Root `pyproject.toml`과 lockfile은 Agent 1 소유 범위가 아니므로 수정하지 않았으며, Integration 단계의 최종 pin 후보는 `google-cloud-firestore==2.28.1`이다.
 
 ## Python runtime dependencies
 
@@ -17,7 +25,7 @@ Phase 0~2에서는 신규 package가 필요하지 않아 추가 설치를 수행
 |---|---|---|
 | FastAPI | Control-owned HTTP API와 dependency injection | Pydantic 2.13.4 및 Python 3.14.7 호환 |
 | Uvicorn | 개발 및 Cloud Run ASGI runtime | 선택한 FastAPI/Starlette와 호환 |
-| Google Cloud Firestore client | Canonical Firestore repositories와 transaction | Python 3.14.7 호환 |
+| Google Cloud Firestore client | Canonical Firestore repositories와 transaction | `google-cloud-firestore==2.28.1` 검증 완료 |
 | Authlib 또는 동등 OIDC client | Google OIDC authorization-code flow, discovery, state/nonce 검증 | Google OIDC 및 async Web flow 지원 |
 | HTTPX 또는 동등 async HTTP client | OIDC discovery/token/userinfo 통신과 API test client | 선택한 FastAPI/Auth library와 호환 |
 | itsdangerous 또는 동등 signing capability | Secure application session/state signing | Starlette session 사용 시 필요 |
@@ -57,6 +65,7 @@ SESSION_SECRET
 APP_PUBLIC_BASE_URL
 GCP_PROJECT_ID
 FIRESTORE_DATABASE
+FIRESTORE_EMULATOR_HOST  # emulator test에서만 사용
 ```
 
 실제 secret은 `.env.example`, source, fixture 또는 log에 기록하지 않는다.
