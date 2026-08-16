@@ -458,8 +458,21 @@ class InMemoryAnalysisJobRepository(_Repository):
 
     async def save(self, job: AnalysisJob) -> None:
         self._open()
-        if job.id not in self._state.analysis_jobs:
+        previous = self._state.analysis_jobs.get(job.id)
+        if previous is None:
             raise _missing("analysis job", job.id)
+        if (
+            previous.change_event_id != job.change_event_id
+            or previous.artifact_id != job.artifact_id
+            or previous.revision != job.revision
+        ):
+            raise UniqueConstraintViolation("analysis job source identity is immutable")
+        if not set(job.requested_analysis_types).issubset(
+            previous.requested_analysis_types
+        ):
+            raise UniqueConstraintViolation(
+                "analysis job requested types may only be narrowed"
+            )
         self._state.analysis_jobs[job.id] = job
 
     async def list_for_change(self, change_event_id: str) -> tuple[AnalysisJob, ...]:
@@ -574,6 +587,10 @@ class InMemoryAuditRepository(_Repository):
         if event.id in self._state.source_access_events:
             raise _duplicate("source access event", event.id)
         self._state.source_access_events[event.id] = event
+
+    async def get_source_access(self, event_id: str) -> SourceAccessEvent | None:
+        self._open()
+        return self._state.source_access_events.get(event_id)
 
     async def list_source_access(
         self, risk_workspace_id: str

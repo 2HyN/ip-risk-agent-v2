@@ -573,6 +573,19 @@ class FirestoreAnalysisJobRepository(_Repository):
         await self._add(ANALYSIS_JOBS, job.id, job, analysis_job_to_document)
 
     async def save(self, job: AnalysisJob) -> None:
+        previous = await _required(self.get(job.id), "analysis job", job.id)
+        if (
+            previous.change_event_id != job.change_event_id
+            or previous.artifact_id != job.artifact_id
+            or previous.revision != job.revision
+        ):
+            raise UniqueConstraintViolation("analysis job source identity is immutable")
+        if not set(job.requested_analysis_types).issubset(
+            previous.requested_analysis_types
+        ):
+            raise UniqueConstraintViolation(
+                "analysis job requested types may only be narrowed"
+            )
         await self._save(ANALYSIS_JOBS, job.id, job, analysis_job_to_document)
 
     async def list_for_change(self, change_event_id: str) -> tuple[AnalysisJob, ...]:
@@ -693,6 +706,13 @@ class FirestoreAuditRepository(_Repository):
             event.id,
             event,
             source_access_event_to_document,
+        )
+
+    async def get_source_access(self, event_id: str) -> SourceAccessEvent | None:
+        return await self._get(
+            SOURCE_ACCESS_EVENTS,
+            event_id,
+            source_access_event_from_document,
         )
 
     async def list_source_access(

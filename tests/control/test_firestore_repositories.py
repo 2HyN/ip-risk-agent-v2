@@ -11,6 +11,7 @@ from iprisk_contracts import (
     AnalysisType,
     ChangeType,
     ReviewPriority,
+    SourceAccessType,
     SourceArtifactRef,
     SourceChange,
     SourceType,
@@ -31,7 +32,7 @@ from ip_risk_agent.application.repositories import (
     UniqueConstraintViolation,
 )
 from ip_risk_agent.application.workspace_admin import WorkspaceAdministrationService
-from ip_risk_agent.core.audit import AuditEvent, AuditEventType
+from ip_risk_agent.core.audit import AuditEvent, AuditEventType, SourceAccessEvent
 from ip_risk_agent.core.auth import User
 from ip_risk_agent.core.common import ActorType
 from ip_risk_agent.core.artifacts import (
@@ -761,5 +762,61 @@ def test_source_change_intake_is_idempotent_with_firestore_unit_of_work() -> Non
             jobs = await uow.analysis_jobs.list_for_change(first.change_event_id)
             assert event is not None and event.status is ChangeEventStatus.PENDING
             assert len(jobs) == 1 and jobs[0].status is AnalysisJobStatus.QUEUED
+
+    run(scenario())
+
+
+def test_source_access_event_supports_idempotency_lookup_in_firestore() -> None:
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        factory = FirestoreControlUnitOfWorkFactory(backend)
+        event = SourceAccessEvent(
+            id="access-1",
+            risk_workspace_id="vws-1",
+            mount_id="mount-1",
+            artifact_id="artifact-1",
+            access_type=SourceAccessType.PARTIAL_CONTENT,
+            revision="revision-1",
+            content_bytes=128,
+            occurred_at=NOW,
+            analysis_job_id="job-1",
+            provider_request_id="request-1",
+        )
+        async with factory() as uow:
+            await uow.audit.append_source_access(event)
+            await uow.commit()
+        async with factory() as uow:
+            assert await uow.audit.get_source_access(event.id) == event
+            assert await uow.audit.list_source_access("vws-1") == (event,)
+
+    run(scenario())
+
+
+def test_firestore_analysis_job_requested_types_can_only_be_narrowed() -> None:
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        factory = FirestoreControlUnitOfWorkFactory(backend)
+        job = AnalysisJob(
+            "job-routing",
+            "change-routing",
+            "artifact-routing",
+            "revision-routing",
+            (AnalysisType.LICENSE, AnalysisType.PATENT),
+            AnalysisJobStatus.QUEUED,
+            NOW,
+        )
+        async with factory() as uow:
+            await uow.analysis_jobs.add(job)
+            await uow.commit()
+        narrowed = replace(
+            job,
+            requested_analysis_types=(AnalysisType.PATENT,),
+        )
+        async with factory() as uow:
+            await uow.analysis_jobs.save(narrowed)
+            await uow.commit()
+        async with factory() as uow:
+            with pytest.raises(UniqueConstraintViolation, match="only be narrowed"):
+                await uow.analysis_jobs.save(job)
 
     run(scenario())

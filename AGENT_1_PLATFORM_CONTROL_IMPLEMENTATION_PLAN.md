@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 5 — SourceChange intake와 AnalysisJob orchestration |
-| 다음 개발 Phase | Phase 6 — Security Gate |
-| 전체 진행률 | 6/14 Phase 완료 |
+| 현재 완료 Phase | Phase 6 — Security Gate |
+| 다음 개발 Phase | Phase 7 — AnalysisResult intake와 Risk reconciliation |
+| 전체 진행률 | 7/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -16,6 +16,8 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 중대한 문제 사항이 아닌 추가 검토 항목은 Agent 1이 자체 검사와 독자적 판단으로 처리하고 구현·테스트·현황 문서에 기록한다. 개발자가 이후 Phase 지시와 함께 수정 방향을 전달하면 해당 결정을 재검토한다.
 
 이전 Phase에서 후속 Phase 범위라는 이유로 보류한 항목은 별도 지시를 기다리지 않고 해당 Phase 개발 시 자동으로 작업 범위에 포함해 보완·완료한다. 해결 여부와 남은 경계는 최신 작업 현황 로그에 명시한다.
+
+한 번 독자 판단해 추가 검토 목록에 기록한 결정도 후속 Phase의 새 정보와 구현 경계에 비추어 가볍게 재검토한다. 기존보다 합리적이고 범위 내에서 안전한 방안을 발견하면 해당 Phase에서 함께 개선하고 변경 근거를 기록한다.
 
 ## 1. 문서 목적
 
@@ -41,9 +43,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - Agent 1의 `core`에는 Phase 1~2 Domain 모델, identity, lifecycle과 authorization/mutation plan이 구현됐다.
 - `application/repositories`에는 async repository/UoW contract와 transactional in-memory 구현이 있고, `application/workspace_admin`에는 Phase 2 plan의 원자적 적용 service가 구현됐다.
 - `application/process_change`와 `application/analysis_jobs`에는 SourceChange 관계 검증, idempotent Artifact/ChangeEvent/AnalysisJob 저장, raw-free queue port와 retry-safe job orchestration이 구현됐다.
+- `application/security_gate`에는 canonical context 검증, deny-only `.ipriskignore`, file/size policy, secret redaction, deterministic minimization/routing/checksum과 SourceAccess 기록이 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐다. API 영역은 아직 skeleton이다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~5 Domain, policy, repository transaction, Firestore persistence와 SourceChange orchestration test 123개가 구현됐으며 현재 환경에서는 122개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~6 Domain, policy, repository transaction, Firestore persistence, SourceChange orchestration과 Security Gate test 143개가 구현됐으며 현재 환경에서는 142개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -68,7 +71,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 3 | Repository protocol과 In-memory transaction | 완료 |
 | 4 | Firestore canonical persistence | 완료 |
 | 5 | SourceChange intake와 AnalysisJob orchestration | 완료 |
-| 6 | Security Gate | 미구현 |
+| 6 | Security Gate | 완료 |
 | 7 | AnalysisResult intake와 Risk reconciliation | 미구현 |
 | 8 | Human review, History, Audit, Notification | 미구현 |
 | 9 | Google App Login과 Control API | 미구현 |
@@ -374,38 +377,57 @@ pnpm run verify:resolution
 - Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
 - 공식 생성 및 전체 test 후 generated tracked diff: 0
 
-### Phase 6 — Security Gate
+### Phase 6 — Security Gate `[완료]`
 
-1. `build_analysis_artifact(snapshot, job_id)`의 단일 진입점을 만든다.
-2. canonical Mount/SourceWorkspace/Artifact/Job과 Snapshot 식별자·revision을 교차 검증한다.
-3. logical path를 mount alias 기준으로 정규화하고 traversal/잘못된 scope metadata를 거부한다.
-4. VWS global `.ipriskignore` parser를 구현한다.
+1. [x] `build_analysis_artifact(snapshot, job_id)`의 단일 transient 진입점을 만들었다.
+2. [x] canonical Workspace/Mount/SourceConnection/SourceWorkspace/Artifact/ArtifactState/ChangeEvent/Job과 Snapshot 식별자·revision·처리 상태를 교차 검증한다.
+3. [x] logical path를 mount alias 기준 절대 논리 경로로 정규화하고 traversal, local absolute path와 scope metadata 불일치를 거부한다.
+4. [x] VWS global `.ipriskignore` parser를 구현했다.
    - deny-only
    - `*`, `**`, `?`
    - negation `!` 미지원 또는 명시적 validation error
    - source-level deny가 전달되면 VWS allow보다 항상 우선
-5. artifact kind, MIME/type, content scope, byte-size policy를 적용한다.
-6. deterministic secret filter를 구현한다.
+5. [x] artifact kind, MIME/type allow/deny, content scope와 실제 segment/receipt를 포함한 보수적 byte-size policy를 적용한다.
+6. [x] deterministic secret filter를 구현했다.
    - PEM private key block
    - `.env` 형태 credential line
    - common secret/token assignment
    - bearer/token-like value
    - 고정 placeholder와 정확한 `redaction_count`
-7. artifact kind별 deterministic minimization을 적용한다.
+7. [x] artifact kind별 deterministic minimization을 적용했다.
    - MANIFEST/LOCKFILE: size 한도 내 full 가능
    - SOURCE_CODE: changed/context 우선
    - DOCUMENT_TEXT/TEXT: threshold와 segment cap 적용
-8. static analyzer eligibility matrix로 PATENT/LICENSE 요청 목록을 계산한다.
-9. redaction/minimization 이후 canonical serialization을 hash하여 `analysis_input_checksum`을 만든다.
-10. 모든 gate를 통과한 경우에만 `security_context.approved=true`인 Frozen `AnalysisArtifact`를 생성한다.
-11. fetch가 이미 발생했다는 사실은 allow/deny와 무관하게 SourceAccessReceipt에서 idempotent SourceAccessEvent로 기록한다.
-12. SourceSnapshot 또는 원문 segment를 repository, event, error, structured log에 보관하지 않는다.
+8. [x] static analyzer eligibility matrix로 PATENT/LICENSE 요청 목록을 계산하고 AnalysisJob 요청 목록도 결과 교집합으로 축소한다.
+9. [x] redaction/minimization 이후 identity와 routing을 포함한 canonical serialization을 SHA-256 hash하여 `analysis_input_checksum`을 만든다.
+10. [x] 모든 gate를 통과한 경우에만 `security_context.approved=true`인 Frozen `AnalysisArtifact`를 생성한다.
+11. [x] fetch가 이미 발생했다는 사실은 allow/deny와 무관하게 SourceAccessReceipt에서 idempotent SourceAccessEvent로 기록한다.
+12. [x] SourceSnapshot 또는 원문 segment를 repository, event, error, denial result와 structured log에 보관하지 않는다.
+13. [x] policy/scope/type/size deny는 INCONCLUSIVE/DONE, 운영·무결성 오류는 FAILED/FAILED로 Job/Event를 원자 종료하고 동일 receipt 재처리를 idempotent하게 만든다.
 
 완료 조건:
 
-- deny-wins, redaction, minimization, checksum, approved-only 생성이 pure test로 검증된다.
-- ignored/unsupported/oversized 입력에서 Analyzer로 전달 가능한 artifact가 생성되지 않는다.
-- Snapshot 전체를 저장하는 persistence API가 존재하지 않는다.
+- [x] deny-wins, redaction, minimization, checksum, approved-only 생성이 pure test로 검증된다.
+- [x] ignored/unsupported/oversized 입력에서 Analyzer로 전달 가능한 artifact가 생성되지 않는다.
+- [x] Snapshot 전체를 저장하는 persistence API가 존재하지 않는다.
+
+구현 파일군:
+
+- `application/security_gate/policy.py`: versioned Gate policy, source-scope deny input과 resolver port/fake
+- `application/security_gate/ignore.py`: deny-only mount-absolute `.ipriskignore` parser와 `*`/`**`/`?` matcher
+- `application/security_gate/redaction.py`: PEM/env/assignment/Bearer/token pattern의 deterministic redaction
+- `application/security_gate/minimization.py`: kind/segment 우선순위와 UTF-8 byte/segment cap
+- `application/security_gate/service.py`: canonical validation, deny/approval, analyzer routing, checksum, Job 종료와 SourceAccess 원자 기록
+- `application/repositories/**`, `persistence/core_firestore/repositories.py`: SourceAccess direct lookup과 AnalysisJob requested type narrowing invariant
+- `tests/control/test_security_gate.py`: deny-wins, redaction, minimization, routing, checksum, mismatch, 상태 종료와 비영속 경계 검증
+- `tests/control/test_firestore_repositories.py`: SourceAccess lookup 및 requested type narrowing Firestore parity
+
+검증 결과:
+
+- Phase 1~6 Control tests: 142 passed, 1 skipped(emulator 미설정)
+- Frozen Contract + Control tests: 169 passed, 1 skipped(emulator 미설정)
+- Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
+- 공식 생성 및 전체 test 후 generated tracked diff: 0
 
 ### Phase 7 — AnalysisResult intake와 Risk reconciliation
 
@@ -640,7 +662,134 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 
 ## 9. 작업 현황 로그
 
+### 2026-08-16 — 이전 Phase 보완 및 Phase 6 완료
+
+#### 구현 완료 항목
+
+1. `SecurityGateService.build_analysis_artifact()`를 `SourceSnapshot -> AnalysisArtifact | denial`의 유일한 application 경계로 구현했다.
+   - Frozen SourceSnapshot을 입력으로만 사용하고 repository 또는 canonical event에 Snapshot/segment를 저장하지 않는다.
+   - 승인 결과만 `security_context.approved=true`인 Frozen AnalysisArtifact를 반환한다.
+   - denial result에는 enum reason과 content-free SourceAccessEvent ID만 포함한다.
+2. canonical context와 Snapshot을 교차 검증한다.
+   - AnalysisJob, ChangeEvent, Artifact/ArtifactState, Workspace, Mount, SourceWorkspace와 SourceConnection을 한 Unit of Work에서 조회한다.
+   - Job/Event RUNNING/PROCESSING 상태, 모든 aggregate ID 관계, SourceType, ACTIVE/AVAILABLE 상태를 검증한다.
+   - Snapshot의 workspace/mount/source/artifact/display name과 provider-relative path가 canonical Artifact와 일치해야 한다.
+   - Snapshot revision, Job/Event revision과 ArtifactState latest revision이 모두 일치하지 않으면 stale input으로 거부한다.
+   - 빈 checksum과 빈/중복 segment ID도 invalid snapshot으로 거부한다.
+3. deny-only `.ipriskignore` parser와 matcher를 구현했다.
+   - `/mount-alias/path` 형태의 mount-absolute pattern만 허용한다.
+   - `*`, `**`, `?`, comment/blank line을 지원한다.
+   - negation `!`, backslash, NUL, traversal과 잘못된 relative pattern은 거부한다.
+   - deny policy는 case 차이를 이용한 우회를 줄이기 위해 logical path/pattern을 casefold하여 보수적으로 적용한다.
+   - VWS global deny와 ephemeral source-level deny 중 하나라도 일치하면 AnalysisArtifact를 만들지 않는다.
+4. source scope 경계를 typed ephemeral input으로 구현했다.
+   - `SourceScopeDecision.in_scope=false`는 모든 VWS 설정보다 우선해 deny된다.
+   - source-level `.ipriskignore` text는 Gate 처리 중에만 사용하고 Firestore/ChangeEvent/Job에 저장하지 않는다.
+   - 임의 raw metadata dict 대신 boolean scope와 safe denial code만 허용한다.
+5. file/content/size fail-closed policy를 구현했다.
+   - METADATA_ONLY, UNSUPPORTED, 빈 segment와 UNKNOWN/no-route kind는 Analyzer로 보내지 않는다.
+   - image/audio/video/font/archive/binary MIME은 거부하고 text 및 제한된 textual application MIME만 허용한다.
+   - DOCUMENT_TEXT에 한해서 추출된 PDF/RTF/Word MIME을 허용한다.
+   - max size 판단은 신고된 snapshot byte size, SourceAccessReceipt content bytes와 실제 UTF-8 segment bytes 중 최댓값을 사용해 축소 신고 우회를 방지한다.
+6. deterministic secret/credential redaction을 구현했다.
+   - PEM private key block
+   - `.env`/export credential line
+   - quoted/unquoted common secret assignment
+   - Bearer token, GitHub token과 JWT-like token
+   - 모든 치환은 `[REDACTED_SECRET]` placeholder를 사용하고 `redaction_count`를 기록한다.
+   - raw secret은 AnalysisArtifact, denial, SourceAccessEvent 또는 error에 포함되지 않는다.
+7. deterministic data minimization을 구현했다.
+   - SOURCE_CODE는 CHANGED를 우선한 뒤 CONTEXT를 포함하고 불필요한 FULL segment를 제외한다.
+   - MANIFEST/LOCKFILE은 허용 input/output 한도 내 full segment를 유지할 수 있다.
+   - DOCUMENT_TEXT/TEXT는 threshold 초과 시 changed/context 우선 축소를 적용한다.
+   - segment 수, segment별 UTF-8 byte와 전체 output byte cap을 적용하며 multi-byte 문자를 중간에서 손상시키지 않는다.
+8. static analyzer eligibility를 구현하고 Phase 5 임시 결정을 개선했다.
+   - MANIFEST/LOCKFILE -> LICENSE
+   - SOURCE_CODE/DOCUMENT_TEXT -> PATENT
+   - TEXT -> policy가 허용할 때 PATENT
+   - UNKNOWN -> none
+   - Phase 5에서 보수적으로 LICENSE/PATENT를 모두 넣은 Job은 Gate 승인 transaction에서 실제 eligibility 교집합으로 축소된다.
+   - repository save는 Job identity/revision 불변과 requested type의 narrowing-only를 강제해 Phase 7이 비대상 analysis type을 수용하지 않도록 한다.
+9. canonical analysis input checksum을 구현했다.
+   - redaction/minimization 이후 Artifact ID, revision, kind, MIME, analyzer route, content scope와 segment JSON을 canonical serialization한다.
+   - SHA-256 결과를 `sha256:<hex>` 형식으로 SecurityContext에 기록한다.
+   - 같은 input/policy/routing은 같은 checksum을 생성한다.
+10. SourceAccessReceipt 기록을 완료했다.
+    - 승인/ignore/unsupported/oversized/mismatch 여부와 무관하게 fetch가 발생한 사실을 append-only SourceAccessEvent로 기록한다.
+    - event ID는 Job, 실제 Snapshot revision, access type, provider request ID, occurred_at과 byte count에서 결정적으로 생성한다.
+    - repository에 direct lookup을 추가해 같은 receipt 재처리는 중복 event를 만들지 않고 다른 실제 fetch는 별도 event가 된다.
+    - stale Snapshot도 Job revision이 아니라 실제 accessed revision으로 기록한다.
+11. Gate denial과 Phase 5 Job 수명주기를 연결했다.
+    - ignore/source scope/unsupported/type/size/no-analyzer와 stale revision은 INCONCLUSIVE/DONE으로 안전하게 종료한다.
+    - policy unavailable/invalid, canonical context unavailable/mismatch와 invalid Snapshot은 FAILED/FAILED 및 safe reason으로 기록한다.
+    - persisted `SECURITY_GATE:<reason>`을 인식해 동일 receipt redelivery를 idempotent하게 ACK한다.
+    - 승인된 Job은 RUNNING을 유지하여 Integration Worker가 실제 Analyzer 실행 후 Phase 7 result 처리를 계속할 수 있다.
+12. 신규 dependency 없이 Security Gate 및 Firestore parity test를 추가하고 전체 회귀 검증을 통과했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. VWS `.ipriskignore` 편집 내용의 production persistence와 version 갱신 use case는 아직 구현하지 않았다.
+   - Phase 6은 `(workspace_id, security_policy_version)` 기반 `SecurityPolicyResolver` port와 in-memory fake로 Gate를 독립 검증한다. 실제 PUT API, Workspace version 증가, AuditEvent와 Firestore 저장 형태는 Phase 8~9의 Security API/History 범위에서 완료한다.
+2. 실제 Source Plane tracking 결과를 `SourceScopeDecision`으로 변환하는 adapter wiring은 구현하지 않았다.
+   - provider branch/folder/local root scope 판정은 Agent 2 책임이다. Integration Worker는 Agent 2의 content-free 판정만 Gate의 ephemeral input으로 전달해야 한다.
+3. 승인 AnalysisArtifact의 Analyzer 전달과 AnalysisResult 수용은 구현하지 않았다.
+   - 실제 Intelligence 호출은 Integration/Agent 3 경계이며, result identity/status/coverage와 Risk reconciliation은 Phase 7에서 구현한다.
+4. Security Gate denial의 사용자용 history/query/API projection은 구현하지 않았다.
+   - canonical Job/Event safe status는 기록된다. Workspace activity, SourceAccess 조회와 사용자 문구는 Phase 8~9 범위다.
+5. Security policy 변경 AuditEvent는 아직 생성하지 않는다.
+   - Gate는 현재 policy를 소비하는 경계다. 정책 편집 권한, version increment와 `SECURITY_POLICY_CHANGED` event는 Phase 8~9의 원자적 update use case에서 함께 구현한다.
+6. structured logging deny-list와 런타임 telemetry는 아직 구현하지 않았다.
+   - Phase 6 코드에는 raw content logging 자체가 없다. logger integration과 content/token/path 회귀 검사는 Phase 12 hardening에서 완료한다.
+7. 실제 Firestore Emulator production-adapter test는 계속 미실행 상태다.
+   - 현재 환경에 Emulator host가 없어 1건이 skip된다. SourceAccess direct lookup과 Job narrowing은 fake Firestore transaction test를 통과했다.
+8. secret filter는 deterministic accidental-forwarding 방어이며 완전한 DLP가 아니다.
+   - entropy 기반 임의 secret 탐지는 false positive/negative와 비결정성이 커 MVP에 포함하지 않았다. pattern 확장은 실제 유출 사례와 test fixture를 근거로 Phase 12에서 검토한다.
+
+#### 추가 검토가 필요한 사항
+
+1. 이전 Phase의 “Job이 LICENSE/PATENT를 모두 요청” 결정은 Phase 6 정보로 개선했다.
+   - SourceChange만으로 kind를 알 수 없다는 판단은 유지하되, Snapshot kind가 검증되는 Gate에서 Job 요청 목록을 narrowing-only로 영속한다. 이로써 AnalysisArtifact와 Phase 7 canonical Job 허용 범위가 일치한다.
+2. Gate denial이 RUNNING Job을 방치하지 않도록 상태 종료 정책을 추가했다.
+   - 보안/제품상 정상 skip은 INCONCLUSIVE, 재처리 가치가 있는 운영·무결성 문제는 FAILED로 분리했다. stale revision은 obsolete 작업이므로 재시도 loop 대신 INCONCLUSIVE로 종료한다.
+3. `.ipriskignore`는 deny-only이므로 case-insensitive matching을 사용한다.
+   - case-sensitive provider에서 의도보다 넓게 차단할 수 있지만 허용 우회보다 안전한 fail-closed 선택이다. 향후 provider별 case semantics를 도입하더라도 VWS deny가 약화되지 않는 방향만 허용한다.
+4. MIME이 명시된 경우 allowlist 성격으로 처리하지만 `mime_type=None`은 artifact kind와 text segment 검증을 전제로 허용한다.
+   - Frozen Contract에서 MIME은 optional이고 일부 provider가 제공하지 않을 수 있기 때문이다. Phase 12에서 실제 Connector 출력 품질을 확인해 provider/kind별 MIME 필수화를 강화할 수 있다.
+5. input size는 세 독립 값 중 최댓값을 사용한다.
+   - Connector가 byte_size를 잘못 축소해도 receipt 또는 실제 segment bytes가 한도를 넘으면 deny된다. 반대로 receipt가 원문 전체 access byte를 나타내고 전달 segment가 작아도 보수적으로 원문 규모 기준 deny가 적용된다.
+6. redaction은 minimization보다 먼저 실행한다.
+   - 최소화로 버려질 segment도 먼저 필터링하므로 향후 selection 규칙 변경이 secret을 되살리지 않는다. redaction_count는 최종 전달 segment뿐 아니라 검사한 전체 Snapshot에서 발견한 수를 뜻한다.
+7. SourceAccessEvent는 실제 Snapshot revision을 기록한다.
+   - stale/mismatch deny에서도 실제 읽은 revision을 숨기지 않는다. canonical Job revision과의 차이는 denial reason 및 Job state로 분리해 추적한다.
+8. VWS policy content는 현재 resolver port 뒤에 있다.
+   - 정확히 16개 canonical collection 제약 때문에 임의 security policy collection을 추가하지 않았다. Phase 9에서 RiskWorkspace document 내 안전한 policy value 또는 versioned external config 중 API 원자성과 audit를 만족하는 저장 형태를 재검토한다.
+9. AnalysisArtifact는 의도적으로 canonical DB에 저장하지 않는다.
+   - redacted/minimized content도 장기 저장 필요성이 명세에 없고 checksum으로 재현 identity를 추적할 수 있다. Analyzer 전달은 transient object로 유지한다.
+
+#### 검증 결과
+
+```text
+pnpm run generate                                      PASS
+tests/control                                          142 passed, 1 skipped
+shared/contracts/tests + tests/control                 169 passed, 1 skipped
+Security Gate focused tests                            18 passed
+Firestore repository/security parity tests             14 passed
+Python compileall                                      PASS
+pip check                                              PASS
+pnpm run typecheck                                     PASS
+pnpm run verify:resolution                             PASS
+generated files tracked diff after generation/tests   NONE
+```
+
+#### 제안 커밋 메시지
+
+```text
+feat: implement transient Security Gate
+```
+
 ### 2026-08-16 — 이전 Phase 보완 및 Phase 5 완료
+
+아래 미구현/검토 항목은 Phase 5 종료 당시의 상태다. analyzer eligibility/Job narrowing, SourceAccessEvent와 Gate denial 상태 종료 등 Phase 6에서 해결된 내용은 위 최신 로그를 우선한다.
 
 #### 구현 완료 항목
 
