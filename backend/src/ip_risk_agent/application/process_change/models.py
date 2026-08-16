@@ -85,3 +85,24 @@ class ChangeEvent:
             "safe_metadata",
             freeze_safe_mapping(self.safe_metadata, "change_event.safe_metadata"),
         )
+        if self.last_error_safe is not None:
+            object.__setattr__(
+                self,
+                "last_error_safe",
+                require_non_empty(self.last_error_safe, "change_event.last_error_safe"),
+            )
+        if self.status is ChangeEventStatus.PENDING:
+            if self.last_error_safe is not None:
+                raise DomainInvariantError("PENDING change event cannot have last_error_safe")
+        elif self.status is ChangeEventStatus.PROCESSING:
+            if self.attempts < 1 or self.last_error_safe is not None:
+                raise DomainInvariantError(
+                    "PROCESSING change event requires an attempt and no last_error_safe"
+                )
+        elif self.status is ChangeEventStatus.FAILED:
+            if self.attempts < 1 or self.last_error_safe is None:
+                raise DomainInvariantError(
+                    "FAILED change event requires an attempt and last_error_safe"
+                )
+        elif self.last_error_safe is not None:
+            raise DomainInvariantError("DONE change event cannot have last_error_safe")

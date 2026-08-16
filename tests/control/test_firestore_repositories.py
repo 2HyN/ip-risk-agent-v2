@@ -7,9 +7,24 @@ from datetime import datetime, timezone
 
 import pytest
 
-from iprisk_contracts import AnalysisType, ChangeType, ReviewPriority, SourceType
+from iprisk_contracts import (
+    AnalysisType,
+    ChangeType,
+    ReviewPriority,
+    SourceArtifactRef,
+    SourceChange,
+    SourceType,
+)
 from ip_risk_agent.application.analysis_jobs import AnalysisJob, AnalysisJobStatus
-from ip_risk_agent.application.process_change import ChangeEvent, ChangeEventStatus
+from ip_risk_agent.application.process_change import (
+    ChangeEvent,
+    ChangeEventStatus,
+    InMemoryTaskEnqueuer,
+)
+from ip_risk_agent.application.process_change.service import (
+    SourceChangeDisposition,
+    SourceChangeIntakeService,
+)
 from ip_risk_agent.application.repositories import (
     ConcurrencyConflictError,
     InMemoryControlStore,
@@ -31,7 +46,14 @@ from ip_risk_agent.core.memberships import (
     MembershipStatus,
     membership_id_for,
 )
-from ip_risk_agent.core.mounts import MountStatus, WorkspaceMount
+from ip_risk_agent.core.mounts import (
+    MountStatus,
+    SourceConnection,
+    SourceConnectionStatus,
+    SourceWorkspace,
+    SourceWorkspaceStatus,
+    WorkspaceMount,
+)
 from ip_risk_agent.core.risk import (
     ReviewDisposition,
     Risk,
@@ -596,5 +618,148 @@ def test_optimistic_risk_review_update_and_event_reject_stale_transaction() -> N
             assert current is not None
             assert current.review_disposition is ReviewDisposition.MONITORING
             assert len(await verification.risks.list_events("risk-1")) == 1
+
+    run(scenario())
+
+
+def test_artifact_move_transfers_firestore_unique_sentinel_atomically() -> None:
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        factory = FirestoreControlUnitOfWorkFactory(backend)
+        artifact = Artifact(
+            "artifact-stable",
+            "vws-1",
+            "mount-1",
+            "source-1",
+            SourceType.GITHUB,
+            "path:old.py",
+            "old.py",
+            "Backend/old.py",
+            ArtifactStatus.ACTIVE,
+            NOW,
+            NOW,
+        )
+        state = ArtifactState(
+            artifact.id,
+            "revision-1",
+            None,
+            ArtifactAvailability.AVAILABLE,
+            NOW,
+        )
+        async with factory() as uow:
+            await uow.artifacts.add(artifact, state)
+            await uow.commit()
+
+        moved = replace(
+            artifact,
+            source_artifact_id="path:new.py",
+            display_name="new.py",
+            logical_path="Backend/new.py",
+        )
+        async with factory() as uow:
+            await uow.artifacts.save(moved)
+            await uow.commit()
+
+        async with factory() as uow:
+            assert await uow.artifacts.get_by_source_identity(
+                "source-1", "path:old.py"
+            ) is None
+            assert await uow.artifacts.get_by_source_identity(
+                "source-1", "path:new.py"
+            ) == moved
+
+    run(scenario())
+
+
+def test_source_change_intake_is_idempotent_with_firestore_unit_of_work() -> None:
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        factory = FirestoreControlUnitOfWorkFactory(backend)
+        queue = InMemoryTaskEnqueuer()
+        async with factory() as uow:
+            await uow.workspaces.add(
+                RiskWorkspace(
+                    "vws-intake",
+                    "Intake workspace",
+                    "owner-intake",
+                    "security-v1",
+                    "retention-v1",
+                    NOW,
+                    NOW,
+                )
+            )
+            await uow.source_metadata.add_connection(
+                SourceConnection(
+                    "connection-intake",
+                    SourceType.GITHUB,
+                    "manager-intake",
+                    SourceConnectionStatus.ACTIVE,
+                    NOW,
+                    NOW,
+                )
+            )
+            await uow.source_metadata.add_source_workspace(
+                SourceWorkspace(
+                    "source-intake",
+                    "connection-intake",
+                    SourceType.GITHUB,
+                    "repo-intake",
+                    "org/repo",
+                    SourceWorkspaceStatus.ACTIVE,
+                    NOW,
+                    NOW,
+                )
+            )
+            await uow.mounts.add(
+                WorkspaceMount(
+                    "mount-intake",
+                    "vws-intake",
+                    "source-intake",
+                    "Backend",
+                    "manager-intake",
+                    "connection-intake",
+                    MountStatus.ACTIVE,
+                    NOW,
+                    NOW,
+                )
+            )
+            await uow.commit()
+
+        change = SourceChange(
+            contract_version="1",
+            event_id="source-event-intake",
+            provider_event_id="provider-event-intake",
+            event_fingerprint="fingerprint-intake",
+            risk_workspace_id="vws-intake",
+            mount_id="mount-intake",
+            source_workspace_id="source-intake",
+            source_type=SourceType.GITHUB,
+            artifact=SourceArtifactRef(
+                source_artifact_id="repo:path:src/main.py",
+                display_name="main.py",
+                path_hint="src/main.py",
+            ),
+            change_type=ChangeType.CREATE,
+            revision="revision-intake",
+            observed_at=NOW,
+            safe_metadata={},
+        )
+        intake = SourceChangeIntakeService(
+            unit_of_work_factory=factory,
+            task_enqueuer=queue,
+            clock=lambda: NOW,
+        )
+        first = await intake.register_source_change(change)
+        duplicate = await intake.register_source_change(change)
+        assert first.disposition is SourceChangeDisposition.CREATED
+        assert duplicate.disposition is SourceChangeDisposition.DUPLICATE_PENDING
+        assert first.change_event_id == duplicate.change_event_id
+        assert first.artifact_id == duplicate.artifact_id
+        assert queue.pending_ids == (first.change_event_id,)
+        async with factory() as uow:
+            event = await uow.change_events.get(first.change_event_id)
+            jobs = await uow.analysis_jobs.list_for_change(first.change_event_id)
+            assert event is not None and event.status is ChangeEventStatus.PENDING
+            assert len(jobs) == 1 and jobs[0].status is AnalysisJobStatus.QUEUED
 
     run(scenario())

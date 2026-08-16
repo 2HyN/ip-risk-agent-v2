@@ -14,8 +14,8 @@ from typing import TypeVar
 
 from iprisk_contracts import AnalysisType
 
-from ip_risk_agent.application.analysis_jobs import AnalysisJob
-from ip_risk_agent.application.process_change import ChangeEvent
+from ip_risk_agent.application.analysis_jobs.models import AnalysisJob
+from ip_risk_agent.application.process_change.models import ChangeEvent
 from ip_risk_agent.core.artifacts import Artifact, ArtifactState
 from ip_risk_agent.core.audit import AuditEvent, SourceAccessEvent
 from ip_risk_agent.core.auth import User
@@ -385,13 +385,15 @@ class InMemoryArtifactRepository(_Repository):
         previous = self._state.artifacts.get(artifact.id)
         if previous is None:
             raise _missing("artifact", artifact.id)
+        if previous.source_workspace_id != artifact.source_workspace_id:
+            raise UniqueConstraintViolation("an artifact cannot move between source workspaces")
         previous_key = (previous.source_workspace_id, previous.source_artifact_id)
         source_key = (artifact.source_workspace_id, artifact.source_artifact_id)
-        if previous_key != source_key:
-            raise UniqueConstraintViolation("artifact source identity is immutable")
         source_owner = self._state.artifacts_by_source_identity.get(source_key)
         if source_owner not in (None, artifact.id):
             raise _duplicate("source artifact identity", source_key)
+        if previous_key != source_key:
+            self._state.artifacts_by_source_identity.pop(previous_key, None)
         self._state.artifacts[artifact.id] = artifact
         self._state.artifacts_by_source_identity[source_key] = artifact.id
 

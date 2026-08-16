@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 4 — Firestore canonical persistence |
-| 다음 개발 Phase | Phase 5 — SourceChange intake와 AnalysisJob orchestration |
-| 전체 진행률 | 5/14 Phase 완료 |
+| 현재 완료 Phase | Phase 5 — SourceChange intake와 AnalysisJob orchestration |
+| 다음 개발 Phase | Phase 6 — Security Gate |
+| 전체 진행률 | 6/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -14,6 +14,8 @@
 Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 커밋과 push를 실행하지 않고, 매 개발 요청 종료 시 제안 커밋 메시지만 제공한다.
 
 중대한 문제 사항이 아닌 추가 검토 항목은 Agent 1이 자체 검사와 독자적 판단으로 처리하고 구현·테스트·현황 문서에 기록한다. 개발자가 이후 Phase 지시와 함께 수정 방향을 전달하면 해당 결정을 재검토한다.
+
+이전 Phase에서 후속 Phase 범위라는 이유로 보류한 항목은 별도 지시를 기다리지 않고 해당 Phase 개발 시 자동으로 작업 범위에 포함해 보완·완료한다. 해결 여부와 남은 경계는 최신 작업 현황 로그에 명시한다.
 
 ## 1. 문서 목적
 
@@ -38,9 +40,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - Backend는 `backend/src/ip_risk_agent` 아래에 Control, Source, Intelligence, Integration namespace가 분리되어 있다.
 - Agent 1의 `core`에는 Phase 1~2 Domain 모델, identity, lifecycle과 authorization/mutation plan이 구현됐다.
 - `application/repositories`에는 async repository/UoW contract와 transactional in-memory 구현이 있고, `application/workspace_admin`에는 Phase 2 plan의 원자적 적용 service가 구현됐다.
+- `application/process_change`와 `application/analysis_jobs`에는 SourceChange 관계 검증, idempotent Artifact/ChangeEvent/AnalysisJob 저장, raw-free queue port와 retry-safe job orchestration이 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐다. API 영역은 아직 skeleton이다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~4 Domain, policy, repository transaction, mapper와 Firestore persistence test 104개가 구현됐으며 현재 환경에서는 103개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~5 Domain, policy, repository transaction, Firestore persistence와 SourceChange orchestration test 123개가 구현됐으며 현재 환경에서는 122개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -64,7 +67,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 2 | 인증, Role/Permission, VWS와 Mount 권한 | 완료 |
 | 3 | Repository protocol과 In-memory transaction | 완료 |
 | 4 | Firestore canonical persistence | 완료 |
-| 5 | SourceChange intake와 AnalysisJob orchestration | 미구현 |
+| 5 | SourceChange intake와 AnalysisJob orchestration | 완료 |
 | 6 | Security Gate | 미구현 |
 | 7 | AnalysisResult intake와 Risk reconciliation | 미구현 |
 | 8 | Human review, History, Audit, Notification | 미구현 |
@@ -336,22 +339,40 @@ pnpm run verify:resolution
 - `pnpm run verify:resolution`: 통과
 - 공식 생성 및 전체 test 후 generated tracked diff: 0
 
-### Phase 5 — SourceChange intake와 AnalysisJob orchestration
+### Phase 5 — SourceChange intake와 AnalysisJob orchestration `[완료]`
 
-1. `register_source_change(SourceChange)`를 구현한다.
-2. `risk_workspace_id`, `mount_id`, `source_workspace_id`, `source_type` 관계와 Mount 처리 가능 상태를 검증한다.
-3. `event_fingerprint`로 idempotent ChangeEvent를 생성하고 중복 DONE 이벤트는 harmless ACK한다.
-4. SourceArtifactRef를 stable Artifact에 resolve/upsert한다.
-5. CREATE/UPDATE/MOVE/DELETE semantics를 적용하며 MOVE continuity에는 `previous_artifact`를 사용한다.
-6. DELETE에서 Artifact availability만 바꾸고 Risk reconciliation은 호출하지 않는다.
-7. 분석 가능한 변경에는 AnalysisJob/queue record를 만들고, queue port에는 `change_event_id`만 전달한다.
-8. claim/start/finish/fail transition을 retry-safe compare-and-set으로 구현한다.
-9. Cloud Tasks SDK는 직접 wiring하지 않고 `TaskEnqueuer` protocol과 fake를 제공한다.
+1. [x] `register_source_change(SourceChange)`를 persistence-neutral application service로 구현했다.
+2. [x] `risk_workspace_id`, `mount_id`, `source_workspace_id`, `source_type`, SourceConnection 관계와 각 ACTIVE 상태를 transaction 안에서 검증한다.
+3. [x] `event_fingerprint`로 idempotent ChangeEvent를 생성하고 PENDING/PROCESSING/DONE/FAILED 중복 상태를 일관된 ACK/재큐잉 정책으로 처리한다.
+4. [x] SourceArtifactRef를 stable Artifact에 resolve/upsert하고 ArtifactState의 revision/availability를 함께 갱신한다.
+5. [x] CREATE/UPDATE/MOVE/DELETE semantics를 적용하며 MOVE continuity에는 `previous_artifact`를 사용한다.
+6. [x] DELETE에서는 Artifact availability와 ChangeEvent만 기록하고 AnalysisJob/Risk reconciliation/queue를 호출하지 않는다.
+7. [x] 분석 대상 변경에는 deterministic AnalysisJob을 같은 transaction에 만들고 commit 후 queue port에 `change_event_id`만 전달한다.
+8. [x] claim/start/finish/fail/retry transition과 ChangeEvent/AnalysisJob 상태 쌍을 retry-safe compare-and-set 경로로 구현했다.
+9. [x] Cloud Tasks SDK는 직접 wiring하지 않고 idempotent 구현을 요구하는 `TaskEnqueuer` protocol과 deterministic fake를 제공한다.
+10. [x] Phase 3~4에서 보류했던 SourceChange referential integrity, AnalysisJob CAS/queue, Artifact MOVE identity-index 이전을 in-memory와 Firestore repository에 보완했다.
 
 완료 조건:
 
-- 동일 SourceChange의 반복 및 동시 수신이 ChangeEvent, Job, Risk를 중복 생성하지 않는다.
-- queue payload에 raw source나 provider credential이 없다.
+- [x] 동일 SourceChange의 반복 및 동시 수신이 ChangeEvent, Job, Artifact/Risk identity를 중복 생성하지 않는다.
+- [x] queue payload에는 raw source나 provider credential 없이 canonical `change_event_id`만 존재한다.
+
+구현 파일군:
+
+- `application/process_change/service.py`: SourceChange 관계/status 검증, Artifact/ChangeEvent/Job 원자 저장, duplicate/retry와 enqueue-after-commit
+- `application/process_change/{models,transitions,queue}.py`: canonical 상태 불변식, 순수 transition, raw-free queue port/fake
+- `application/analysis_jobs/{models,transitions,service}.py`: deterministic Job identity와 claim/finish/fail/retry orchestration
+- `application/repositories/in_memory.py`: MOVE 시 같은 SourceWorkspace 내 source identity index의 원자 이전
+- `persistence/core_firestore/repositories.py`: MOVE unique sentinel claim/release를 포함한 Firestore 원자 이전
+- `tests/control/test_source_change_intake.py`: intake, duplicate/concurrency, queue recovery, MOVE/DELETE, 상태 관계와 job lifecycle 검증
+- `tests/control/test_firestore_repositories.py`: MOVE sentinel 및 Firestore UoW 기반 intake idempotency 검증
+
+검증 결과:
+
+- Phase 1~5 Control tests: 122 passed, 1 skipped(emulator 미설정)
+- Frozen Contract + Control tests: 149 passed, 1 skipped(emulator 미설정)
+- Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
+- 공식 생성 및 전체 test 후 generated tracked diff: 0
 
 ### Phase 6 — Security Gate
 
@@ -619,7 +640,120 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 
 ## 9. 작업 현황 로그
 
+### 2026-08-16 — 이전 Phase 보완 및 Phase 5 완료
+
+#### 구현 완료 항목
+
+1. Phase 3~4에서 후속 범위로 보류했던 SourceChange referential integrity를 완료했다.
+   - RiskWorkspace, WorkspaceMount, SourceWorkspace, SourceConnection 존재 여부를 확인한다.
+   - VWS/Mount/SourceWorkspace/Connection의 상호 ID 관계와 SourceType 일치를 검증한다.
+   - Workspace, Mount, SourceWorkspace, SourceConnection이 모두 ACTIVE인 경우에만 새 변경을 처리한다.
+   - 검증 실패나 revision/path 오류가 발생하면 staged Artifact/Event/Job 전체가 rollback되고 queue 호출도 발생하지 않는다.
+2. content-free `SourceChangeIntakeService.register_source_change()`를 구현했다.
+   - `event_fingerprint`에서 deterministic ChangeEvent ID를 만들고 unique lookup을 먼저 수행한다.
+   - 신규 분석 변경은 Artifact/ArtifactState, ChangeEvent와 AnalysisJob을 같은 Unit of Work에서 commit한다.
+   - AnalysisJob ID는 ChangeEvent ID에서 결정적으로 생성한다.
+   - `provider_event_id`, revision, source identity 등 의미 필드가 다른 fingerprint 재사용은 collision으로 거부한다.
+   - persistence commit이 성공한 뒤에만 queue를 호출한다.
+3. duplicate 및 동시 전달 정책을 상태별로 고정했다.
+   - PENDING/QUEUED 중복은 동일 ChangeEvent ID를 다시 enqueue하여 이전 enqueue 실패를 회복한다.
+   - PROCESSING/RUNNING은 이미 worker가 소유한 것으로 보고 enqueue하지 않는다.
+   - DONE/SUCCEEDED 또는 DONE/INCONCLUSIVE는 무해하게 ACK한다.
+   - FAILED/FAILED는 정책이 허용하면 두 record를 원자적으로 PENDING/QUEUED로 되돌린 뒤 enqueue한다.
+   - 불가능한 ChangeEvent/AnalysisJob 상태 조합은 손상된 canonical state로 보고 명시적으로 거부한다.
+4. Phase 3에서 보류했던 AnalysisJob claim/finish/fail CAS와 retry 경로를 완료했다.
+   - claim은 ChangeEvent와 AnalysisJob을 각각 PROCESSING/RUNNING으로 한 transaction에서 전환하고 attempt를 증가시킨다.
+   - finish는 SUCCEEDED/INCONCLUSIVE와 DONE을, fail은 FAILED/FAILED 및 safe failure를 함께 기록한다.
+   - 같은 terminal 요청은 idempotent하고 잘못된 상태에서의 transition은 거부한다.
+   - 수동 retry도 상태 commit 후 injected TaskEnqueuer로 재큐잉하며, 이미 PENDING/QUEUED인 retry 호출은 복구 목적으로 다시 enqueue한다.
+5. raw-free queue boundary를 구현했다.
+   - `TaskEnqueuer.enqueue_change(change_event_id)` 외 payload surface를 노출하지 않는다.
+   - 구현체는 ChangeEvent ID를 task identity로 사용해 idempotent해야 함을 protocol contract에 명시했다.
+   - in-memory fake는 pending ID를 중복 제거하면서 enqueue 시도 이력과 주입 가능한 실패를 제공한다.
+6. CREATE/UPDATE semantics를 구현했다.
+   - 동일 `(source_workspace_id, source_artifact_id)`는 기존 canonical Artifact를 upsert한다.
+   - mount alias와 provider-relative path로 logical path를 구성하고 absolute Windows/POSIX path 및 traversal을 거부한다.
+   - 분석 대상 변경은 non-empty revision을 필수로 하며 ArtifactState를 AVAILABLE로 갱신한다.
+7. MOVE continuity와 Phase 3~4 repository identity 규칙을 보완했다.
+   - `previous_artifact`가 없거나 이전 source identity가 존재하지 않으면 MOVE를 거부한다.
+   - 같은 SourceWorkspace 안에서 내부 Artifact ID와 연결된 Risk ID를 보존한 채 현재 source identity/path만 이전한다.
+   - in-memory secondary index와 Firestore unique sentinel은 새 identity claim 및 이전 identity release를 같은 transaction에 수행한다.
+   - 다른 SourceWorkspace로 Artifact를 이동하는 repository save는 계속 거부한다.
+   - 이동 전 source identity가 새 Artifact에 재사용될 때 기존 Artifact의 보존 ID와 충돌하지 않도록 event fingerprint 기반 deterministic instance ID fallback을 적용했다.
+8. DELETE semantics를 구현했다.
+   - ArtifactState availability를 DELETED로 기록하고 ChangeEvent를 즉시 DONE으로 저장한다.
+   - AnalysisJob과 queue 요청을 생성하지 않으며 기존 Risk lifecycle/review state를 변경하지 않는다.
+   - 기존 Artifact가 없는 DELETE도 canonical tombstone Artifact를 남겨 관찰 사실과 unavailable 상태를 보존한다.
+9. Phase 1 모델의 상태 불변식을 보강했다.
+   - ChangeEvent의 PROCESSING/FAILED attempt 및 safe error 조건을 강제한다.
+   - AnalysisJob의 QUEUED/RUNNING/terminal timestamp와 FAILED/SUCCEEDED failure 조건을 강제한다.
+   - pure transition 함수가 timestamp 정규화와 허용된 상태 이동만 수행한다.
+10. persistence parity와 회귀 테스트를 추가했다.
+    - in-memory에서 duplicate/concurrent delivery, queue failure recovery, failed retry, MOVE/DELETE, path/revision rollback과 job lifecycle을 검증한다.
+    - Firestore fake backend에서 Artifact identity sentinel 이전과 실제 SourceChangeIntakeService의 반복 수신 idempotency를 검증한다.
+    - Phase 1~4 기존 suite를 포함한 전체 Control 및 Frozen Contract test를 통과했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. Static analyzer eligibility와 artifact kind별 requested analysis type 축소는 아직 구현하지 않았다.
+   - SourceChange에는 canonical ArtifactKind/content 판별 정보가 없으므로 Phase 5에서는 configured default인 LICENSE/PATENT를 결정적으로 요청한다. Phase 6 Security Gate가 SourceSnapshot의 kind/MIME/policy를 검증한 뒤 실제 analyzer eligibility를 제한한다.
+2. SourceSnapshot fetch와 provider 원문 접근은 구현하지 않았다.
+   - 명세대로 Agent 2 SourceAdapter와 Integration Worker의 책임이다. Agent 1은 content-free ChangeEvent ID만 queue boundary로 전달한다.
+3. Cloud Tasks production adapter, queue 이름/region, retry/backoff/dead-letter 설정은 구현하지 않았다.
+   - Agent 1은 SDK 독립 `TaskEnqueuer` port와 fake까지만 소유한다. 실제 adapter와 service account/config wiring은 Integration 범위다.
+4. AnalysisResult별 multi-analyzer aggregate와 최종 AnalysisJob 판정은 구현하지 않았다.
+   - Phase 5의 Job은 요청 목록과 실행 수명주기만 관리한다. analysis type별 result 수용, partial/provider failure 및 aggregate completion은 Phase 7에서 Risk reconciliation과 함께 완료한다.
+5. SourceAccessEvent는 아직 생성하지 않는다.
+   - Phase 5 intake는 원문을 읽지 않으므로 source access가 발생하지 않는다. Phase 6에서 Worker가 전달한 SourceAccessReceipt를 fetch 발생 사실 기준으로 기록한다.
+6. 실제 Firestore Emulator production-adapter test는 계속 미실행 상태다.
+   - 현재 환경에 `FIRESTORE_EMULATOR_HOST`가 없어 1건이 skip된다. fake backend의 Phase 5 transaction/idempotency는 통과했으며 Integration/CI가 host를 제공하면 기존 emulator gate가 실행된다.
+7. transactional outbox용 별도 canonical record는 추가하지 않았다.
+   - 명세가 정확히 16개 canonical collection을 고정하고 별도 queue/outbox collection을 정의하지 않는다. commit 후 enqueue 실패는 persisted PENDING/QUEUED와 동일 SourceChange redelivery 또는 명시적 retry 호출로 회복한다.
+
+#### 추가 검토가 필요한 사항
+
+1. queue delivery는 at-least-once이고 `change_event_id`가 유일한 task identity다.
+   - commit과 외부 Cloud Tasks 호출을 하나의 transaction으로 묶지 않는다. production TaskEnqueuer는 같은 ChangeEvent ID의 반복 enqueue를 중복 작업으로 만들지 않아야 하며, worker claim CAS가 최종 중복 실행 방어선이다.
+2. FAILED 자동 재처리는 현재 기본 활성화이며 횟수 제한은 application intake가 아니라 queue 운영 정책에 둔다.
+   - ChangeEvent attempts는 실제 claim 횟수를 누적한다. 최대 retry/backoff/dead-letter와 운영 알림은 Integration queue config 및 Phase 12 관측성에서 확정한다.
+3. MOVE는 SourceWorkspace 내부 identity continuity만 허용한다.
+   - Artifact의 VWS/SourceWorkspace 경계를 넘는 이동은 새로운 canonical Artifact로 취급해야 한다. provider가 잘못된 previous identity를 전달하면 기존 Risk를 임의 연결하지 않고 거부한다.
+4. 기본 Artifact ID는 기존 `(source_workspace_id, source_artifact_id)` 결정식을 유지한다.
+   - 단, MOVE 이후 해제된 이전 identity가 새 파일에 재사용되면 원래 ID는 이동 Artifact가 계속 소유하므로 `(source workspace, source artifact, first event fingerprint)` 기반 보조 ID를 사용한다. 이 예외는 이동 Artifact/Risk continuity와 경로 재사용을 동시에 보장한다.
+5. 알려지지 않은 Artifact의 DELETE는 tombstone을 생성한다.
+   - out-of-order webhook과 최초 관찰이 DELETE인 경우에도 event와 unavailable 상태를 보존하기 위한 결정이다. Risk는 없으므로 생성·해소되지 않으며 이후 CREATE가 같은 canonical Artifact를 AVAILABLE로 되돌릴 수 있다.
+6. ChangeEvent 자체를 최소 operational record로 사용하고 SourceChange마다 AuditEvent를 추가하지 않는다.
+   - 현재 AuditEvent taxonomy는 VWS 운영/보안 활동 중심이며 원문 없는 source processing 이력은 ChangeEvent status/attempt/error에 기록한다. Phase 8/12에서 ANALYSIS_FAILED 운영 알림·Audit 연결을 추가한다.
+7. `safe_metadata`는 Frozen Contract가 보장한 JSON-safe content-free 값만 ChangeEvent에 보존한다.
+   - token/raw source/local absolute path는 Contract에서 금지되며 queue에는 metadata도 전달하지 않는다. Phase 12 logging deny-list가 이 경계를 다시 검증한다.
+8. SourceChange intake의 optimistic conflict 재시도는 최대 3회다.
+   - 외부 side effect 이전의 persistence 구간만 재실행하므로 안전하다. queue는 성공 commit 뒤 한 번 호출되며 duplicate redelivery는 idempotent enqueue를 수행한다.
+9. package root에서는 service를 재-export하지 않고 명시적 `application.*.service` import를 사용한다.
+   - repository protocol이 aggregate model을 참조하는 현재 dependency graph에서 service까지 package root에 export하면 순환 import가 생긴다. Phase 10 public facade가 Integration용 안정 surface를 제공할 예정이다.
+
+#### 검증 결과
+
+```text
+pnpm run generate                                      PASS
+tests/control                                          122 passed, 1 skipped
+shared/contracts/tests + tests/control                 149 passed, 1 skipped
+Phase 5 focused in-memory/Firestore tests               29 passed
+Python compileall                                      PASS
+pip check                                              PASS
+pnpm run typecheck                                     PASS
+pnpm run verify:resolution                             PASS
+generated files tracked diff after generation/tests   NONE
+```
+
+#### 제안 커밋 메시지
+
+```text
+feat: implement idempotent SourceChange orchestration
+```
+
 ### 2026-08-16 — 이전 Phase 보완 및 Phase 4 완료
+
+아래 미구현/검토 항목은 Phase 4 종료 당시의 상태다. SourceChange 관계 검증, Artifact MOVE identity 이전과 AnalysisJob queue/CAS 등 Phase 5에서 해결된 내용은 위 최신 로그를 우선한다.
 
 #### 구현 완료 항목
 
@@ -746,7 +880,7 @@ feat: implement canonical Firestore persistence
 
 ### 2026-08-16 — Phase 2 보완 및 Phase 3 완료
 
-아래 미구현/검토 항목은 Phase 3 종료 당시의 상태다. Firestore mapper, persisted discriminator, 공용 repository contract scenario와 emulator 실행 경로 등 Phase 4에서 해결된 내용은 위 최신 로그를 우선한다.
+아래 미구현/검토 항목은 Phase 3 종료 당시의 상태다. Firestore mapper/persistence는 Phase 4, SourceChange 관계 검증과 AnalysisJob queue/CAS는 Phase 5에서 해결됐으므로 위 최신 로그를 우선한다.
 
 #### 구현 완료 항목
 

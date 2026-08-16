@@ -14,8 +14,8 @@ from iprisk_contracts import (
     SourceAccessType,
     SourceType,
 )
-from ip_risk_agent.application.analysis_jobs import AnalysisJob, AnalysisJobStatus
-from ip_risk_agent.application.process_change import ChangeEvent, ChangeEventStatus
+from ip_risk_agent.application.analysis_jobs.models import AnalysisJob, AnalysisJobStatus
+from ip_risk_agent.application.process_change.models import ChangeEvent, ChangeEventStatus
 from ip_risk_agent.core.artifacts import (
     Artifact,
     ArtifactAvailability,

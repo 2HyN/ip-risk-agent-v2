@@ -6,8 +6,8 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from iprisk_contracts import AnalysisType
-from ip_risk_agent.application.analysis_jobs import AnalysisJob
-from ip_risk_agent.application.process_change import ChangeEvent
+from ip_risk_agent.application.analysis_jobs.models import AnalysisJob
+from ip_risk_agent.application.process_change.models import ChangeEvent
 from ip_risk_agent.application.repositories import (
     RecordNotFoundError,
     TransactionClosedError,
@@ -470,18 +470,36 @@ class FirestoreArtifactRepository(_Repository):
 
     async def save(self, artifact: Artifact) -> None:
         previous = await _required(self.get(artifact.id), "artifact", artifact.id)
-        if (
-            previous.source_workspace_id != artifact.source_workspace_id
-            or previous.source_artifact_id != artifact.source_artifact_id
-        ):
-            raise UniqueConstraintViolation("artifact source identity is immutable")
-        await claim_unique_key(
-            self._session,
-            collection=ARTIFACTS,
-            namespace="source-identity",
-            components=(artifact.source_workspace_id, artifact.source_artifact_id),
-            owner_document_id=artifact.id,
+        if previous.source_workspace_id != artifact.source_workspace_id:
+            raise UniqueConstraintViolation("an artifact cannot move between source workspaces")
+        previous_identity = (
+            previous.source_workspace_id,
+            previous.source_artifact_id,
         )
+        current_identity = (artifact.source_workspace_id, artifact.source_artifact_id)
+        if previous_identity != current_identity:
+            await claim_unique_key(
+                self._session,
+                collection=ARTIFACTS,
+                namespace="source-identity",
+                components=current_identity,
+                owner_document_id=artifact.id,
+            )
+            await release_unique_key(
+                self._session,
+                collection=ARTIFACTS,
+                namespace="source-identity",
+                components=previous_identity,
+                owner_document_id=artifact.id,
+            )
+        else:
+            await claim_unique_key(
+                self._session,
+                collection=ARTIFACTS,
+                namespace="source-identity",
+                components=current_identity,
+                owner_document_id=artifact.id,
+            )
         await self._save(ARTIFACTS, artifact.id, artifact, artifact_to_document)
 
     async def get_state(self, artifact_id: str) -> ArtifactState | None:

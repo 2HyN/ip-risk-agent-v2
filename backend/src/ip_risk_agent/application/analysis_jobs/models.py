@@ -13,6 +13,7 @@ from ip_risk_agent.core.common import (
     normalize_utc,
     require_chronological,
     require_non_empty,
+    stable_key,
 )
 
 
@@ -22,6 +23,10 @@ class AnalysisJobStatus(StrEnum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     INCONCLUSIVE = "INCONCLUSIVE"
+
+
+def analysis_job_id_for(change_event_id: str) -> str:
+    return stable_key("analysis-job", (change_event_id,))
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,3 +74,30 @@ class AnalysisJob:
                 later_name="analysis_job.completed_at",
             )
             object.__setattr__(self, "completed_at", completed_at)
+        if self.failure_safe is not None:
+            object.__setattr__(
+                self,
+                "failure_safe",
+                require_non_empty(self.failure_safe, "analysis_job.failure_safe"),
+            )
+        if self.status is AnalysisJobStatus.QUEUED:
+            if self.started_at is not None or self.completed_at is not None:
+                raise DomainInvariantError("QUEUED analysis job cannot have execution timestamps")
+            if self.failure_safe is not None:
+                raise DomainInvariantError("QUEUED analysis job cannot have failure_safe")
+        elif self.status is AnalysisJobStatus.RUNNING:
+            if self.started_at is None or self.completed_at is not None:
+                raise DomainInvariantError(
+                    "RUNNING analysis job requires started_at and forbids completed_at"
+                )
+            if self.failure_safe is not None:
+                raise DomainInvariantError("RUNNING analysis job cannot have failure_safe")
+        else:
+            if self.started_at is None or self.completed_at is None:
+                raise DomainInvariantError(
+                    "terminal analysis job requires started_at and completed_at"
+                )
+            if self.status is AnalysisJobStatus.FAILED and self.failure_safe is None:
+                raise DomainInvariantError("FAILED analysis job requires failure_safe")
+            if self.status is AnalysisJobStatus.SUCCEEDED and self.failure_safe is not None:
+                raise DomainInvariantError("SUCCEEDED analysis job cannot have failure_safe")

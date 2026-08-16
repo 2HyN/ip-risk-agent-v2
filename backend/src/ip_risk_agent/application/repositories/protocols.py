@@ -6,8 +6,8 @@ from typing import Protocol
 
 from iprisk_contracts import AnalysisType
 
-from ip_risk_agent.application.analysis_jobs import AnalysisJob
-from ip_risk_agent.application.process_change import ChangeEvent
+from ip_risk_agent.application.analysis_jobs.models import AnalysisJob
+from ip_risk_agent.application.process_change.models import ChangeEvent
 from ip_risk_agent.core.artifacts import Artifact, ArtifactState
 from ip_risk_agent.core.audit import AuditEvent, SourceAccessEvent
 from ip_risk_agent.core.auth import User
