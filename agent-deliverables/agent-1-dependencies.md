@@ -3,11 +3,13 @@
 ## Status
 
 - Owner: Agent 1 — Platform & Control Plane
-- State: requested; root manifest merge pending Integration Owner
+- State: Agent 1 feature 단계별 자체 선택/설치 허용; 최종 root pin은 Integration 단계 검토
 - Python compatibility target: CPython 3.14.7
 - Existing fixed packages: Pydantic 2.13.4, pytest 9.1.1
 
-Agent 1은 root manifest와 lockfile을 수정하지 않는다. 아래 항목의 실제 버전 선택, lockfile 갱신과 runtime wiring은 Integration Owner가 담당한다. 선택 버전은 Python 3.14.7 또는 Node.js 24.19.0과 호환되어야 한다.
+Agent 1은 각 feature 구현에 필요한 package를 독자적으로 선택하고 현재 `.venv`/workspace에서 호환성을 검사해 설치할 수 있다. 선택 버전과 검사 결과는 이 문서에 누적한다. Root manifest와 최종 lockfile pin은 Integration 단계에서 다른 Plane과의 충돌 여부를 확인해 최대한 반영한다. 모든 선택은 Python 3.14.7 또는 Node.js 24.19.0과 호환되어야 한다.
+
+Phase 0~1에서는 신규 package가 필요하지 않아 추가 설치를 수행하지 않았다.
 
 ## Python runtime dependencies
 
@@ -74,6 +76,6 @@ FIRESTORE_DATABASE
 4. Windows contract test 실행 시 `PNPM_EXECUTABLE`에 `pnpm.cmd`를 지정한다.
 5. Agent 1 router/facade의 실제 등록은 Integration 전용 `composition/**`, `main.py`, `worker.py`에서 수행한다.
 
-## Deferred version decisions
+## Version selection policy
 
-정확한 신규 package 버전 pin은 Integration Owner가 Python 3.14.7 호환성과 전체 Plane dependency를 함께 확인한 뒤 결정한다. Agent 1은 호환성 확인 전 임의 pin이나 root lockfile 변경을 수행하지 않는다.
+Agent 1은 package가 처음 필요한 Phase에서 최신 안정 release를 우선 검토하고 Python/Node 기준 버전, 기존 Pydantic/pytest/TypeScript, 직접 및 전체 회귀 test로 호환성을 확인한다. 검증된 개발 버전은 이 문서에 기록한다. 최종 pin은 Integration Owner가 전체 Plane dependency를 비교해 충돌이 없는 한 해당 검증 버전을 반영한다.

@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 0 — 기준점 보호와 개발 게이트 확정 |
-| 다음 개발 Phase | Phase 1 — 공통 Domain 기반과 불변식 |
-| 전체 진행률 | 1/14 Phase 완료 |
+| 현재 완료 Phase | Phase 1 — 공통 Domain 기반과 불변식 |
+| 다음 개발 Phase | Phase 2 — 인증, Role/Permission, VWS와 Mount 권한 |
+| 전체 진행률 | 2/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -33,10 +33,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 
 ### 2.2 현재 구조 요약
 
-- Backend는 `backend/src/ip_risk_agent` 아래에 Control, Source, Intelligence, Integration namespace만 생성된 상태다.
-- Agent 1 소유 Backend 영역인 `core`, `application`, `persistence/core_firestore`, Control 전용 `api`는 모두 빈 package skeleton이다.
+- Backend는 `backend/src/ip_risk_agent` 아래에 Control, Source, Intelligence, Integration namespace가 분리되어 있다.
+- Agent 1의 `core`와 ChangeEvent/AnalysisJob application state에는 Phase 1 Domain 모델과 순수 불변식이 구현됐다. Repository, persistence와 API 영역은 아직 skeleton이다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`은 비어 있다.
+- `tests/control`에는 Phase 1 Domain/identity/lifecycle test 32개가 구현됐다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -44,13 +44,11 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 
 ### 2.3 확정된 개발 기준점과 보호 항목
 
-1. 현재 작업 트리에는 다음 Frozen 생성 파일의 선행 변경이 존재한다.
-   - `shared/contracts/schemas/*.json` 4개
-   - `shared/contracts/typescript/generated/contracts.ts`
-2. Agent 1은 이 변경을 수정·복원·재생성·커밋하지 않으며 모든 Agent 1 변경에서 제외한다.
+1. `shared/contracts/schemas/*.json`과 `shared/contracts/typescript/generated/contracts.ts`는 `scripts/generate_contracts.py` 또는 `pnpm run generate`로 재생성할 수 있다.
+2. Pydantic Contract source 변경이 없는 검증에서는 공식 생성 후 tracked diff가 없어야 한다. 생성 파일의 수동 편집은 금지한다.
 3. 버전 관리는 README를 우선하며 Python은 CPython 3.14.7로 확정했다. `.venv\Scripts\python.exe`가 3.14.7임을 검증했다.
 4. 현재 환경에는 Windows `py` launcher가 없으므로 Python 명령은 `.venv\Scripts\python.exe`를 직접 사용한다.
-5. Frozen contract test는 생성 파일을 다시 쓰는 테스트를 포함하므로 선행 변경 처리 전에는 schema/TypeScript generation test를 실행하지 않는다.
+5. Frozen contract 결정성 test를 포함한 전체 suite를 실행하며, 실행 후 생성 파일 diff가 0인지 확인한다.
 6. Windows에서 pytest가 pnpm을 subprocess로 실행할 때 `PNPM_EXECUTABLE`은 `pnpm.ps1`이 아닌 `pnpm.cmd`의 절대 경로로 지정한다.
 
 ### 2.4 Phase 현황
@@ -58,7 +56,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | Phase | 내용 | 상태 |
 |---|---|---|
 | 0 | 기준점 보호와 개발 게이트 확정 | 완료 |
-| 1 | 공통 Domain 기반과 불변식 | 미구현 |
+| 1 | 공통 Domain 기반과 불변식 | 완료 |
 | 2 | 인증, Role/Permission, VWS와 Mount 권한 | 미구현 |
 | 3 | Repository protocol과 In-memory transaction | 미구현 |
 | 4 | Firestore canonical persistence | 미구현 |
@@ -106,7 +104,7 @@ contract-change-requests/agent1-*.md  # 정말 필요한 경우에만
 
 ### 3.3 수정·구현 금지 영역
 
-- `shared/contracts/**`
+- `shared/contracts/**`의 Pydantic source/fixture/test 수동 변경 및 생성 파일 수동 편집. 공식 생성 스크립트에 의한 generated schema/TypeScript 쓰기는 허용한다.
 - `connectors/**`, `frontend/src/sources/**`, `apps/desktop/**`
 - `intelligence/**`, `rag-corpus/**`
 - `composition/**`, `main.py`, `worker.py`
@@ -143,7 +141,7 @@ persistence/core_firestore + external adapters supplied by Integration
 
 ### Phase 0 — 기준점 보호와 개발 게이트 확정 `[완료]`
 
-1. [x] 선행 dirty Frozen 파일을 기록하고 Agent 1 diff에서 제외했다.
+1. [x] Frozen 생성 파일을 공식 script로 재생성하고 source-of-truth와 일치시켰다.
 2. [x] README를 우선해 Python 3.14.7을 확정하고 `.venv` interpreter를 검증했다.
 3. [x] 현재 dependency로 가능한 Python import/contract smoke check를 수행했다.
 4. [x] FastAPI, Firestore, Google OIDC, React/Vite 및 테스트 dependency를 `agent-deliverables/agent-1-dependencies.md`에 기록했다. Root manifest는 수정하지 않았다.
@@ -158,11 +156,11 @@ persistence/core_firestore + external adapters supplied by Integration
 검증 결과:
 
 - Python 3.14.7, Pydantic 2.13.4, pytest 9.1.1 import smoke: 통과
-- Frozen Contract tests(생성 결정성 test 제외): 26 passed, 1 deselected
+- Frozen Contract tests(생성 결정성 test 포함): 27 passed
 - `pnpm run typecheck`: 통과
 - `pnpm run verify:resolution`: 통과
 - 첫 pytest 시도에서 `pnpm.ps1` subprocess 실행 문제로 2건 실패했으나 `pnpm.cmd`를 지정한 재실행에서 모두 통과
-- 생성 결정성 test 1건은 선행 Frozen 파일 보호를 위해 의도적으로 보류
+- 공식 생성 직후 및 결정성 test 이후 generated tracked diff: 0
 
 확정 명령:
 
@@ -170,37 +168,56 @@ persistence/core_firestore + external adapters supplied by Integration
 # Agent 1 전용 테스트
 .\.venv\Scripts\python.exe -m pytest tests/control
 
-# Frozen 생성물을 쓰지 않는 shared contract 검증
+# Frozen 생성 및 전체 shared contract 검증
+pnpm run generate
 $env:PNPM_EXECUTABLE = (Get-Command pnpm.cmd).Source
-.\.venv\Scripts\python.exe -m pytest shared/contracts/tests/test_contracts.py -k "not schema_and_typescript_generation_is_deterministic"
+.\.venv\Scripts\python.exe -m pytest shared/contracts/tests/test_contracts.py
 
 # TypeScript 읽기 전용 검증
 pnpm run typecheck
 pnpm run verify:resolution
 ```
 
-### Phase 1 — 공통 Domain 기반과 불변식
+### Phase 1 — 공통 Domain 기반과 불변식 `[완료]`
 
-1. Agent 1 내부 공통 ID, UTC timestamp, status, safe error/value type을 정의한다.
-2. User, RiskWorkspace, Membership, SourceConnection metadata, SourceWorkspace metadata, WorkspaceMount를 dataclass/Pydantic 내부 model로 정의한다.
-3. Artifact, ArtifactState, ChangeEvent, AnalysisJob을 정의한다.
-4. Risk, RiskEvidence, RiskEvent, AuditEvent, SourceAccessEvent, Notification을 정의한다.
-5. Machine lifecycle(`NEW`, `EXISTING`, `RESOLVED`)과 review disposition(`UNREVIEWED`, `MONITORING`, `ACCEPTED_RISK`, `EXCLUDED`)을 별도 타입과 transition 함수로 분리한다.
-6. 정규화·결정론적 ID 함수에 명확한 canonical input encoding과 hash version을 둔다.
+1. [x] Agent 1 내부 공통 ID, UTC timestamp, status, domain error와 JSON-safe immutable value 처리를 정의했다.
+2. [x] User, RiskWorkspace, Membership, SourceConnection metadata, SourceWorkspace metadata, WorkspaceMount를 frozen dataclass로 정의했다.
+3. [x] Artifact, ArtifactState, ChangeEvent, AnalysisJob을 정의했다.
+4. [x] Risk, RiskEvidence, RiskEvent, AuditEvent, SourceAccessEvent, Notification을 정의했다.
+5. [x] Machine lifecycle(`NEW`, `EXISTING`, `RESOLVED`)과 review disposition(`UNREVIEWED`, `MONITORING`, `ACCEPTED_RISK`, `EXCLUDED`)을 별도 타입과 순수 transition 함수로 분리했다.
+6. [x] JSON canonical component encoding + SHA-256 + `v1` namespace 기반 결정론적 ID 함수를 구현했다.
 
 핵심 불변식:
 
-- User identity key는 email이 아니라 Google `sub`이다.
-- VWS는 collaboration/security/risk boundary다.
-- SourceWorkspace 하나는 MVP에서 VWS 하나에만 Mount된다.
-- Mount alias는 VWS 안에서 unique지만 Artifact/Risk identity에는 들어가지 않는다.
-- Artifact mapping은 `(source_workspace_id, source_artifact_id)`에 대해 안정적이다.
-- DELETE는 Artifact availability만 바꾸며 Risk를 resolve하지 않는다.
-- 과거 RiskEvent는 update/overwrite할 수 없다.
+- [x] User identity key model은 email과 Google `sub`를 분리한다. 실제 upsert use case는 Phase 2에서 구현한다.
+- [x] VWS가 security/retention version과 Owner identity를 소유한다.
+- [x] SourceWorkspace와 WorkspaceMount 관계를 분리했다. VWS 단일 Mount 정책의 repository 강제는 Phase 3에서 구현한다.
+- [x] Mount alias는 presentation value이며 Artifact/Risk identity 함수의 입력에 포함되지 않는다.
+- [x] Artifact ID는 `(source_workspace_id, source_artifact_id)`에 대해 안정적이다.
+- [x] AnalysisResult가 `SUCCEEDED + COMPLETE`가 아니면 Risk 생성·변경·해소가 모두 차단된다.
+- [x] RiskEvent와 nested safe state를 immutable value로 구성했다. Repository append-only API는 Phase 3에서 강제한다.
 
 완료 조건:
 
-- 외부 SDK 없이 pure unit test로 모든 entity와 transition invariant를 검증한다.
+- [x] 외부 SDK 없이 pure unit test로 Phase 1 entity와 transition invariant를 검증했다.
+
+구현 파일군:
+
+- `core/common.py`: UTC/시간 순서, domain error, stable key, JSON-safe recursive freeze
+- `core/{auth,workspaces,memberships,mounts,artifacts,risk,audit,notifications}`: canonical domain models와 public exports
+- `application/{process_change,analysis_jobs}/models.py`: ChangeEvent와 AnalysisJob state
+- `tests/control/test_domain_models.py`: entity/value invariant
+- `tests/control/test_identity.py`: deterministic/collision-safe identity
+- `tests/control/test_risk_transitions.py`: authoritative analysis와 lifecycle/review 분리
+
+검증 결과:
+
+- Phase 1 Control tests: 32 passed
+- Frozen Contract + Control tests: 59 passed
+- Python compileall: 통과
+- `pnpm run typecheck`: 통과
+- `pnpm run verify:resolution`: 통과
+- 전체 test 후 generated tracked diff: 0
 
 ### Phase 2 — 인증, Role/Permission, VWS와 Mount 권한
 
@@ -484,7 +501,7 @@ Fake SourceChange
 
 ## 7. 예상 dependency 및 환경 요청
 
-정확한 버전은 Integration Owner가 root manifest에 병합한다. Agent 1은 root 파일을 직접 수정하지 않는다.
+Agent 1은 package가 필요한 Phase에서 호환 버전을 독자적으로 선택·설치·검증하고 dependency 문서에 기록한다. Integration Owner는 전체 Plane 충돌을 확인한 뒤 root manifest와 lockfile에 최종 pin을 병합한다.
 
 ### Python runtime 후보
 
@@ -533,3 +550,90 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 6. fake ports로 독립 Control scenario가 완결되고 `tests/control/**`의 모든 invariant test가 통과한다.
 7. Firestore production repository와 emulator 검증 경로가 존재한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
+
+## 9. 작업 현황 로그
+
+### 2026-08-16 — Phase 0 보완 및 Phase 1 완료
+
+#### 구현 완료 항목
+
+1. Frozen Contract 공식 생성 정책을 확정하고 `pnpm run generate`를 실행했다.
+2. Pydantic source 변경 없이 생성 schema/TypeScript 파일에 tracked diff가 없음을 생성 직후와 결정성 test 이후 각각 확인했다.
+3. Python 3.14.7, Node.js 24.19.0, pnpm 11.19.0 기준 명령을 확정했다.
+4. Domain 공통 기반을 구현했다.
+   - non-empty identifier/name validation
+   - timezone-aware datetime의 UTC 정규화와 시간 순서 검증
+   - `DomainInvariantError`
+   - JSON-safe metadata의 재귀 validation과 immutable freeze
+   - component ambiguity가 없는 versioned SHA-256 stable key
+5. Control canonical entity/state를 구현했다.
+   - User, RiskWorkspace, Membership/Role/Permission
+   - SourceConnection metadata, SourceWorkspace metadata, WorkspaceMount
+   - Artifact, ArtifactState, ChangeEvent, AnalysisJob
+   - Risk, RiskEvidence, RiskEvent
+   - AuditEvent, SourceAccessEvent, Notification
+6. stable identity를 구현했다.
+   - Artifact: `source_workspace_id + source_artifact_id`
+   - ChangeEvent: `event_fingerprint`
+   - Patent Risk: `artifact_id + normalized_application_number`
+   - License Risk: artifact/ecosystem/package/resolution-state/version/license expression
+7. Machine lifecycle와 Human review를 분리한 순수 decision 함수를 구현했다.
+   - `SUCCEEDED + COMPLETE`만 authoritative
+   - incomplete/failure에서는 기존 Risk 유지 및 신규 Risk 생성 차단
+   - DETECTED, CONFIRMED, RESOLVED, REOPENED 결정
+   - review disposition 변경은 lifecycle input/output을 갖지 않음
+8. raw-source permission이 없는 4단계 Role permission hierarchy를 정의했다.
+9. System AuditEvent와 User-authored event의 actor invariant를 분리했다.
+10. Phase 1 Control test 32개와 전체 Frozen+Control test 59개를 통과했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. Google identity User upsert와 OIDC flow는 미구현이다.
+   - Phase 1은 entity와 invariant만 다루며, 실제 login/provider/session use case는 Phase 2와 Phase 9 범위다.
+2. Membership invitation의 pending email 처리 방식은 미구현이다.
+   - 현재 Membership은 canonical `user_id`를 요구한다. 아직 가입하지 않은 email 초대를 placeholder User로 표현할지 pending Membership metadata로 표현할지는 Phase 2 use case와 canonical persistence 제약을 함께 검토해야 한다.
+3. SourceWorkspace 단일 VWS Mount, Mount alias uniqueness와 Google `sub` uniqueness는 저장소 수준에서 아직 강제되지 않는다.
+   - entity 하나만으로 cross-record uniqueness를 판정할 수 없으며 Phase 3 repository transaction/unique-key 전략이 필요하다.
+4. ChangeEvent와 AnalysisJob은 상태 모델만 존재하며 intake, claim, retry, queue enqueue 동작은 미구현이다.
+   - SourceChange orchestration은 Phase 5 범위다.
+5. Risk transition은 단일 candidate에 대한 순수 결정만 제공하며 Risk set reconciliation, Evidence retention, append transaction은 미구현이다.
+   - repository/transaction과 AnalysisResult intake가 필요한 Phase 7 범위다.
+6. DELETE/MOVE 처리, Source Manager 제거 후 Mount 상태 전환, append-only repository 강제는 미구현이다.
+   - 각각 Phase 5, Phase 2, Phase 3에서 cross-aggregate use case로 구현한다.
+7. Security Gate, Firestore, API, frontend는 미구현이다.
+   - Phase 4 이후의 독립 범위이며 Phase 1에 외부 SDK dependency를 도입하지 않았다.
+8. 신규 dependency 설치는 수행하지 않았다.
+   - Phase 0~1 구현은 Python 표준 library, 기존 Pydantic/pytest와 Frozen Contract만으로 완결됐다. 각 package는 최초 사용 Phase에서 실제 호환성을 검사해 선택한다.
+
+#### 추가 검토가 필요한 사항
+
+1. Phase 2의 transactional workspace/membership use case가 Phase 3 repository protocol보다 먼저 계획돼 있다.
+   - Phase 2에서는 authorization와 aggregate policy를 순수 service로 우선 구현하고, 필요한 최소 port signature를 정의한다. 실제 atomic repository 구현과 전체 Unit of Work는 Phase 3에서 완성하는 방식으로 경계를 유지한다.
+2. Pending invitation의 canonical 표현을 결정해야 한다.
+   - 새 canonical collection을 임의 추가할 수 없으므로 기존 `memberships` collection 안에서 명확한 deterministic ID와 status를 사용할 수 있는지 우선 검토한다. Frozen Contract 변경은 필요하지 않을 것으로 예상한다.
+3. JSON-safe metadata는 domain에서 `MappingProxyType`과 tuple로 immutable하게 보관된다.
+   - Phase 4 Firestore mapper는 이를 JSON-compatible dict/list로 명시적으로 변환하고, 역직렬화 시 다시 domain validation을 통과시켜야 한다.
+4. Stable key는 `v1` hash format을 사용한다.
+   - persistence 이후 format 변경은 identity migration이 되므로 Phase 3 deterministic document ID 설계 시 현재 format을 재확인하고 고정한다.
+5. Risk review priority는 Frozen Contract의 `ReviewPriority`를 재사용한다.
+   - Intelligence의 suggested priority를 Control projection에 반영하는 정책은 Phase 7에서 deterministic mapping/update rule로 확정해야 한다.
+6. Windows Git은 generated LF 파일에 CRLF 경고를 출력하지만 실제 tracked diff는 0이다.
+   - 생성 결과의 correctness 판단은 경고가 아니라 `git diff --exit-code -- shared/contracts/schemas shared/contracts/typescript/generated/contracts.ts` 결과로 유지한다.
+
+#### 검증 결과
+
+```text
+pnpm run generate                                      PASS
+shared/contracts/tests + tests/control                 59 passed
+tests/control                                          32 passed
+Python compileall                                      PASS
+pnpm run typecheck                                     PASS
+pnpm run verify:resolution                             PASS
+generated files tracked diff after generation/tests   NONE
+```
+
+#### 제안 커밋 메시지
+
+```text
+feat: establish Control Plane domain models and invariants
+```
