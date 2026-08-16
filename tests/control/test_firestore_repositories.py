@@ -55,6 +55,11 @@ from ip_risk_agent.core.mounts import (
     SourceWorkspaceStatus,
     WorkspaceMount,
 )
+from ip_risk_agent.core.notifications import (
+    Notification,
+    NotificationStatus,
+    NotificationType,
+)
 from ip_risk_agent.core.risk import (
     ReviewDisposition,
     Risk,
@@ -594,7 +599,11 @@ def test_optimistic_risk_review_update_and_event_reject_stale_transaction() -> N
         stale_risk = await stale.risks.get("risk-1")
         assert first_risk is not None and stale_risk is not None
         await first.risks.save(
-            replace(first_risk, review_disposition=ReviewDisposition.MONITORING)
+            replace(
+                first_risk,
+                review_disposition=ReviewDisposition.MONITORING,
+                review_version=first_risk.review_version + 1,
+            )
         )
         await first.risks.append_event(
             RiskEvent(
@@ -607,7 +616,11 @@ def test_optimistic_risk_review_update_and_event_reject_stale_transaction() -> N
             )
         )
         await stale.risks.save(
-            replace(stale_risk, review_disposition=ReviewDisposition.EXCLUDED)
+            replace(
+                stale_risk,
+                review_disposition=ReviewDisposition.EXCLUDED,
+                review_version=stale_risk.review_version + 1,
+            )
         )
         await first.commit()
         with pytest.raises(ConcurrencyConflictError):
@@ -818,5 +831,56 @@ def test_firestore_analysis_job_requested_types_can_only_be_narrowed() -> None:
         async with factory() as uow:
             with pytest.raises(UniqueConstraintViolation, match="only be narrowed"):
                 await uow.analysis_jobs.save(job)
+
+    run(scenario())
+
+
+def test_firestore_history_scope_and_notification_read_invariants() -> None:
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        factory = FirestoreControlUnitOfWorkFactory(backend)
+        risk = Risk(
+            "risk-history",
+            "vws-history",
+            "artifact-history",
+            AnalysisType.PATENT,
+            "risk-key-history",
+            RiskLifecycleState.NEW,
+            ReviewDisposition.UNREVIEWED,
+            ReviewPriority.HIGH,
+            "Potential overlap",
+            NOW,
+            NOW,
+            "job-history",
+            NOW,
+        )
+        notification = Notification(
+            "notification-history",
+            "user-history",
+            "vws-history",
+            NotificationType.RISK_HIGH_DETECTED,
+            NotificationStatus.UNREAD,
+            NOW,
+        )
+        async with factory() as uow:
+            await uow.risks.add(risk)
+            await uow.notifications.add(notification)
+            await uow.commit()
+
+        async with factory() as uow:
+            assert await uow.risks.list_for_workspace("vws-history") == (risk,)
+            read = replace(
+                notification,
+                status=NotificationStatus.READ,
+                read_at=NOW,
+            )
+            await uow.notifications.save(read)
+            await uow.commit()
+
+        async with factory() as uow:
+            current = await uow.notifications.get(notification.id)
+            assert current is not None and current.status is NotificationStatus.READ
+            with pytest.raises(UniqueConstraintViolation, match="READ cannot become UNREAD"):
+                await uow.notifications.save(notification)
 
     run(scenario())

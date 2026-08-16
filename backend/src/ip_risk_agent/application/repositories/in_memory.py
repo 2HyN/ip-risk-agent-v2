@@ -26,7 +26,7 @@ from ip_risk_agent.core.memberships import (
     membership_id_for,
 )
 from ip_risk_agent.core.mounts import SourceConnection, SourceWorkspace, WorkspaceMount, mount_alias_key
-from ip_risk_agent.core.notifications import Notification
+from ip_risk_agent.core.notifications import Notification, NotificationStatus
 from ip_risk_agent.core.risk import Risk, RiskEvidence, RiskEvent, RiskLifecycleState
 from ip_risk_agent.core.workspaces import RiskWorkspace
 
@@ -527,6 +527,21 @@ class InMemoryRiskRepository(_Repository):
             or previous.first_seen_at != risk.first_seen_at
         ):
             raise UniqueConstraintViolation("risk canonical identity is immutable")
+        if (
+            risk.review_version < previous.review_version
+            or risk.review_version > previous.review_version + 1
+            or (
+                risk.review_disposition is previous.review_disposition
+                and risk.review_version != previous.review_version
+            )
+            or (
+                risk.review_disposition is not previous.review_disposition
+                and risk.review_version != previous.review_version + 1
+            )
+        ):
+            raise UniqueConstraintViolation(
+                "risk review disposition requires one review version increment"
+            )
         risk_key_owner = self._state.risks_by_key.get(risk.risk_key)
         if risk_key_owner not in (None, risk.id):
             raise _duplicate("risk key", risk.risk_key)
@@ -547,6 +562,17 @@ class InMemoryRiskRepository(_Repository):
                 if risk.artifact_id == artifact_id
                 and risk.analysis_type is analysis_type
                 and (lifecycle_states is None or risk.lifecycle_state in lifecycle_states)
+            ],
+            key=lambda risk: risk.id,
+        )
+
+    async def list_for_workspace(self, risk_workspace_id: str) -> tuple[Risk, ...]:
+        self._open()
+        return _sorted(
+            [
+                risk
+                for risk in self._state.risks.values()
+                if risk.risk_workspace_id == risk_workspace_id
             ],
             key=lambda risk: risk.id,
         )
@@ -637,8 +663,26 @@ class InMemoryNotificationRepository(_Repository):
 
     async def save(self, notification: Notification) -> None:
         self._open()
-        if notification.id not in self._state.notifications:
+        previous = self._state.notifications.get(notification.id)
+        if previous is None:
             raise _missing("notification", notification.id)
+        if (
+            previous.user_id != notification.user_id
+            or previous.risk_workspace_id != notification.risk_workspace_id
+            or previous.notification_type is not notification.notification_type
+            or previous.created_at != notification.created_at
+            or previous.metadata_safe != notification.metadata_safe
+            or (
+                previous.status is NotificationStatus.READ
+                and (
+                    notification.status is not NotificationStatus.READ
+                    or notification.read_at != previous.read_at
+                )
+            )
+        ):
+            raise UniqueConstraintViolation(
+                "notification identity is immutable and READ cannot become UNREAD"
+            )
         self._state.notifications[notification.id] = notification
 
     async def list_for_user(self, user_id: str) -> tuple[Notification, ...]:

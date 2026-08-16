@@ -361,7 +361,11 @@ def test_authoritative_lifecycle_existing_resolved_and_reopened_preserves_review
                 await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
             )[0]
             await uow.risks.save(
-                replace(risk, review_disposition=ReviewDisposition.EXCLUDED)
+                replace(
+                    risk,
+                    review_disposition=ReviewDisposition.EXCLUDED,
+                    review_version=risk.review_version + 1,
+                )
             )
             await uow.commit()
 

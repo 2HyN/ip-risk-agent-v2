@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 7 — AnalysisResult intake와 Risk reconciliation |
-| 다음 개발 Phase | Phase 8 — Human review, History, Audit, Notification |
-| 전체 진행률 | 8/14 Phase 완료 |
+| 현재 완료 Phase | Phase 8 — Human review, History, Audit, Notification |
+| 다음 개발 Phase | Phase 9 — Google App Login과 Control API |
+| 전체 진행률 | 9/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-16 |
@@ -45,9 +45,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - `application/process_change`와 `application/analysis_jobs`에는 SourceChange 관계 검증, idempotent Artifact/ChangeEvent/AnalysisJob 저장, raw-free queue port와 retry-safe job orchestration이 구현됐다.
 - `application/security_gate`에는 canonical context 검증, deny-only `.ipriskignore`, file/size policy, secret redaction, deterministic minimization/routing/checksum과 SourceAccess 기록이 구현됐다.
 - `application/risk_reconcile`에는 AnalysisResult canonical context 검증, per-analysis-type outcome 수용, minimal evidence retention, authoritative Risk set reconciliation과 결과 기반 Audit/Notification 기록이 구현됐다.
+- `application/risk_review`, `application/history`, `application/notifications`에는 versioned human review, 세 canonical history stream의 권한 기반 safe projection/export, 사용자별 in-app inbox와 idempotent read 처리가 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐다. API 영역은 아직 skeleton이다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~7 Domain, policy, repository transaction, Firestore persistence, SourceChange/Security Gate/AnalysisResult orchestration test 155개가 구현됐으며 현재 환경에서는 154개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~8 Domain, policy, repository transaction, Firestore persistence와 Control application orchestration test 159개가 구현됐으며 현재 환경에서는 158개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -74,7 +75,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 5 | SourceChange intake와 AnalysisJob orchestration | 완료 |
 | 6 | Security Gate | 완료 |
 | 7 | AnalysisResult intake와 Risk reconciliation | 완료 |
-| 8 | Human review, History, Audit, Notification | 미구현 |
+| 8 | Human review, History, Audit, Notification | 완료 |
 | 9 | Google App Login과 Control API | 미구현 |
 | 10 | ControlPlaneFacade와 Integration surface | 미구현 |
 | 11 | Product Web UI | 미구현 |
@@ -470,19 +471,36 @@ pnpm run verify:resolution
 - Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
 - 공식 생성 후 generated tracked diff: 0
 
-### Phase 8 — Human review, History, Audit, Notification
+### Phase 8 — Human review, History, Audit, Notification `[완료]`
 
-1. review disposition 변경 use case에 optimistic version check를 적용한다.
-2. actor, 이전/신규 disposition, optional comment, timestamp를 append-only RiskEvent로 남긴다.
-3. Risk timeline query와 Workspace activity projection을 구현한다.
-4. VWS 운영/보안 사건은 AuditEvent, source read는 SourceAccessEvent, Risk 변화는 RiskEvent로 분리한다.
-5. Notification list/read 상태와 대상 사용자 filtering을 구현한다.
-6. audit export는 raw source/token 없이 safe field만 직렬화한다.
+1. [x] review disposition 변경 use case에 명시적 `review_version` optimistic check와 transaction을 적용했다.
+2. [x] actor, 이전/신규 disposition/version, redacted optional comment와 timestamp를 append-only RiskEvent로 남긴다.
+3. [x] 권한이 적용된 Risk timeline query와 Workspace activity projection을 구현했다.
+4. [x] VWS 운영/보안 사건은 AuditEvent, source read는 SourceAccessEvent, Risk 변화는 RiskEvent로 분리해 projection에서도 stream discriminator를 유지한다.
+5. [x] Notification list/read 상태, unread count와 대상 사용자 filtering을 구현했다.
+6. [x] history export는 raw source/token/local absolute path 없이 JSON-compatible safe field만 직렬화한다.
 
 완료 조건:
 
 - `EXCLUDED != RESOLVED`와 과거 event 불변성이 API까지 유지된다.
 - 세 history stream 어디에도 raw source, local absolute path, token이 없다.
+
+구현 결과:
+
+- `application/risk_review/**`: reviewer 권한, review version CAS, no-op idempotency와 transactional Risk/RiskEvent 변경
+- `application/history/**`: Risk timeline, Workspace activity, safe history export와 bounded redaction
+- `application/notifications/**`: user-scoped inbox, unread filtering/count와 idempotent READ 전환
+- `core/risk/**`: canonical `review_version`과 deterministic review event identity
+- `application/repositories/**`, `persistence/core_firestore/**`: Workspace Risk query, review version 및 Notification 단방향 상태 불변식
+- `tests/control/test_review_history_notifications.py`: 권한/CAS/stream 분리/export safety/notification isolation 검증
+
+검증 결과:
+
+- Phase 1~8 Control tests: 158 passed, 1 skipped(emulator 미설정)
+- Frozen Contract + Control tests: 185 passed, 1 skipped(emulator 미설정)
+- Phase 8 focused service/persistence tests: 50 passed
+- Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
+- 공식 생성 후 generated tracked diff: 0
 
 ### Phase 9 — Google App Login과 Control API
 
@@ -679,6 +697,106 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
 
 ## 9. 작업 현황 로그
+
+### 2026-08-16 — 직전 Phase 보완 및 Phase 8 완료
+
+#### 구현 완료 항목
+
+1. 직전 Phase에서 Phase 8 범위로 남겨 둔 Human review, history query, Notification read/filtering과 safe export를 우선 보완했다.
+   - Phase 7의 machine Risk reconciliation은 review disposition과 review version을 변경하지 않는다.
+   - Phase 8 review use case만 human disposition을 변경하며 Risk와 RiskEvent를 한 transaction으로 저장한다.
+2. canonical Risk에 독립적인 `review_version`을 추가했다.
+   - 새 Risk는 version 0에서 시작하고 실제 disposition 변경마다 정확히 1 증가한다.
+   - 요청은 `expected_review_version`을 반드시 전달하며 stale version이면 현재 version을 포함한 `RiskReviewConflictError`를 반환한다.
+   - repository도 disposition 변경 없는 version 조작, version 누락/도약/감소를 거부해 application service 우회를 방어한다.
+3. `RiskReviewService.change_disposition()`을 구현했다.
+   - ACTIVE Membership의 `RISK_REVIEW` 권한을 확인하고 Risk가 요청 VWS에 속하는지 교차 검증한다.
+   - lifecycle, priority, evidence identity는 건드리지 않고 review disposition/version과 updated timestamp만 변경한다.
+   - 동일 disposition 재요청은 version과 history를 증가시키지 않는 `UNCHANGED` 결과로 처리한다.
+4. Human review history를 append-only RiskEvent로 기록한다.
+   - deterministic `(risk_id, review_version)` event ID를 사용한다.
+   - USER actor와 actor user ID, 이전/신규 disposition/version, timestamp와 optional comment를 기록한다.
+   - comment에는 Phase 6 secret redaction을 재사용하고 Windows/common Unix local absolute path를 별도로 제거하며 길이를 제한한다.
+5. `HistoryQueryService.get_risk_timeline()`을 구현했다.
+   - VWS `RISK_VIEW` 권한과 Risk scope를 검증한다.
+   - 현재 lifecycle/review disposition/version과 최신순 RiskEvent projection을 반환하되 evidence 본문은 포함하지 않는다.
+6. `list_workspace_activity()`와 세 history stream projection을 구현했다.
+   - RiskEvent는 `RISK`, 운영·보안 AuditEvent는 `AUDIT`, source read receipt는 `SOURCE_ACCESS` discriminator를 유지한다.
+   - `AUDIT_VIEW` 권한을 가진 사용자만 조회할 수 있고 세 stream을 timestamp/type/ID로 결정적으로 최신순 병합한다.
+   - SourceAccess projection은 ID, revision, access type, byte count와 provider request ID만 포함하고 source content/path를 포함하지 않는다.
+7. `export_workspace_history()`와 JSON-compatible safe serialization을 구현했다.
+   - `AUDIT_EXPORT` 권한을 별도로 검사한다.
+   - metadata의 secret 성격 key는 값 전체를 redaction placeholder로 바꾸고 모든 string에 secret/path redaction과 길이 제한을 적용한다.
+   - 중첩 깊이, item 수와 최종 JSON byte 상한을 적용해 `to_safe_dict()` 결과를 바로 JSON 직렬화할 수 있다.
+8. `NotificationService`를 구현했다.
+   - `list_for_user()`는 요청 actor ID로만 repository query하고 최신순 결과, unread-only filter와 limit 적용 전 전체 unread count를 제공한다.
+   - 타 사용자 Notification ID를 read 요청하면 존재하지 않는 것과 같은 오류로 처리해 대상 정보 노출을 막는다.
+   - `mark_read()`는 UNREAD → READ만 허용하며 동일 요청 재전달은 기존 read timestamp를 유지한 `changed=false` 결과로 처리한다.
+9. Notification repository 불변식을 보완했다.
+   - user/workspace/type/created_at/metadata identity는 수정할 수 없다.
+   - READ → UNREAD와 이미 기록된 read timestamp의 변경을 In-memory/Firestore 모두 거부한다.
+10. History용 Workspace Risk repository query와 Firestore index declaration을 추가했다.
+    - Firestore mapper는 `review_version`을 strict required field로 왕복한다.
+    - fake Firestore backend에서 workspace scope query, review optimistic transaction과 Notification read 단방향 규칙을 검증했다.
+11. Phase 7 회귀 테스트의 직접 review setup도 review version을 증가시키도록 갱신해 새 불변식 아래에서 machine lifecycle의 review 보존을 재검증했다.
+12. Phase 8 메인 구현 완료 후 이전 검토 사항을 제한적으로 재검토했다.
+    - optional RiskEvent hash chain은 현재 append-only/deterministic identity보다 우선하지 않았고 구현하지 않았다.
+    - Security policy persistence는 Phase 9 Control API와 함께 transaction/audit surface를 정하는 기존 결정을 유지했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. Human review, timeline, activity, export와 Notification의 HTTP endpoint/DTO/ETag 매핑은 아직 구현하지 않았다.
+   - application use case와 safe projection은 완성했다. 인증 session, 공통 authorization dependency와 API error model이 필요한 Phase 9에서 router와 함께 연결한다.
+2. Workspace activity와 Notification의 cursor pagination은 아직 구현하지 않았다.
+   - Phase 8은 1~500의 bounded limit와 deterministic ordering을 제공한다. 외부 cursor 형식은 Phase 9 API DTO, 실제 Firestore index/scale 검증은 Phase 12와 함께 확정한다.
+3. Firestore 문서에 새로 추가한 `Risk.review_version`의 production migration은 작성하지 않았다.
+   - 현재 프로젝트에는 production data가 없고 schema version 1 개발 단계다. 통합 전에 기존 환경 데이터가 생겼다면 version 0 backfill 또는 mapper schema version 증가를 검토해야 한다.
+4. 실제 Firestore Emulator에서 Phase 8 service 전체를 실행하지 못했다.
+   - `FIRESTORE_EMULATOR_HOST`가 없어 공용 emulator test 1건이 계속 skip된다. strict mapper와 fake transactional backend parity는 통과했다.
+5. VWS security policy content 저장/편집과 `SECURITY_POLICY_CHANGED` 생성 use case는 아직 구현하지 않았다.
+   - Phase 8은 이미 존재하는 AuditEvent의 query/export를 구현했다. policy request DTO, version precondition과 권한 오류가 함께 필요한 Phase 9 Security API에서 완료한다.
+6. RiskEvent hash chain은 구현하지 않았다.
+   - 명세상 MVP 권장 사항이지 필수 완료 조건은 아니다. append-only repository, deterministic review event identity와 transactional write가 현재 무결성 기반이며, export 서명/검증 요구가 생기면 Phase 12에서 체인 도입 비용과 migration을 검토한다.
+7. Email/Slack/FCM 등 외부 Notification delivery는 구현하지 않았다.
+   - MVP 필수 범위는 Firestore/in-app notification이며 외부 channel은 명세상 후속 항목이다.
+8. Analyzer 호출/result delivery adapter와 대규모 evidence storage는 이전 Phase와 동일하게 Agent 3/Integration 경계 또는 의도적 비보존 항목이다.
+   - Phase 8 본 작업에 포함하지 않았으며 Control history에도 raw result/evidence/source를 새로 노출하지 않는다.
+
+#### 추가 검토가 필요한 사항
+
+1. optimistic precondition은 Risk 전체 `updated_at`이 아니라 독립 `review_version`으로 결정했다.
+   - analyzer가 lifecycle/priority를 갱신해도 reviewer의 version이 불필요하게 충돌하지 않고, 동시에 제출된 서로 다른 human disposition만 명확히 충돌시킨다.
+2. 같은 disposition 재요청에서 comment만 추가하는 동작은 지원하지 않는다.
+   - disposition 변화 이력과 자유 형식 메모를 혼합하지 않기 위해 no-op으로 처리한다. 별도 reviewer note 기능이 필요하면 새로운 event intent/API로 명시해야 한다.
+3. Risk timeline은 `RISK_VIEW`, 세 stream이 합쳐진 Workspace activity는 `AUDIT_VIEW`, export는 `AUDIT_EXPORT`로 분리했다.
+   - 일반 viewer가 Risk history는 볼 수 있지만 source access와 운영/security audit 전체는 볼 수 없도록 Phase 2 permission 모델을 그대로 적용한다.
+4. history 조회 시에도 저장 필드의 `_safe` 이름을 절대 신뢰하지 않고 출력 직전에 다시 redaction한다.
+   - 과거/외부 adapter가 잘못된 metadata를 저장했더라도 token과 local path가 export에 그대로 나오지 않도록 하는 defense-in-depth다. 한 event가 bounds를 위반하면 조용히 잘라내기보다 query/export를 fail-closed 처리한다.
+5. Notification은 현재 VWS membership이 아니라 canonical target user 소유권으로 조회한다.
+   - membership 제거 후에도 본인에게 이미 발생한 보안/운영 알림을 확인할 수 있고 다른 사용자는 ID를 알아도 조회·read할 수 없다. Phase 9 session identity가 이 actor ID를 보증해야 한다.
+6. read transition의 clock이 notification 생성보다 과거면 created time으로 올린다.
+   - clock skew로 domain chronology가 깨지는 것을 막되 이미 READ인 notification의 timestamp는 재전달 시 수정하지 않는다.
+7. 이전 검토 목록의 Firestore emulator, pagination/scale, policy persistence와 RiskEvent hash chain을 메인 작업 후 다시 확인했다.
+   - 현재 Phase 범위 안에서 더 합리적인 즉시 개선안은 history query index declaration과 bounded limit뿐이어서 이를 반영했고, 나머지는 위 미완료 사유에 따라 후속 Phase에 유지한다.
+
+#### 검증 결과
+
+```text
+Phase 8 focused service/persistence tests               50 passed
+tests/control                                           158 passed, 1 skipped
+shared/contracts/tests + tests/control                  185 passed, 1 skipped
+pnpm run generate                                       PASS
+generated files tracked diff after generation/tests    NONE
+Python compileall                                       PASS
+pip check                                               PASS
+pnpm run typecheck                                      PASS
+pnpm run verify:resolution                              PASS
+git diff --check                                        PASS
+```
+
+#### 제안 커밋 메시지
+
+`feat: add versioned review and safe history services`
 
 ### 2026-08-16 — 이전 Phase 보완 및 Phase 7 완료
 

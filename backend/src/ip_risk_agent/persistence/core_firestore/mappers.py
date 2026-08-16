@@ -741,6 +741,7 @@ def risk_to_document(value: Risk) -> Document:
         updated_at=value.updated_at,
         resolved_at=value.resolved_at,
         latest_evidence_revision=value.latest_evidence_revision,
+        review_version=value.review_version,
     )
 
 
@@ -764,6 +765,7 @@ def risk_from_document(document: Mapping[str, object]) -> Risk:
             "updated_at",
             "resolved_at",
             "latest_evidence_revision",
+            "review_version",
         ),
     )
     return Risk(
@@ -782,6 +784,7 @@ def risk_from_document(document: Mapping[str, object]) -> Risk:
         updated_at=_datetime(data["updated_at"]),
         resolved_at=_optional_datetime(data["resolved_at"]),
         latest_evidence_revision=_optional_str(data["latest_evidence_revision"]),
+        review_version=_int(data["review_version"]),
     )
 
 

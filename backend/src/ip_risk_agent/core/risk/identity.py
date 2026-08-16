@@ -1,6 +1,6 @@
 """Stable Risk identity functions owned by the Control Plane."""
 
-from ip_risk_agent.core.common import stable_key
+from ip_risk_agent.core.common import DomainInvariantError, stable_key
 
 
 def risk_id_for(risk_key: str) -> str:
@@ -22,6 +22,12 @@ def risk_event_id_for(
     event_type: str,
 ) -> str:
     return stable_key("risk-event", (risk_id, result_fingerprint, event_type))
+
+
+def risk_review_event_id_for(risk_id: str, review_version: int) -> str:
+    if review_version < 1:
+        raise DomainInvariantError("review event version must be positive")
+    return stable_key("risk-review-event", (risk_id, str(review_version)))
 
 
 def patent_risk_key(artifact_id: str, normalized_application_number: str) -> str:

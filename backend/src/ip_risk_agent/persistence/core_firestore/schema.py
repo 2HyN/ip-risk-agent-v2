@@ -63,6 +63,7 @@ REQUIRED_COMPOSITE_INDEXES = (
         RISKS,
         ("record_kind", "artifact_id", "analysis_type", "lifecycle_state"),
     ),
+    CompositeIndex(RISKS, ("record_kind", "risk_workspace_id")),
 )
 
 

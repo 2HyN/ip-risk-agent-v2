@@ -28,7 +28,7 @@ from ip_risk_agent.core.mounts import (
     WorkspaceMount,
     mount_alias_key,
 )
-from ip_risk_agent.core.notifications import Notification
+from ip_risk_agent.core.notifications import Notification, NotificationStatus
 from ip_risk_agent.core.risk import Risk, RiskEvent, RiskEvidence, RiskLifecycleState
 from ip_risk_agent.core.workspaces import RiskWorkspace
 
@@ -646,6 +646,21 @@ class FirestoreRiskRepository(_Repository):
             or previous.first_seen_at != risk.first_seen_at
         ):
             raise UniqueConstraintViolation("risk canonical identity is immutable")
+        if (
+            risk.review_version < previous.review_version
+            or risk.review_version > previous.review_version + 1
+            or (
+                risk.review_disposition is previous.review_disposition
+                and risk.review_version != previous.review_version
+            )
+            or (
+                risk.review_disposition is not previous.review_disposition
+                and risk.review_version != previous.review_version + 1
+            )
+        ):
+            raise UniqueConstraintViolation(
+                "risk review disposition requires one review version increment"
+            )
         await claim_unique_key(
             self._session,
             collection=RISKS,
@@ -677,6 +692,16 @@ class FirestoreRiskRepository(_Repository):
                 )
             )
         return await self._query(RISKS, tuple(filters), risk_from_document)
+
+    async def list_for_workspace(self, risk_workspace_id: str) -> tuple[Risk, ...]:
+        return await self._query(
+            RISKS,
+            (
+                QueryFilter("record_kind", "risk"),
+                QueryFilter("risk_workspace_id", risk_workspace_id),
+            ),
+            risk_from_document,
+        )
 
     async def add_evidence(self, evidence: RiskEvidence) -> None:
         if await self.get(evidence.risk_id) is None:
@@ -754,6 +779,26 @@ class FirestoreNotificationRepository(_Repository):
         )
 
     async def save(self, notification: Notification) -> None:
+        previous = await _required(
+            self.get(notification.id), "notification", notification.id
+        )
+        if (
+            previous.user_id != notification.user_id
+            or previous.risk_workspace_id != notification.risk_workspace_id
+            or previous.notification_type is not notification.notification_type
+            or previous.created_at != notification.created_at
+            or previous.metadata_safe != notification.metadata_safe
+            or (
+                previous.status is NotificationStatus.READ
+                and (
+                    notification.status is not NotificationStatus.READ
+                    or notification.read_at != previous.read_at
+                )
+            )
+        ):
+            raise UniqueConstraintViolation(
+                "notification identity is immutable and READ cannot become UNREAD"
+            )
         await self._save(
             NOTIFICATIONS, notification.id, notification, notification_to_document
         )

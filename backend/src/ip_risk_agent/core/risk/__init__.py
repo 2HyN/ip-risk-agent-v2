@@ -6,6 +6,7 @@ from .identity import (
     risk_evidence_id_for,
     risk_event_id_for,
     risk_id_for,
+    risk_review_event_id_for,
 )
 from .models import (
     ActorType,
@@ -44,4 +45,5 @@ __all__ = [
     "risk_evidence_id_for",
     "risk_event_id_for",
     "risk_id_for",
+    "risk_review_event_id_for",
 ]

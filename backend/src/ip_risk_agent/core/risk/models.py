@@ -59,6 +59,7 @@ class Risk:
     updated_at: datetime
     resolved_at: datetime | None = None
     latest_evidence_revision: str | None = None
+    review_version: int = 0
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -117,6 +118,8 @@ class Risk:
             object.__setattr__(self, "resolved_at", resolved_at)
         elif self.resolved_at is not None:
             raise DomainInvariantError("active risks cannot have risk.resolved_at")
+        if isinstance(self.review_version, bool) or self.review_version < 0:
+            raise DomainInvariantError("risk.review_version cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)
