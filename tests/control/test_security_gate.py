@@ -380,6 +380,44 @@ def test_every_global_or_source_scope_deny_wins_and_still_records_access(
     run(scenario())
 
 
+def test_canonical_workspace_policy_text_overrides_static_gate_template() -> None:
+    async def scenario() -> None:
+        store, _, job_id, _ = await seed_running_job(
+            path_hint="private/secret.py",
+            source_artifact_id="repo:path:private/secret.py",
+        )
+        async with store() as uow:
+            workspace = await uow.workspaces.get("vws-1")
+            assert workspace is not None
+            await uow.workspaces.save(
+                replace(
+                    workspace,
+                    security_policy_version="security-v2",
+                    global_ignore_text="/Backend/private/**\n",
+                    updated_at=NOW + timedelta(seconds=1),
+                )
+            )
+            await uow.commit()
+        gate = SecurityGateService(
+            unit_of_work_factory=store,
+            policy_resolver=InMemorySecurityPolicyResolver(
+                (("vws-1", SecurityGatePolicy(policy_version="security-v2")),)
+            ),
+            clock=lambda: NOW + timedelta(seconds=3),
+            use_canonical_workspace_policy_text=True,
+        )
+        result = await gate.build_analysis_artifact(
+            make_snapshot(
+                path_hint="private/secret.py",
+                source_artifact_id="repo:path:private/secret.py",
+            ),
+            job_id,
+        )
+        assert result.denial_reason is SecurityGateDenialReason.GLOBAL_IGNORE_DENIED
+
+    run(scenario())
+
+
 def test_invalid_ignore_policy_fails_closed_after_recording_access() -> None:
     async def scenario() -> None:
         store, _, job_id, _ = await seed_running_job()

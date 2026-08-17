@@ -136,6 +136,7 @@ class SecurityGateService:
         policy_resolver: SecurityPolicyResolver,
         clock: Clock,
         concurrency_attempts: int = 3,
+        use_canonical_workspace_policy_text: bool = False,
     ) -> None:
         if concurrency_attempts < 1:
             raise ValueError("concurrency_attempts must be positive")
@@ -143,6 +144,9 @@ class SecurityGateService:
         self._policy_resolver = policy_resolver
         self._clock = clock
         self._concurrency_attempts = concurrency_attempts
+        self._use_canonical_workspace_policy_text = (
+            use_canonical_workspace_policy_text
+        )
 
     async def build_analysis_artifact(
         self,
@@ -232,6 +236,11 @@ class SecurityGateService:
             return SecurityGateDenialReason.POLICY_UNAVAILABLE, None
         if policy.policy_version != context.workspace.security_policy_version:
             return SecurityGateDenialReason.POLICY_INVALID, None
+        if self._use_canonical_workspace_policy_text:
+            policy = replace(
+                policy,
+                global_ignore_text=context.workspace.global_ignore_text,
+            )
 
         logical_path = _canonical_logical_path(context.artifact.logical_path)
         try:

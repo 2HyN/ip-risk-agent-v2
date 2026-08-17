@@ -4,12 +4,12 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 9 — Google App Login과 Control API |
-| 다음 개발 Phase | Phase 10 — ControlPlaneFacade와 Integration surface |
-| 전체 진행률 | 10/14 Phase 완료 |
+| 현재 완료 Phase | Phase 10 — ControlPlaneFacade와 Integration surface |
+| 다음 개발 Phase | Phase 11 — Product Web UI |
+| 전체 진행률 | 11/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
-| 마지막 업데이트 | 2026-08-16 |
+| 마지막 업데이트 | 2026-08-17 |
 
 Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 커밋과 push를 실행하지 않고, 매 개발 요청 종료 시 제안 커밋 메시지만 제공한다.
 
@@ -47,9 +47,10 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - `application/risk_reconcile`에는 AnalysisResult canonical context 검증, per-analysis-type outcome 수용, minimal evidence retention, authoritative Risk set reconciliation과 결과 기반 Audit/Notification 기록이 구현됐다.
 - `application/risk_review`, `application/history`, `application/notifications`에는 versioned human review, 세 canonical history stream의 권한 기반 safe projection/export, 사용자별 in-app inbox와 idempotent read 처리가 구현됐다.
 - `application/auth`, `application/security_policy`와 `api/**`에는 Google OIDC identity upsert, server-revocable signed session, VWS security policy persistence와 전체 Control-owned FastAPI router factory가 구현됐다.
+- `application/public_facade`에는 cross-plane authorization/source metadata callback과 SourceChange→Security Gate→AnalysisResult 전체 pipeline을 감싸는 안정된 Integration surface가 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐고, Control-owned API 영역은 Phase 9 router/factory까지 구현됐다.
 - Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~9 Domain, policy, repository/Firestore persistence, application orchestration와 Control API test 168개가 구현됐으며 현재 환경에서는 167개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~10 Domain, policy, repository/Firestore persistence, application/API/facade orchestration test 174개가 구현됐으며 현재 환경에서는 173개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
@@ -78,7 +79,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 7 | AnalysisResult intake와 Risk reconciliation | 완료 |
 | 8 | Human review, History, Audit, Notification | 완료 |
 | 9 | Google App Login과 Control API | 완료 |
-| 10 | ControlPlaneFacade와 Integration surface | 미구현 |
+| 10 | ControlPlaneFacade와 Integration surface | 완료 |
 | 11 | Product Web UI | 미구현 |
 | 12 | 관측성, 보안 hardening과 전체 검증 | 미구현 |
 | 13 | 인계 문서와 통합 준비 | 미구현 |
@@ -545,9 +546,9 @@ pnpm run verify:resolution
 - Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
 - 공식 생성 후 generated tracked diff: 0
 
-### Phase 10 — ControlPlaneFacade와 Integration surface
+### Phase 10 — ControlPlaneFacade와 Integration surface `[완료]`
 
-1. `application/public_facade`에 최소 다음 기능을 안정된 public surface로 제공한다.
+1. [x] `application/public_facade`에 최소 다음 기능을 안정된 public surface로 제공한다.
    - `authorize_vws_action`
    - `register_source_change`
    - `register_source_access`
@@ -555,13 +556,30 @@ pnpm run verify:resolution
    - `accept_analysis_result`
    - `get_mount_ref`
    - `get_source_workspace_context`
-2. facade constructor가 repository Unit of Work, queue port, clock/ID factory와 config를 명시적으로 받게 한다.
-3. Agent 2 source router가 사용할 authorization callback과 canonical metadata creation callback을 정의하되 Agent 2 내부 타입을 import하지 않는다.
-4. Integration용 예제는 fake ports 기반으로 작성하고 production wiring은 `composition/**`에 남긴다.
+2. [x] facade constructor가 repository Unit of Work, queue port, clock/ID factory와 config를 명시적으로 받게 했다.
+3. [x] Agent 2 source router가 사용할 authorization callback과 canonical metadata creation callback을 Agent 2 타입 import 없이 정의했다.
+4. [x] Integration용 fake pipeline test와 `AGENT_DELIVERY.md` wiring 예제를 제공하고 production wiring은 `composition/**`에 남겼다.
 
 완료 조건:
 
 - Integration이 Agent 1 내부 service/repository를 직접 import하지 않고 전체 pipeline을 연결할 수 있다.
+
+구현 결과:
+
+- `application/public_facade/models.py`: 안정된 content-free public command/result/config DTO
+- `application/public_facade/ports.py`: Source router authorization 및 canonical metadata registration callback protocol
+- `application/public_facade/service.py`: authorization, source metadata/access/change, worker claim/failure, Security Gate, result intake, mount/source/original query facade
+- `application/security_gate/service.py`: facade 사용 시 canonical `RiskWorkspace.global_ignore_text`를 현재 policy 원문으로 적용
+- `tests/control/test_public_facade.py`: deterministic metadata registration, callback authorization, source access idempotency, 전체 fake pipeline와 failure redaction
+- `AGENT_DELIVERY.md`: repository/API/facade/SourceAdapter/queue/Open Original wiring과 known issue 인계
+
+검증 결과:
+
+- Phase 10 facade 및 pipeline focused tests: 52 passed
+- Phase 1~10 Control tests: 173 passed, 1 skipped(emulator 미설정)
+- Frozen Contract + Control tests: 200 passed, 1 skipped(emulator 미설정)
+- Python compileall, `pip check`, `pnpm run typecheck`, `pnpm run verify:resolution`: 통과
+- 공식 생성 후 generated tracked diff: 0
 
 ### Phase 11 — Product Web UI
 
@@ -716,6 +734,104 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
 
 ## 9. 작업 현황 로그
+
+### 2026-08-17 — 직전 미완료 보완 및 Phase 10 완료
+
+#### 구현 완료 항목
+
+1. **Phase 9 Open Original 미완료 경계 보완**
+   - Risk API의 opaque `SOURCE_OPEN_ORIGINAL + artifact_id`를 `ControlPlaneFacade.get_original_source_request()`와 연결했다.
+   - facade는 RISK_VIEW를 확인한 뒤 raw content, local absolute path, provider URL 없이 `MountRef`와 content-free `SourceArtifactRef`만 반환한다.
+   - Integration이 `mount.source_type`으로 Agent 2 adapter를 선택하고 `resolve_original()`을 호출하도록 `AGENT_DELIVERY.md`에 고정했다. provider/local authority는 Source Plane과 provider/owning device가 최종 확인한다.
+2. **안정된 `ControlPlaneFacade` public surface**
+   - `authorize_vws_action`, `register_source_change`, `register_source_access`, `build_analysis_artifact`, `accept_analysis_result`, `get_mount_ref`, `get_source_workspace_context` 최소 surface를 구현했다.
+   - 전체 worker flow에 필요한 `claim_analysis`, `fail_analysis`, `retry_failed_analysis`와 Open Original request query를 함께 제공했다.
+   - facade 결과는 기존 내부 service dataclass를 노출하지 않고 facade-owned immutable DTO 또는 Frozen Contract로 projection한다.
+3. **명시적 constructor/config 경계**
+   - Unit of Work factory, raw-free task enqueuer, UTC clock, side-effect-free ID factory와 `ControlPlaneFacadeConfig`를 필수 constructor dependency로 받는다.
+   - requested analysis type, retry/concurrency, Security Gate byte/MIME limit과 evidence retention을 config에 모았다.
+4. **canonical source metadata registration callback**
+   - verified Source callback이 SourceConnection, SourceWorkspace와 WorkspaceMount metadata를 한 transaction으로 생성하는 `register_source_metadata()`를 구현했다.
+   - ACTIVE user/workspace, SOURCE_MOUNT permission과 provider credential owner 일치를 먼저 검사한다.
+   - source type/connection key/source workspace key/VWS로 deterministic canonical ID를 만들고 retry 시 같은 record와 audit로 수렴한다.
+   - credential 내용은 받지 않고 compact opaque `credential_ref`만 허용하며 tracking config의 secret/token 성격 key를 거부한다.
+   - 신규 connection/mount에는 content-free `SOURCE_CONNECTED`/`MOUNT_CREATED` audit를 남긴다.
+5. **Source router callback protocol**
+   - `SourceAuthorizationCallback`과 `SourceMetadataRegistrationCallback` protocol을 facade package에서 export했다.
+   - callback signature는 Agent 2 내부 type을 import하지 않고 facade DTO와 shared `SourceType`만 사용한다.
+6. **VWS/source authorization facade**
+   - canonical active user, membership, action permission, mount ownership과 provider credential owner를 한 callback에서 판정한다.
+   - provider authority가 별도로 필요한 action은 decision에 `provider_authority_required=True`를 유지해 Control permission이 raw-source authority로 오인되지 않게 했다.
+7. **독립 SourceAccess registration과 Gate de-duplication**
+   - Source Plane이 별도로 전달하는 `SourceAccessReceiptContext`를 canonical Artifact/Mount/SourceWorkspace/Job과 교차 검증해 append-only event로 기록한다.
+   - Security Gate와 동일한 deterministic identity 식을 사용하므로 facade에서 먼저 기록한 receipt를 Gate가 다시 보아도 같은 event로 무해하게 수렴한다.
+8. **public worker orchestration 보완**
+   - `register_source_change()`가 반환한 content-free ID로 worker가 facade를 통해 claim하도록 했다.
+   - Snapshot fetch 자체가 실패하면 `fail_analysis()`가 입력 메시지를 secret redaction/길이 제한한 뒤에만 ChangeEvent/AnalysisJob에 저장한다.
+   - retry는 동일 change-event task ID만 다시 enqueue한다.
+9. **canonical `.ipriskignore` 연결 개선**
+   - Phase 9에서 `RiskWorkspace.global_ignore_text`를 canonical 저장소로 확정했으나 기존 Gate resolver template와 자동 연결되지 않았던 공백을 보완했다.
+   - facade 경로의 Gate는 config resolver에서 size/MIME limit을 받고 policy 원문은 transaction에서 읽은 canonical workspace 값으로 덮어써 다음 분석부터 즉시 적용한다.
+10. **Integration delivery 문서와 실행 예제**
+    - root `AGENT_DELIVERY.md`에 public import, Firestore constructor, Source callback, queue, 전체 pipeline, Open Original, API bundle, 환경 변수와 known issue를 기록했다.
+    - fake SourceChange→claim→SourceSnapshot→Security Gate→AnalysisResult→Risk 시나리오를 `tests/control/test_public_facade.py`에서 실제 실행했다.
+11. **소유 경계 보존**
+    - `main.py`, `worker.py`, `composition/**`, Agent 2 `connectors/**`/source route와 root manifest/lock을 변경하지 않았다.
+    - 신규 package 없이 Python 3.14.7 기존 검증 dependency만 사용했다.
+
+#### 미구현 항목 및 사유
+
+1. **production composition과 실제 Cloud Tasks enqueuer**
+   - facade와 constructor/wiring 계약은 완료했지만 최종 FastAPI/worker app, Agent 2/3 registry, Cloud Tasks SDK adapter는 Integration 소유다. `composition/**`, `main.py`, `worker.py`를 수정하지 않았다.
+2. **실제 SourceAdapter와 Open Original resolver 실행**
+   - Control은 안전한 request context까지만 제공한다. Drive/GitHub URL 생성과 Local device registry 처리는 credential/filesystem을 소유한 Agent 2가 구현하고 Integration이 binding해야 한다.
+3. **credential rotation, reconnect와 source health/status callback**
+   - 이번 metadata callback은 create/idempotent registration만 제공하며 동일 key의 의미 변경은 collision으로 거부한다. credential rotation 및 connection/workspace status transition은 Agent 2 provider UX/semantics와 함께 별도 command로 합의해야 한다.
+4. **실제 Google OIDC staging 검증**
+   - Phase 9와 동일하게 staging credential 및 callback domain이 없어 fake provider 검증 상태다.
+5. **Firestore native cursor와 배포 hardening**
+   - native document cursor, CORS/TrustedHost/proxy/rate-limit, structured logging/correlation은 Phase 12의 scale/deployment 정보가 필요한 범위다.
+6. **기존 document migration**
+   - production data 존재 여부가 확정되지 않아 `session_version`/`global_ignore_text` backfill 도구는 만들지 않았다. Integration 전에 데이터가 확인되면 migration/rollback plan이 필요하다.
+7. **Firestore emulator test**
+   - `FIRESTORE_EMULATOR_HOST`가 없어 1개 test는 계속 skip된다. facade는 in-memory 전체 pipeline과 기존 Firestore repository parity로 검증했다.
+8. **초대 자동 수락 UX**
+   - 로그인 callback에서 암묵적으로 membership을 변경하지 않는 결정을 유지한다. 명시적 invitation acceptance 화면/API가 필요한 Phase 11 UX에서 다시 검토한다.
+
+#### 추가 검토가 필요한 사항
+
+1. **public DTO와 내부 service 격리**
+   - Integration이 내부 service 결과나 repository aggregate에 결합되지 않도록 facade projection을 별도로 만들었다. 향후 내부 refactor는 이 DTO 의미와 method signature를 호환되게 유지해야 한다.
+2. **PublicVwsAction parity**
+   - Agent 2가 core enum을 import하지 않도록 facade-owned action enum을 제공하고 내부에서 canonical `VwsAction`으로 변환한다. action 추가 시 두 enum의 parity test/검토가 필요하다.
+3. **deterministic source metadata identity**
+   - 외부 callback retry 안정성을 위해 ID factory가 아니라 stable key를 canonical entity ID에 사용하고, ID factory는 audit event에만 사용했다. caller는 connection/workspace key를 retry 전후 동일하게 유지해야 한다.
+4. **opaque credential reference 노출 범위**
+   - `SourceWorkspaceContext.credential_ref`는 repr에서 숨기지만 Integration 내부에서 Agent 2 adapter binding에 필요하다. 이 DTO를 Product API response나 log로 직렬화하면 안 된다.
+5. **canonical policy resolver 역할 분리**
+   - Security Gate config는 size/MIME limit만 결정하고 VWS policy version/text는 canonical workspace가 결정한다. 이로써 Phase 9 policy 변경과 worker 사이의 별도 cache invalidation 요구를 제거했다.
+6. **SourceAccess identity 통합**
+   - 별도 receipt callback과 Gate가 같은 job/revision/receipt에 대해 같은 ID를 만들도록 했다. provider가 timestamp/request ID/content byte를 재전달 때 변경하면 별도 실제 access event로 기록되는 현재 의미를 유지한다.
+7. **worker safe failure 경계**
+   - facade에서 redaction을 한 번 더 적용해 Integration이 provider exception text를 실수로 넘겨도 token-like value가 canonical failure field에 저장되지 않게 했다. 원래 provider exception/log payload는 facade에 전달하지 않는 것이 기본 계약이다.
+8. **Source metadata exact-match registration**
+   - 동일 deterministic key로 label/config/credential reference를 변경하면 조용히 덮어쓰지 않고 collision을 반환한다. mutation command 없이 create callback이 provider 상태를 임의 변경하지 않게 하는 보수적 결정이다.
+9. **AGENT_DELIVERY 갱신 시점**
+   - Phase 10 integration surface 확정 시 최초 문서를 만들었다. Phase 11~13에서 UI, hardening, 최종 test 결과와 known issue를 계속 갱신해야 한다.
+
+#### 검증 결과
+
+- Phase 10 facade/pipeline focused tests: `52 passed`
+- Agent 1 control suite: `173 passed, 1 skipped`
+- shared contracts + Agent 1 control suite: `200 passed, 1 skipped`
+- `pnpm run generate`: 통과, generated contracts tracked diff 없음
+- `pnpm typecheck`: 통과
+- `pnpm verify:resolution`: 통과
+- Python compileall 및 `.venv/Scripts/python.exe -m pip check`: 통과
+
+#### 제안 커밋 메시지
+
+- `feat: add Control Plane integration facade`
 
 ### 2026-08-16 — 직전 미완료 보완 및 Phase 9 완료
 

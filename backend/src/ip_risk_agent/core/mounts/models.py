@@ -67,7 +67,7 @@ class SourceConnection:
     updated_at: datetime
     provider_subject: str | None = None
     provider_account_label: str | None = None
-    credential_ref: str | None = None
+    credential_ref: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         for field_name in ("id", "authorized_by_user_id"):
