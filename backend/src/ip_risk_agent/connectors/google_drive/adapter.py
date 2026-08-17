@@ -4,9 +4,6 @@ models.py의 DriveProvider Protocol에만 의존한다 (client.py를 직접
 import하지 않음) — 그래서 googleapiclient 설치 여부와 무관하게 지금
 바로 테스트할 수 있다. 운영 시엔 client.GoogleDriveProviderFactory가,
 테스트에선 Fake factory가 provider_factory로 주입된다.
-
-reconcile()은 다음 단계에서 구현한다 (이번 턴은 health/fetch_snapshot/
-resolve_original까지).
 """
 
 from __future__ import annotations
@@ -31,6 +28,7 @@ from iprisk_contracts.common import (
     SourceType,
     TextSegment,
 )
+from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
@@ -42,6 +40,8 @@ from ..common.errors import (
     PermissionDeniedError,
     SourceConnectorError,
 )
+from ..common.fingerprint import drive_change_fingerprint
+from ..common.runtime_store import DriveRuntime
 from .connection_lookup import DriveConnectionContext, DriveConnectionLookup
 from .models import SELECTABLE_MIME_TYPES, DriveProvider
 from .tracking_scope import DriveTrackingScope
@@ -61,11 +61,13 @@ class GoogleDriveAdapter:
         credential_vault: SourceCredentialVault,
         connection_lookup: DriveConnectionLookup,
         tracking_scope_store,
+        runtime_store,
     ) -> None:
         self._provider_factory = provider_factory
         self._credential_vault = credential_vault
         self._connection_lookup = connection_lookup
         self._tracking_scope_store = tracking_scope_store
+        self._runtime_store = runtime_store
 
     async def _provider_for_mount(
         self, mount_id: str
@@ -190,3 +192,71 @@ class GoogleDriveAdapter:
             provider_url=provider_url,
             metadata_safe={},
         )
+
+    async def reconcile(self, mount: MountRef, cursor: str | None) -> ReconcileResult:
+        scope: DriveTrackingScope | None = await self._tracking_scope_store.load(mount.mount_id)
+        tracked_ids = set(scope.selected_file_ids) if scope else set()
+
+        provider, connection = await self._provider_for_mount(mount.mount_id)
+
+        page_token = cursor
+        if page_token is None:
+            runtime: DriveRuntime | None = await self._runtime_store.load(connection.connection_id)
+            page_token = runtime.change_cursor if runtime else None
+        if page_token is None:
+            page_token = provider.get_start_page_token()
+
+        page = provider.list_changes(page_token)
+        await self._persist_refreshed_token(connection, provider)
+
+        now = datetime.now(timezone.utc)
+        changes: list[SourceChange] = []
+        for item in page.changes:
+            if item.file_id not in tracked_ids:
+                continue
+            change_type = ChangeType.DELETE if item.removed else ChangeType.UPDATE
+            revision = item.revision_id or "unknown"
+            fingerprint = drive_change_fingerprint(file_id=item.file_id, resolved_revision=revision)
+            changes.append(
+                SourceChange(
+                    contract_version="1",
+                    event_id=fingerprint,
+                    provider_event_id=None,
+                    event_fingerprint=fingerprint,
+                    risk_workspace_id=mount.risk_workspace_id,
+                    mount_id=mount.mount_id,
+                    source_workspace_id=mount.source_workspace_id,
+                    source_type=SourceType.GOOGLE_DRIVE,
+                    artifact=SourceArtifactRef(
+                        source_artifact_id=item.file_id,
+                        display_name=self._display_name(scope, item.file_id),
+                    ),
+                    change_type=change_type,
+                    revision=item.revision_id,
+                    previous_revision=None,
+                    observed_at=now,
+                    safe_metadata={},
+                )
+            )
+
+        has_more = page.next_page_token is not None
+        next_cursor = page.next_page_token or page.new_start_page_token
+
+        if not has_more and page.new_start_page_token:
+            await self._runtime_store.save(
+                connection.connection_id,
+                DriveRuntime(
+                    connection_id=connection.connection_id,
+                    change_cursor=page.new_start_page_token,
+                ),
+            )
+
+        return ReconcileResult(changes=changes, next_cursor=next_cursor, has_more=has_more)
+
+    @staticmethod
+    def _display_name(scope: DriveTrackingScope | None, file_id: str) -> str:
+        if scope is None:
+            return file_id
+        metadata = scope.display_metadata_by_file.get(file_id) or {}
+        name = metadata.get("name")
+        return str(name) if name else file_id
