@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from ip_risk_agent.application.repositories import (
+    ConcurrencyConflictError,
     ControlUnitOfWork,
     ControlUnitOfWorkFactory,
     RecordNotFoundError,
@@ -52,12 +53,26 @@ class AnalysisJobOrchestrationService:
         unit_of_work_factory: ControlUnitOfWorkFactory,
         task_enqueuer: TaskEnqueuer,
         clock: Clock,
+        concurrency_attempts: int = 3,
     ) -> None:
+        if concurrency_attempts < 1:
+            raise ValueError("concurrency_attempts must be positive")
         self._unit_of_work_factory = unit_of_work_factory
         self._task_enqueuer = task_enqueuer
         self._clock = clock
+        self._concurrency_attempts = concurrency_attempts
 
     async def claim(self, change_event_id: str) -> AnalysisExecutionState | None:
+        last_conflict: ConcurrencyConflictError | None = None
+        for _ in range(self._concurrency_attempts):
+            try:
+                return await self._claim_once(change_event_id)
+            except ConcurrencyConflictError as exc:
+                last_conflict = exc
+        assert last_conflict is not None
+        raise last_conflict
+
+    async def _claim_once(self, change_event_id: str) -> AnalysisExecutionState | None:
         async with self._unit_of_work_factory() as uow:
             event, job = await _load_execution(uow, change_event_id)
             if (

@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from fastapi import APIRouter, FastAPI
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from ip_risk_agent.application.observability import StructuredLogger
 
 from .auth import AuthRouterDependencies, create_auth_router
 from .common import install_error_handlers
@@ -21,6 +25,11 @@ from .workspaces import (
     WorkspaceRouterDependencies,
     create_invitations_router,
     create_workspaces_router,
+)
+from .runtime import (
+    ApiObservabilityMiddleware,
+    ApplicationHardeningConfig,
+    LocalRateLimitMiddleware,
 )
 
 
@@ -50,6 +59,10 @@ class ControlApiDependencies:
     security: SecurityRouterDependencies
     notifications: NotificationRouterDependencies
     session: ApplicationSessionConfig
+    hardening: ApplicationHardeningConfig = field(
+        default_factory=ApplicationHardeningConfig
+    )
+    observer: StructuredLogger = field(default_factory=StructuredLogger)
 
 
 class ControlApiBundle:
@@ -67,6 +80,7 @@ class ControlApiBundle:
 
     def install(self, app: FastAPI) -> None:
         session = self._dependencies.session
+        hardening = self._dependencies.hardening
         app.add_middleware(
             SessionMiddleware,
             secret_key=session.secret_key,
@@ -75,8 +89,31 @@ class ControlApiBundle:
             same_site=session.same_site,
             https_only=session.https_only,
         )
+        if hardening.allowed_origins:
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=list(hardening.allowed_origins),
+                allow_credentials=True,
+                allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                allow_headers=["Content-Type", "X-CSRF-Token", "X-Request-ID"],
+            )
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=list(hardening.trusted_hosts),
+        )
+        if hardening.rate_limit_requests is not None:
+            app.add_middleware(
+                LocalRateLimitMiddleware,
+                requests=hardening.rate_limit_requests,
+                window_seconds=hardening.rate_limit_window_seconds,
+                observer=self._dependencies.observer,
+            )
+        app.add_middleware(
+            ApiObservabilityMiddleware,
+            observer=self._dependencies.observer,
+        )
         app.include_router(self.router)
-        install_error_handlers(app)
+        install_error_handlers(app, observer=self._dependencies.observer)
 
 
 def create_control_api_bundle(dependencies: ControlApiDependencies) -> ControlApiBundle:
@@ -85,6 +122,7 @@ def create_control_api_bundle(dependencies: ControlApiDependencies) -> ControlAp
 
 __all__ = [
     "ApplicationSessionConfig",
+    "ApplicationHardeningConfig",
     "ControlApiBundle",
     "ControlApiDependencies",
     "create_control_api_bundle",

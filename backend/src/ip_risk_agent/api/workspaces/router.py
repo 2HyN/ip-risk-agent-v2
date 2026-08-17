@@ -208,6 +208,19 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
         )
         return workspace
 
+    @router.get("/{vws_id}/membership", response_model=MembershipResponse)
+    async def get_current_membership(
+        vws_id: str,
+        principal: CurrentPrincipal = Depends(current),
+    ):
+        _workspace, membership = await require_workspace_action(
+            deps.unit_of_work_factory,
+            risk_workspace_id=vws_id,
+            actor_user_id=principal.user.id,
+            action=VwsAction.VWS_VIEW,
+        )
+        return membership
+
     @router.get("/{vws_id}/dashboard", response_model=WorkspaceDashboardResponse)
     async def get_dashboard(
         vws_id: str,

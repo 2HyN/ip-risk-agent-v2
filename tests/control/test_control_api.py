@@ -10,10 +10,12 @@ from starlette.responses import RedirectResponse
 
 from iprisk_contracts import AnalysisType, ReviewPriority, SourceAccessType
 from ip_risk_agent.api import (
+    ApplicationHardeningConfig,
     ApplicationSessionConfig,
     ControlApiDependencies,
     create_control_api_bundle,
 )
+from ip_risk_agent.application.observability import StructuredLogger
 from ip_risk_agent.api.auth import AuthRouterDependencies, GoogleOidcConfig
 from ip_risk_agent.api.common import CursorCodec
 from ip_risk_agent.api.history import HistoryRouterDependencies
@@ -92,7 +94,12 @@ class FakeGoogleOidcClient:
         return self.identity
 
 
-def build_api(identity: GoogleOidcIdentity | None = None):
+def build_api(
+    identity: GoogleOidcIdentity | None = None,
+    *,
+    hardening: ApplicationHardeningConfig | None = None,
+    observer: StructuredLogger | None = None,
+):
     store = InMemoryControlStore()
     ids = SequentialIds()
     oidc = FakeGoogleOidcClient(
@@ -159,6 +166,8 @@ def build_api(identity: GoogleOidcIdentity | None = None):
             https_only=False,
             max_age_seconds=3_600,
         ),
+        hardening=hardening or ApplicationHardeningConfig(),
+        observer=observer or StructuredLogger(),
     )
     app = FastAPI()
     create_control_api_bundle(dependencies).install(app)

@@ -18,6 +18,11 @@ from ip_risk_agent.application.auth import (
     AuthenticationError,
     AuthenticationService,
 )
+from ip_risk_agent.application.observability import (
+    ErrorCategory,
+    SafeErrorDescriptor,
+    StructuredLogger,
+)
 from ip_risk_agent.application.repositories import (
     ConcurrencyConflictError,
     RecordNotFoundError,
@@ -167,17 +172,38 @@ def opaque_etag(namespace: str, version: str) -> str:
     return f'"{digest}"'
 
 
-def install_error_handlers(app: FastAPI) -> None:
+def install_error_handlers(app: FastAPI, *, observer: StructuredLogger) -> None:
     @app.exception_handler(AuthenticationError)
-    async def authentication_error(_request: Request, _exc: AuthenticationError):
+    async def authentication_error(_request: Request, exc: AuthenticationError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.AUTH,
+            diagnostic_code="authentication_required",
+            status_code=401,
+        )
         return _error(401, "AUTHENTICATION_REQUIRED", "Authentication is required")
 
     @app.exception_handler(CsrfValidationError)
-    async def csrf_error(_request: Request, _exc: CsrfValidationError):
+    async def csrf_error(_request: Request, exc: CsrfValidationError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.PERMISSION,
+            diagnostic_code="csrf_validation_failed",
+            status_code=403,
+        )
         return _error(403, "CSRF_VALIDATION_FAILED", "CSRF validation failed")
 
     @app.exception_handler(OidcProviderUnavailableError)
-    async def oidc_provider_error(_request: Request, _exc: OidcProviderUnavailableError):
+    async def oidc_provider_error(_request: Request, exc: OidcProviderUnavailableError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.PROVIDER_UNAVAILABLE,
+            diagnostic_code="identity_provider_unavailable",
+            status_code=502,
+        )
         return _error(
             502,
             "IDENTITY_PROVIDER_UNAVAILABLE",
@@ -185,14 +211,35 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(AuthorizationDeniedError)
-    async def authorization_error(_request: Request, _exc: AuthorizationDeniedError):
+    async def authorization_error(_request: Request, exc: AuthorizationDeniedError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.PERMISSION,
+            diagnostic_code="workspace_permission_denied",
+            status_code=403,
+        )
         return _error(403, "PERMISSION_DENIED", "Permission denied")
 
     @app.exception_handler(RecordNotFoundError)
-    async def not_found_error(_request: Request, _exc: RecordNotFoundError):
+    async def not_found_error(_request: Request, exc: RecordNotFoundError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.NOT_FOUND,
+            diagnostic_code="record_not_found",
+            status_code=404,
+        )
         return _error(404, "NOT_FOUND", "The requested resource was not found")
 
-    async def optimistic_conflict(_request: Request, _exc: Exception):
+    async def optimistic_conflict(_request: Request, exc: Exception):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.INVALID_RESPONSE,
+            diagnostic_code="optimistic_version_conflict",
+            status_code=409,
+        )
         return _error(409, "VERSION_CONFLICT", "The resource version is stale")
 
     app.add_exception_handler(RiskReviewConflictError, optimistic_conflict)
@@ -202,15 +249,36 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(UniqueConstraintViolation, optimistic_conflict)
 
     @app.exception_handler(InvalidCursorError)
-    async def cursor_error(_request: Request, _exc: InvalidCursorError):
+    async def cursor_error(_request: Request, exc: InvalidCursorError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.INVALID_RESPONSE,
+            diagnostic_code="invalid_pagination_cursor",
+            status_code=400,
+        )
         return _error(400, "INVALID_CURSOR", "The pagination cursor is invalid")
 
     @app.exception_handler(DomainInvariantError)
-    async def domain_error(_request: Request, _exc: DomainInvariantError):
+    async def domain_error(_request: Request, exc: DomainInvariantError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.INVALID_RESPONSE,
+            diagnostic_code="domain_validation_failed",
+            status_code=422,
+        )
         return _error(422, "DOMAIN_VALIDATION_FAILED", "The request violates domain rules")
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, exc: RequestValidationError):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.INVALID_RESPONSE,
+            diagnostic_code="request_validation_failed",
+            status_code=422,
+        )
         details = [
             {"location": list(error["loc"]), "type": error["type"]}
             for error in exc.errors()
@@ -221,6 +289,37 @@ def install_error_handlers(app: FastAPI) -> None:
             "The request is invalid",
             details,
         )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(_request: Request, exc: Exception):
+        _observe_error(
+            observer,
+            exc,
+            category=ErrorCategory.INTERNAL,
+            diagnostic_code="unexpected_control_error",
+            status_code=500,
+        )
+        return _error(500, "INTERNAL_ERROR", "The request could not be completed")
+
+
+def _observe_error(
+    observer: StructuredLogger,
+    exception: BaseException,
+    *,
+    category: ErrorCategory,
+    diagnostic_code: str,
+    status_code: int,
+) -> None:
+    observer.error(
+        SafeErrorDescriptor(
+            category=category,
+            public_code="safe_error",
+            public_message="Safe error response",
+            diagnostic_code=diagnostic_code,
+        ),
+        exception=exception,
+        status_code=status_code,
+    )
 
 
 def _error(

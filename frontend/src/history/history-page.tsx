@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useSession } from "../auth/session";
 import { formatDate, humanize } from "../shared/format";
-import { useResource } from "../shared/hooks/use-resource";
+import { usePagedResource } from "../shared/hooks/use-paged-resource";
 import {
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorState,
@@ -18,8 +19,8 @@ export function HistoryPage() {
   const { api } = useSession();
   const { workspace, canViewAudit } = useWorkspace();
   const [kind, setKind] = useState<HistoryKind>("activity");
-  const resource = useResource(
-    () => api.history(workspace.id, kind),
+  const resource = usePagedResource(
+    (cursor) => api.history(workspace.id, kind, cursor),
     [api, workspace.id, kind],
   );
   return (
@@ -99,6 +100,17 @@ export function HistoryPage() {
             ))}
           </ol>
         </Card>
+      )}
+      {resource.data?.next_cursor === null || resource.data === null ? null : (
+        <div className="pagination-actions">
+          <Button
+            variant="secondary"
+            disabled={resource.loadingMore}
+            onClick={resource.loadMore}
+          >
+            {resource.loadingMore ? "Loading…" : "Load more history"}
+          </Button>
+        </div>
       )}
     </div>
   );

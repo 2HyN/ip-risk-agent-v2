@@ -75,6 +75,51 @@ def test_role_action_matrix(role: MembershipRole, action: VwsAction, allowed: bo
     assert decision.allowed is allowed
 
 
+_ROLE_ACTIONS = {
+    MembershipRole.VIEWER: {
+        VwsAction.VWS_VIEW,
+        VwsAction.RISK_VIEW,
+        VwsAction.MOUNT_STATUS_VIEW,
+    },
+    MembershipRole.RISK_REVIEWER: {
+        VwsAction.VWS_VIEW,
+        VwsAction.RISK_VIEW,
+        VwsAction.RISK_REVIEW,
+        VwsAction.MOUNT_STATUS_VIEW,
+    },
+    MembershipRole.SOURCE_MANAGER: {
+        VwsAction.VWS_VIEW,
+        VwsAction.RISK_VIEW,
+        VwsAction.RISK_REVIEW,
+        VwsAction.SOURCE_MOUNT,
+        VwsAction.MOUNT_STATUS_VIEW,
+        VwsAction.MOUNT_RENAME,
+        VwsAction.MOUNT_SOURCE_OPERATION,
+        VwsAction.MOUNT_RECONNECT,
+        VwsAction.MOUNT_SCOPE_MANAGE,
+    },
+    MembershipRole.OWNER: set(VwsAction),
+}
+
+
+@pytest.mark.parametrize("role", list(MembershipRole))
+@pytest.mark.parametrize("action", list(VwsAction))
+def test_exhaustive_role_action_matrix(
+    role: MembershipRole,
+    action: VwsAction,
+) -> None:
+    membership = make_membership(role)
+    decision = authorize_vws_action(
+        actor_user_id=membership.user_id,
+        risk_workspace_id=membership.risk_workspace_id,
+        membership=membership,
+        action=action,
+        mount=make_mount(owner=membership.user_id),
+        provider_credential_owner_user_id=membership.user_id,
+    )
+    assert decision.allowed is (action in _ROLE_ACTIONS[role])
+
+
 def test_inactive_membership_is_denied() -> None:
     membership = make_membership(MembershipRole.OWNER, status=MembershipStatus.REMOVED)
     decision = authorize_vws_action(

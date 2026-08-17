@@ -1,6 +1,7 @@
 """Physically separated API ownership namespaces."""
 
 from .factory import (
+    ApplicationHardeningConfig,
     ApplicationSessionConfig,
     ControlApiBundle,
     ControlApiDependencies,
@@ -8,6 +9,7 @@ from .factory import (
 )
 
 __all__ = [
+    "ApplicationHardeningConfig",
     "ApplicationSessionConfig",
     "ControlApiBundle",
     "ControlApiDependencies",

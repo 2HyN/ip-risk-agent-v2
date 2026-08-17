@@ -19,6 +19,7 @@ import { AuthGuard } from "./auth-guard";
 import { AppShell, WorkspaceLayout } from "./app-shell";
 import { NotificationsPage } from "./notifications-page";
 import { SourceSlotPage } from "./source-slot-page";
+import { WorkspaceCapabilityRoute } from "../workspace/capability-route";
 import { IntegrationContext } from "./integration-context";
 import type { ControlPlaneIntegration } from "./integration";
 import "../shared/styles.css";
@@ -54,7 +55,14 @@ export function ControlPlaneApp({
                     element={<RiskTimelinePage />}
                   />
                   <Route path="members" element={<MembersPage />} />
-                  <Route path="history" element={<HistoryPage />} />
+                  <Route
+                    path="history"
+                    element={
+                      <WorkspaceCapabilityRoute capability="canViewAudit">
+                        <HistoryPage />
+                      </WorkspaceCapabilityRoute>
+                    }
+                  />
                   <Route path="security" element={<SecurityPage />} />
                   <Route path="sources/*" element={<SourceSlotPage />} />
                 </Route>

@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { formatDate } from "../shared/format";
-import { useResource } from "../shared/hooks/use-resource";
+import { usePagedResource } from "../shared/hooks/use-paged-resource";
 import {
   Badge,
   Button,
@@ -20,8 +20,8 @@ import {
 export function WorkspaceListPage() {
   const { api, user } = useSession();
   const navigate = useNavigate();
-  const resource = useResource(() => api.workspaces(), [api]);
-  const invitations = useResource(() => api.invitations(), [api]);
+  const resource = usePagedResource((cursor) => api.workspaces(cursor), [api]);
+  const invitations = usePagedResource((cursor) => api.invitations(cursor), [api]);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -105,6 +105,17 @@ export function WorkspaceListPage() {
               </Card>
             ))}
           </div>
+          {invitations.data.next_cursor === null ? null : (
+            <div className="pagination-actions">
+              <Button
+                variant="secondary"
+                disabled={invitations.loadingMore}
+                onClick={invitations.loadMore}
+              >
+                {invitations.loadingMore ? "Loading…" : "Load more invitations"}
+              </Button>
+            </div>
+          )}
         </section>
       ) : null}
       <div className="workspace-grid">
@@ -148,6 +159,17 @@ export function WorkspaceListPage() {
                   <span aria-hidden="true">→</span>
                 </button>
               ))}
+            </div>
+          )}
+          {resource.data?.next_cursor === null || resource.data === null ? null : (
+            <div className="pagination-actions">
+              <Button
+                variant="secondary"
+                disabled={resource.loadingMore}
+                onClick={resource.loadMore}
+              >
+                {resource.loadingMore ? "Loading…" : "Load more workspaces"}
+              </Button>
             </div>
           )}
         </section>

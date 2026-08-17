@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useSession } from "../auth/session";
 import { formatDate, humanize } from "../shared/format";
-import { useResource } from "../shared/hooks/use-resource";
+import { usePagedResource } from "../shared/hooks/use-paged-resource";
 import {
   Badge,
   Button,
@@ -23,8 +23,8 @@ const assignableRoles: Role[] = ["SOURCE_MANAGER", "RISK_REVIEWER", "VIEWER"];
 export function MembersPage() {
   const { api, user } = useSession();
   const { workspace, canManageMembers } = useWorkspace();
-  const resource = useResource(
-    () => api.members(workspace.id),
+  const resource = usePagedResource(
+    (cursor) => api.members(workspace.id, cursor),
     [api, workspace.id],
   );
   const [email, setEmail] = useState("");
@@ -211,6 +211,17 @@ export function MembersPage() {
             </table>
           </div>
         </Card>
+      )}
+      {resource.data?.next_cursor === null || resource.data === null ? null : (
+        <div className="pagination-actions">
+          <Button
+            variant="secondary"
+            disabled={resource.loadingMore}
+            onClick={resource.loadMore}
+          >
+            {resource.loadingMore ? "Loading…" : "Load more members"}
+          </Button>
+        </div>
       )}
     </div>
   );

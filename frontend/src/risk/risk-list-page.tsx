@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { formatDate, humanize } from "../shared/format";
-import { useResource } from "../shared/hooks/use-resource";
+import { usePagedResource } from "../shared/hooks/use-paged-resource";
 import {
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorState,
@@ -37,12 +38,12 @@ export function RiskListPage() {
   const { workspace } = useWorkspace();
   const [filters, setFilters] = useState(initialFilters);
   const filterKey = JSON.stringify(filters);
-  const resource = useResource(
-    () => api.risks(workspace.id, filters),
+  const resource = usePagedResource(
+    (cursor) => api.risks(workspace.id, filters, cursor),
     [api, workspace.id, filterKey],
   );
-  const mounts = useResource(
-    () => api.mounts(workspace.id),
+  const mounts = usePagedResource(
+    (cursor) => api.mounts(workspace.id, cursor),
     [api, workspace.id],
   );
   const hasFilters = useMemo(
@@ -124,6 +125,17 @@ export function RiskListPage() {
           ))}
         </Select>
       </Card>
+      {mounts.data?.next_cursor === null || mounts.data === null ? null : (
+        <div className="pagination-actions">
+          <Button
+            variant="secondary"
+            disabled={mounts.loadingMore}
+            onClick={mounts.loadMore}
+          >
+            {mounts.loadingMore ? "Loading…" : "Load more source filters"}
+          </Button>
+        </div>
+      )}
       {resource.loading ? (
         <LoadingState label="Loading risks" />
       ) : resource.error !== null ? (
@@ -198,6 +210,17 @@ export function RiskListPage() {
             </table>
           </div>
         </Card>
+      )}
+      {resource.data?.next_cursor === null || resource.data === null ? null : (
+        <div className="pagination-actions">
+          <Button
+            variant="secondary"
+            disabled={resource.loadingMore}
+            onClick={resource.loadMore}
+          >
+            {resource.loadingMore ? "Loading…" : "Load more risks"}
+          </Button>
+        </div>
       )}
     </div>
   );

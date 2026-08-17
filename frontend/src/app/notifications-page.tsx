@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSession } from "../auth/session";
 import { formatDate, humanize } from "../shared/format";
-import { useResource } from "../shared/hooks/use-resource";
+import { usePagedResource } from "../shared/hooks/use-paged-resource";
 import {
   Badge,
   Button,
@@ -15,8 +15,8 @@ import {
 export function NotificationsPage() {
   const { api } = useSession();
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const resource = useResource(
-    () => api.notifications(unreadOnly),
+  const resource = usePagedResource(
+    (cursor) => api.notifications(unreadOnly, cursor),
     [api, unreadOnly],
   );
   async function markRead(id: string) {
@@ -82,6 +82,17 @@ export function NotificationsPage() {
             ))}
           </ul>
         </Card>
+      )}
+      {resource.data?.next_cursor === null || resource.data === null ? null : (
+        <div className="pagination-actions">
+          <Button
+            variant="secondary"
+            disabled={resource.loadingMore}
+            onClick={resource.loadMore}
+          >
+            {resource.loadingMore ? "Loading…" : "Load more notifications"}
+          </Button>
+        </div>
       )}
     </main>
   );

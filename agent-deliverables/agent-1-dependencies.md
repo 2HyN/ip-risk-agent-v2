@@ -9,7 +9,7 @@
 
 Agent 1은 각 feature 구현에 필요한 package를 독자적으로 선택하고 현재 `.venv`/workspace에서 호환성을 검사해 설치할 수 있다. 선택 버전과 검사 결과는 이 문서에 누적한다. Root manifest와 최종 lockfile pin은 Integration 단계에서 다른 Plane과의 충돌 여부를 확인해 최대한 반영한다. 모든 선택은 Python 3.14.7 또는 Node.js 24.19.0과 호환되어야 한다.
 
-Phase 0~3과 Phase 10에서는 신규 package가 필요하지 않아 추가 설치를 수행하지 않았다. Phase 11에서는 아래 React/Vite dependency를 root lockfile 변경 없이 `frontend/package.json`에 pin하고 Node.js 24.19.0에서 설치·typecheck·test·production build를 검증했다.
+Phase 0~3, Phase 10과 Phase 12에서는 신규 package가 필요하지 않아 추가 설치를 수행하지 않았다. Phase 11에서는 아래 React/Vite dependency를 root lockfile 변경 없이 `frontend/package.json`에 pin하고 Node.js 24.19.0에서 설치·typecheck·test·production build를 검증했다. Phase 12 observability, TrustedHost/CORS와 local rate limit은 Python 표준 library 및 기존 FastAPI/Starlette runtime으로 구현했다.
 
 ## 검증 완료 dependency 선택
 

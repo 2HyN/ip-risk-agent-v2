@@ -671,6 +671,12 @@ textarea:focus-visible {
   padding: 14px;
   grid-template-columns: repeat(6, minmax(130px, 1fr));
 }
+
+.pagination-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
 .table-card {
   padding: 0;
   overflow: hidden;

@@ -55,12 +55,11 @@ export function WorkspaceLayout() {
   const { api, user } = useSession();
   const integration = useIntegration();
   const resource = useResource(async () => {
-    const [workspace, members] = await Promise.all([
+    const [workspace, membership] = await Promise.all([
       api.workspace(workspaceId),
-      api.members(workspaceId),
+      api.myMembership(workspaceId),
     ]);
-    const membership = members.items.find((item) => item.user_id === user?.id);
-    if (membership === undefined)
+    if (membership.user_id !== user?.id)
       throw new Error("Your active workspace membership was not found.");
     return capabilities(workspace, membership);
   }, [api, workspaceId, user?.id]);

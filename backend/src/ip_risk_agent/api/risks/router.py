@@ -151,9 +151,22 @@ def create_risks_router(deps: RiskRouterDependencies) -> APIRouter:
                 )
             )
             projected = []
+            artifacts = {}
+            mounts = {}
             for risk in values:
-                artifact = await uow.artifacts.get(risk.artifact_id)
-                mount = None if artifact is None else await uow.mounts.get(artifact.mount_id)
+                if risk.artifact_id not in artifacts:
+                    artifacts[risk.artifact_id] = await uow.artifacts.get(
+                        risk.artifact_id
+                    )
+                artifact = artifacts[risk.artifact_id]
+                if artifact is None:
+                    mount = None
+                else:
+                    if artifact.mount_id not in mounts:
+                        mounts[artifact.mount_id] = await uow.mounts.get(
+                            artifact.mount_id
+                        )
+                    mount = mounts[artifact.mount_id]
                 if mount_id is not None and (mount is None or mount.id != mount_id):
                     continue
                 if source_type is not None and (

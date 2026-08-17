@@ -23,9 +23,14 @@ export class ControlApi {
   googleLoginUrl = () => this.client.url("/api/v1/auth/google/login");
   logout = () =>
     this.client.request<void>("/api/v1/auth/logout", { method: "POST" });
-  workspaces = () => this.client.request<Page<Workspace>>("/api/v1/workspaces");
+  workspaces = (cursor: string | null = null) =>
+    this.client.request<Page<Workspace>>(
+      `/api/v1/workspaces${queryString({ cursor })}`,
+    );
   workspace = (id: string) =>
     this.client.request<Workspace>(`/api/v1/workspaces/${id}`);
+  myMembership = (id: string) =>
+    this.client.request<Membership>(`/api/v1/workspaces/${id}/membership`);
   createWorkspace = (body: { name: string; description: string | null }) =>
     this.client.request<Workspace>("/api/v1/workspaces", {
       method: "POST",
@@ -33,15 +38,19 @@ export class ControlApi {
     });
   dashboard = (id: string) =>
     this.client.request<Dashboard>(`/api/v1/workspaces/${id}/dashboard`);
-  invitations = () =>
-    this.client.request<Page<Invitation>>("/api/v1/invitations");
+  invitations = (cursor: string | null = null) =>
+    this.client.request<Page<Invitation>>(
+      `/api/v1/invitations${queryString({ cursor })}`,
+    );
   acceptInvitation = (id: string) =>
     this.client.request<{ workspace: Workspace }>(
       `/api/v1/invitations/${id}/accept`,
       { method: "POST" },
     );
-  members = (id: string) =>
-    this.client.request<Page<Membership>>(`/api/v1/workspaces/${id}/members`);
+  members = (id: string, cursor: string | null = null) =>
+    this.client.request<Page<Membership>>(
+      `/api/v1/workspaces/${id}/members${queryString({ cursor })}`,
+    );
   invite = (id: string, body: { email: string; role: Role }) =>
     this.client.request<Invitation>(
       `/api/v1/workspaces/${id}/members/invitations`,
@@ -57,11 +66,17 @@ export class ControlApi {
       `/api/v1/workspaces/${id}/members/${userId}`,
       { method: "DELETE" },
     );
-  mounts = (id: string) =>
-    this.client.request<Page<Mount>>(`/api/v1/workspaces/${id}/mounts`);
-  risks = (id: string, filters: Record<string, string>) =>
+  mounts = (id: string, cursor: string | null = null) =>
+    this.client.request<Page<Mount>>(
+      `/api/v1/workspaces/${id}/mounts${queryString({ cursor })}`,
+    );
+  risks = (
+    id: string,
+    filters: Record<string, string>,
+    cursor: string | null = null,
+  ) =>
     this.client.request<Page<Risk>>(
-      `/api/v1/workspaces/${id}/risks${queryString(filters)}`,
+      `/api/v1/workspaces/${id}/risks${queryString({ ...filters, cursor })}`,
     );
   risk = (id: string, riskId: string) =>
     this.client.request<RiskDetail>(`/api/v1/workspaces/${id}/risks/${riskId}`);
@@ -82,8 +97,14 @@ export class ControlApi {
     this.client.request<{ risk: Risk; entries: HistoryEntry[] }>(
       `/api/v1/workspaces/${id}/risks/${riskId}/timeline`,
     );
-  history = (id: string, kind: "activity" | "audit" | "source-access") =>
-    this.client.request<Page<HistoryEntry>>(`/api/v1/workspaces/${id}/${kind}`);
+  history = (
+    id: string,
+    kind: "activity" | "audit" | "source-access",
+    cursor: string | null = null,
+  ) =>
+    this.client.request<Page<HistoryEntry>>(
+      `/api/v1/workspaces/${id}/${kind}${queryString({ cursor })}`,
+    );
   exportAuditUrl = (id: string) =>
     this.client.url(`/api/v1/workspaces/${id}/audit/export`);
   security = (id: string) =>
@@ -100,9 +121,9 @@ export class ControlApi {
       `/api/v1/workspaces/${id}/security/ipriskignore`,
       { method: "PUT", body: JSON.stringify(body) },
     );
-  notifications = (unreadOnly = false) =>
+  notifications = (unreadOnly = false, cursor: string | null = null) =>
     this.client.request<NotificationInbox>(
-      `/api/v1/notifications${queryString({ unread_only: unreadOnly })}`,
+      `/api/v1/notifications${queryString({ unread_only: unreadOnly, cursor })}`,
     );
   markNotificationRead = (id: string) =>
     this.client.request<void>(`/api/v1/notifications/${id}/read`, {

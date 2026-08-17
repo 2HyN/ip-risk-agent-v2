@@ -17,6 +17,7 @@ from iprisk_contracts import (
 from ip_risk_agent.application.analysis_jobs.service import (
     AnalysisJobOrchestrationService,
 )
+from ip_risk_agent.application.observability import CorrelationIds, StructuredLogger
 from ip_risk_agent.application.process_change.queue import TaskEnqueuer
 from ip_risk_agent.application.process_change.service import SourceChangeIntakeService
 from ip_risk_agent.application.repositories import (
@@ -101,11 +102,13 @@ class ControlPlaneFacade:
         clock: Clock,
         id_factory: IdFactory,
         config: ControlPlaneFacadeConfig,
+        observer: StructuredLogger | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
         self._id_factory = id_factory
         self._config = config
+        self._observer = observer or StructuredLogger()
         self._retention_policy = config.evidence_retention._build()
         self._source_changes = SourceChangeIntakeService(
             unit_of_work_factory=unit_of_work_factory,
@@ -119,6 +122,7 @@ class ControlPlaneFacade:
             unit_of_work_factory=unit_of_work_factory,
             task_enqueuer=task_enqueuer,
             clock=clock,
+            concurrency_attempts=config.concurrency_attempts,
         )
         self._security_gate = SecurityGateService(
             unit_of_work_factory=unit_of_work_factory,
@@ -165,7 +169,16 @@ class ControlPlaneFacade:
         last_conflict: Exception | None = None
         for _ in range(self._config.concurrency_attempts):
             try:
-                return await self._register_source_metadata_once(command)
+                registered = await self._register_source_metadata_once(command)
+                self._observer.event(
+                    "source_metadata_registered",
+                    correlation=CorrelationIds(
+                        risk_workspace_id=command.risk_workspace_id,
+                        mount_id=registered.mount_id,
+                    ),
+                    source_type=command.source_type.value,
+                )
+                return registered
             except (ConcurrencyConflictError, UniqueConstraintViolation) as exc:
                 last_conflict = exc
         assert last_conflict is not None
@@ -173,6 +186,17 @@ class ControlPlaneFacade:
 
     async def register_source_change(self, change: SourceChange) -> SourceChangeReceipt:
         result = await self._source_changes.register_source_change(change)
+        self._observer.event(
+            "source_change_registered",
+            correlation=CorrelationIds(
+                event_id=result.change_event_id,
+                analysis_job_id=result.analysis_job_id,
+                risk_workspace_id=change.risk_workspace_id,
+                mount_id=change.mount_id,
+                artifact_id=result.artifact_id,
+            ),
+            source_type=change.source_type.value,
+        )
         return SourceChangeReceipt(
             change_event_id=result.change_event_id,
             artifact_id=result.artifact_id,
@@ -187,7 +211,21 @@ class ControlPlaneFacade:
     ) -> AnalysisExecutionClaim | None:
         state = await self._jobs.claim(change_event_id)
         if state is None:
+            self._observer.event(
+                "analysis_claim_skipped",
+                correlation=CorrelationIds(event_id=change_event_id),
+            )
             return None
+        self._observer.event(
+            "analysis_claimed",
+            correlation=CorrelationIds(
+                event_id=state.change_event.id,
+                analysis_job_id=state.analysis_job.id,
+                risk_workspace_id=state.change_event.risk_workspace_id,
+                mount_id=state.change_event.mount_id,
+                artifact_id=state.analysis_job.artifact_id,
+            ),
+        )
         return AnalysisExecutionClaim(
             change_event_id=state.change_event.id,
             analysis_job_id=state.analysis_job.id,
@@ -239,6 +277,20 @@ class ControlPlaneFacade:
                 denial_code_safe=scope.denial_code_safe,
             ),
         )
+        self._observer.event(
+            "analysis_artifact_built" if result.analysis_artifact else "analysis_artifact_denied",
+            correlation=CorrelationIds(
+                analysis_job_id=analysis_job_id,
+                risk_workspace_id=snapshot.risk_workspace_id,
+                mount_id=snapshot.mount_id,
+                artifact_id=(
+                    None
+                    if result.analysis_artifact is None
+                    else result.analysis_artifact.artifact_id
+                ),
+            ),
+            source_type=snapshot.source_type.value,
+        )
         return AnalysisArtifactBuildResult(
             analysis_artifact=result.analysis_artifact,
             denial_reason=(
@@ -252,6 +304,18 @@ class ControlPlaneFacade:
         result: AnalysisResult,
     ) -> AnalysisResultReceipt:
         accepted = await self._analysis_results.accept_analysis_result(result)
+        self._observer.event(
+            "analysis_result_accepted",
+            correlation=CorrelationIds(
+                analysis_job_id=result.analysis_job_id,
+                artifact_id=result.artifact_id,
+            ),
+            analyzer_type=result.analysis_type.value,
+            candidate_count=len(result.candidates),
+            coverage=result.coverage.value,
+            model_version=result.versions.model_id,
+            prompt_version=result.versions.prompt_version,
+        )
         return AnalysisResultReceipt(
             disposition=accepted.disposition.value,
             analysis_job_id=accepted.analysis_job_id,

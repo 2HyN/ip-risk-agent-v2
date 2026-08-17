@@ -133,7 +133,9 @@ locator = await source_adapter.resolve_original(request.artifact)
 
 ## 8. Control API wiring
 
-`ip_risk_agent.api.create_control_api_bundle()`이 기존 FastAPI app에 Agent 1 router, session middleware와 safe error handler를 설치한다. 최종 app 생성, Agent 2 router, internal worker/callback route, CORS/TrustedHost/proxy 설정은 Integration 소유다.
+`ip_risk_agent.api.create_control_api_bundle()`이 기존 FastAPI app에 Agent 1 router, session, safe error handler, request correlation middleware와 explicit host/origin/local rate-limit policy를 설치한다. `ControlApiDependencies.hardening`에는 `ApplicationHardeningConfig`를, `observer`에는 allow-list `StructuredLogger` 또는 호환 sink를 주입한다. 기본 trusted host는 local/test 전용이므로 production host와 exact CORS origin을 Integration 환경에서 명시해야 한다. 최종 app 생성, Agent 2 router, internal worker/callback route, forwarded-header trust와 distributed ingress rate-limit은 Integration 소유다.
+
+`ControlPlaneFacade(..., observer=StructuredLogger(...))`에도 같은 observer를 주입하면 SourceChange, analysis claim, Security Gate와 AnalysisResult log가 request/event/job/workspace/mount/artifact correlation ID로 연결된다. sink에는 free-form payload를 추가하지 말고 `application.observability`의 allow-list record를 그대로 전달한다.
 
 ## 9. Dependency와 환경 변수
 
@@ -205,9 +207,9 @@ import { ControlPlaneApp } from "@iprisk/frontend";
 - 실제 Google OIDC roundtrip은 staging credential/callback domain에서 확인해야 한다.
 - Firestore emulator가 설정되지 않은 환경에서는 emulator test 1개가 skip된다.
 - Source metadata callback은 create/idempotent registration만 제공한다. credential rotation, reconnect와 provider status transition endpoint는 Source Plane 요구와 함께 별도 wiring해야 한다.
-- Firestore pagination은 현재 signed offset cursor이며 native cursor/대규모 index 검증은 Phase 12 범위다.
+- Firestore pagination은 현재 scope-bound signed offset cursor이며 frontend는 모든 주요 목록에서 `next_cursor`를 소비한다. native document cursor/query pushdown은 Integration의 production sort/filter index와 load profile을 기준으로 공용 repository contract 전체를 전환해야 한다.
 - production migration이 필요한 기존 document가 있으면 `User.session_version`과 `RiskWorkspace.global_ignore_text` backfill이 필요하다.
-- Cloud Tasks retry/rate/dead-letter, structured logging/correlation, CORS/host/proxy/rate-limit은 Integration/Phase 12에서 확정한다.
+- Cloud Tasks retry/rate/dead-letter와 distributed ingress quota/proxy trust는 Integration에서 확정한다. Control bundle의 structured correlation log, exact CORS/trusted-host 설정과 optional single-process limiter는 Phase 12에서 제공됐다.
 - Agent 2 Source panel과 실제 `openOriginal` resolver는 위 public prop에 Integration이 주입해야 한다.
-- frontend list 화면은 MVP에서 API 첫 페이지(기본 50건)를 표시한다. signed cursor 기반 incremental loading/virtualization은 Phase 12 scale 검토 항목이다.
+- frontend 주요 list 화면은 signed cursor 기반 incremental loading을 제공한다. 매우 큰 table의 virtualization은 실제 row/profile이 확인될 때 별도 UX 성능 개선으로 검토한다.
 - Phase 11 frontend exact version은 `frontend/package.json`과 dependency 문서에 기록했지만 root `pnpm-lock.yaml`은 소유 경계상 변경하지 않았다. Integration이 최종 lock pin을 생성해야 한다.

@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 11 — Product Web UI |
-| 다음 개발 Phase | Phase 12 — 관측성, 보안 hardening과 전체 검증 |
-| 전체 진행률 | 12/14 Phase 완료 |
+| 현재 완료 Phase | Phase 12 — 관측성, 보안 hardening과 전체 검증 |
+| 다음 개발 Phase | Phase 13 — 인계 문서와 통합 준비 (개발자 로컬 검증 후 진행) |
+| 전체 진행률 | 13/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-17 |
@@ -50,7 +50,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - `application/public_facade`에는 cross-plane authorization/source metadata callback과 SourceChange→Security Gate→AnalysisResult 전체 pipeline을 감싸는 안정된 Integration surface가 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐고, Control-owned API 영역은 Phase 9 router/factory까지 구현됐다.
 - Frontend에는 React 19/Vite 8 기반 browser-safe Product UI, auth/VWS context, app shell, role-aware routing, VWS/Risk/History/Security/Notification 화면과 Agent 2 Source UI/Open Original 삽입 경계가 구현됐다.
-- `tests/control`에는 Phase 1~11 Domain, policy, repository/Firestore persistence, application/API/facade/UI-support API orchestration test 175개가 구현됐으며 현재 환경에서는 174개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~12 Domain, policy, repository/Firestore persistence, application/API/facade/관측성/동시성/권한 test 256개가 구현됐으며 현재 환경에서는 255개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root manifest/lock은 변경하지 않았고, Frontend package에는 검증된 React 19.2.8, React Router 7.18.2, Vite 8.2.1, Vitest 4.1.10과 Testing Library exact pin이 기록됐다.
@@ -81,7 +81,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 9 | Google App Login과 Control API | 완료 |
 | 10 | ControlPlaneFacade와 Integration surface | 완료 |
 | 11 | Product Web UI | 완료 |
-| 12 | 관측성, 보안 hardening과 전체 검증 | 미구현 |
+| 12 | 관측성, 보안 hardening과 전체 검증 | 완료 |
 | 13 | 인계 문서와 통합 준비 | 미구현 |
 
 ## 3. Agent 1의 구현 범위와 절대 경계
@@ -734,6 +734,101 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
 
 ## 9. 작업 현황 로그
+
+### 2026-08-17 — 직전 미완료 보완 및 Phase 12 완료
+
+#### 구현 완료 항목
+
+1. **Phase 11 cursor 소비와 현재 membership 조회 보완**
+   - Workspace, invitation, member, mount filter, Risk, history와 notification 목록이 API의 opaque signed `next_cursor`를 실제 다음 요청에 전달하고 결과를 점진 누적하도록 공용 `usePagedResource` hook과 Load More UI를 추가했다.
+   - Workspace shell이 전체 member 목록 첫 페이지에서 현재 사용자를 찾던 scale 취약점을 제거하고 `GET /api/v1/workspaces/{vws_id}/membership` 전용 endpoint로 canonical current membership을 조회한다.
+   - cursor를 해석하거나 local offset으로 바꾸지 않으며 filter가 변경되면 page state를 초기화한다. component test에서 opaque cursor 전달과 append를 고정했다.
+2. **allow-list structured observability 구현**
+   - `CorrelationIds`에 `request_id`, `event_id`, `analysis_job_id`, `risk_workspace_id`, `mount_id`, `artifact_id`를 정의하고 JSON structured record를 내보내는 `StructuredLogger`를 추가했다.
+   - 범용 metadata/message parameter를 제공하지 않고 명세상 허용된 source/analyzer/provider category, latency, candidate count, coverage, model/prompt version만 받는다.
+   - public `ControlPlaneFacade`의 source metadata/change, analysis claim, Security Gate artifact, AnalysisResult 경계와 전체 Control API request middleware에 observer를 적용했다.
+   - 외부에서 온 version label이 log-safe 형식이 아니면 원 값을 복사하지 않고 `*_omitted=true`만 기록하며 이미 commit된 업무 결과를 logging 실패로 되돌리지 않는다.
+3. **logging deny-list와 safe diagnostic 분리**
+   - source content, Evidence, OAuth/access token, Windows/Unix absolute path, full prompt와 raw model response가 구조화 log에 들어갈 parameter surface가 없음을 test로 고정했다.
+   - safe user code/message를 가진 `SafeErrorDescriptor`와 internal `ErrorCategory`/diagnostic code를 분리했다. exception은 class name만 기록하고 `str(exception)`, args, traceback local과 provider payload는 기록하지 않는다.
+   - 예상하지 못한 예외도 credential/path를 반사하지 않는 `INTERNAL_ERROR` 500 응답으로 통일하고 request correlation은 응답 `X-Request-ID`로 반환한다.
+4. **API deployment hardening surface**
+   - explicit trusted host, exact HTTP(S) CORS origin, optional single-process rate limit을 구성하는 `ApplicationHardeningConfig`를 추가했다.
+   - wildcard credentialed origin과 path가 포함된 origin, 빈 trusted host, 잘못된 rate-limit 값을 startup 전에 거부한다.
+   - forwarded header를 임의 신뢰하지 않고 ASGI client address를 local limiter key로 사용한다. production ingress가 authoritative limiter이고 local middleware는 단일 process safety net임을 경계로 유지했다.
+   - TrustedHost/CORS/429 `Retry-After`, 정상·악성 request ID와 safe 500 응답을 실제 FastAPI TestClient로 검증했다.
+5. **동시성 stress hardening**
+   - AnalysisJob claim에도 bounded optimistic conflict retry를 추가하고 Facade의 공용 concurrency 설정을 전달했다.
+   - 같은 SourceChange, job claim, AnalysisResult, review update를 각각 32개 동시에 실행하는 stress scenario를 추가했다.
+   - canonical ChangeEvent/Artifact/Job 하나, claim 하나, AnalysisResult ACCEPTED 하나와 31 DUPLICATE, review update/RiskEvent 하나만 남아 lost update나 중복 canonical record가 없음을 검증했다.
+6. **Backend/API/Frontend permission matrix 교차 검증**
+   - 4개 MembershipRole × 모든 VwsAction의 exhaustive matrix를 own mount와 provider authority 조건까지 포함해 검증했다.
+   - 실제 API에서 workspace/risk/security 조회, review, invitation/member admin, audit activity, security mutation을 OWNER/SOURCE_MANAGER/RISK_REVIEWER/VIEWER session별로 호출해 200/201, 403과 authorized 404 경계를 고정했다.
+   - frontend navigation/action capability test를 4개 Role로 확장하고, 권한 없는 direct audit route는 API 호출 전에 workspace dashboard로 redirect하는 route guard를 추가했다.
+   - frontend gating은 UX이며 backend membership/CSRF/optimistic version이 최종 신뢰 경계라는 기존 결정을 유지한다.
+7. **In-memory end-to-end Control 검증 강화**
+   - fake source metadata와 SourceChange에서 시작해 raw-free job claim, SourceAccessReceipt, Security Gate, 승인 AnalysisArtifact, authoritative AnalysisResult, Risk/Evidence/RiskEvent와 human review까지 다른 Plane 없이 실행했다.
+   - provider 실패를 empty success/no-risk로 바꾸지 않는 FAILED/INCONCLUSIVE/PARTIAL 기존 test와 새 stress pipeline을 전체 회귀에서 함께 실행했다.
+8. **이전 scale/비용 검토 사항 재확인 및 범위 내 개선**
+   - Risk list enrichment에서 동일 Artifact/Mount를 page 내 반복 조회하지 않도록 request-scope cache를 추가했다. canonical entity를 client synthetic projection으로 대체하지 않는다.
+   - Dashboard의 VWS→ChangeEvent→AnalysisJob 조회는 AnalysisJob에 workspace key가 없는 canonical schema에서 정합성을 보존하는 구현이다. 임의 denormalized field/collection을 만들지 않고 Integration의 실제 read profile 전까지 유지한다.
+   - API signed offset cursor는 scope/tamper 안전성을 유지하고 frontend 첫-page 제한은 해소했다. Firestore native cursor는 repository protocol, endpoint별 stable sort key와 production composite index를 함께 변경해야 하므로 Integration scale profile 없이 부분 교체하지 않았다.
+   - RiskEvent hash chain은 canonical schema/version 변경과 migration이 필요한 별도 integrity 기능이다. 현재 append-only transaction/unique ID를 유지하고 Phase 12에 임의 schema field를 추가하지 않았다.
+9. **Phase 13 전 로컬 실행 안내 제공**
+   - 루트 `LOCAL_RUN_AND_TEST_GUIDE.md`에 Python 3.14.7/Node/pnpm 환경 구성, Agent 1 exact dependency 설치, 전체 승인 명령과 6개 focused scenario를 작성했다.
+   - 이 문서는 개발자 로컬 검증 후 삭제 가능한 임시 문서이며 production secret, 실제 provider credential 또는 Integration composition을 요구하지 않는다.
+10. **소유 경계 보존**
+    - Agent 2/3 영역, `frontend/src/sources/**`, `apps/desktop/**`, Integration `composition/**`/`main.py`/`worker.py`, root manifest/lock과 Frozen Pydantic source를 수정하지 않았다.
+    - Phase 12에 신규 package가 필요하지 않아 dependency pin을 추가하지 않았다.
+
+#### 구현 미완료 항목 및 사유
+
+1. **실제 Google OIDC, Firestore, Cloud Tasks와 Agent 2/3를 연결한 browser E2E**
+   - Agent 1의 fake OIDC/in-memory/Firestore mapper/facade/API/UI 검증은 완료했다. 실제 credential, callback domain, SourceAdapter, Analyzer registry와 final app composition은 Integration 소유이며 로컬 Phase 12에서 권한 없이 만들 수 없다.
+2. **Firestore emulator 실제 실행**
+   - 현재 `FIRESTORE_EMULATOR_HOST`가 없어 실제 emulator transaction 1건은 계속 skip된다. 실행 명령과 기대 결과를 로컬 가이드에 기록했으며 개발자가 Phase 13 전 선택적으로 실행할 수 있다.
+3. **Firestore native document cursor와 서버-side query pushdown**
+   - frontend는 모든 주요 signed cursor를 소비하지만 repository는 canonical tuple query 뒤 scope-bound signed offset을 적용한다. native cursor는 각 endpoint의 filter/sort composite index, snapshot consistency와 In-memory/Firestore 공용 protocol을 동시에 확정해야 한다.
+   - production scale/profile 없이 Risk만 부분 전환하면 history/member/notification cursor 의미가 달라지고 재조회 중 누락·중복 위험이 생기므로 Phase 12에서는 계약 일관성을 우선했다. Integration load profile이 제시되면 전체 query contract로 전환해야 한다.
+4. **Dashboard aggregate projection**
+   - AnalysisJob에는 canonical workspace ID가 없어 Dashboard failed count는 ChangeEvent별 job read를 수행한다. 새 field/collection을 임의 추가하면 16개 canonical collection 및 mapper migration에 영향을 주므로 실제 read 비용 기준 없이 denormalize하지 않았다.
+5. **production distributed rate limiting과 proxy trust**
+   - app bundle은 explicit host/origin과 optional local limiter를 제공하지만 다중 instance 전역 quota, trusted forwarded headers, service-account/IAM 및 WAF 정책은 Cloud Run/ingress topology를 소유한 Integration이 설정해야 한다.
+6. **root dependency/lock 반영과 최종 ASGI 실행 app**
+   - 검증 버전은 frontend manifest와 dependency 인계 문서에 있지만 root lock/config, `main.py`/`worker.py`는 Integration-only 영역이다. 현재 branch에서 임의 변경하지 않았다.
+
+#### 추가 검토가 필요한 사항
+
+1. **local rate limiter의 운영 의미**
+   - 단일 process burst 방어와 deterministic test 용도다. client IP를 신뢰할 수 있는 proxy hop, user/workspace quota, distributed store와 retry budget은 Integration deployment 설계에서 확정한다. 이를 production global quota로 오인해서는 안 된다.
+2. **structured log sink와 수집 정책**
+   - 기본 sink는 Python logging에 compact JSON을 기록한다. Cloud Logging severity/resource labels, sampling, retention, alert rule과 trace exporter는 Integration wiring 사항이다. sink를 교체해도 allow-list record schema와 deny-list invariant를 유지해야 한다.
+3. **unsafe version label omission**
+   - 외부 analyzer/model/prompt version이 opaque safe-label 형식을 벗어나면 업무 처리는 성공하고 log에는 원문 대신 omission flag만 남는다. 관측성을 위해 arbitrary free text 허용으로 완화하지 말고 Agent 3와 version naming convention을 합의하는 편이 안전하다.
+4. **signed offset cursor 일관성**
+   - cursor는 scope 위·변조를 막지만 live collection 중간 삽입 시 offset pagination 특성상 다음 page의 중복/이동 가능성이 있다. native 전환 시 stable sort tuple과 snapshot semantics를 endpoint 전체에 동일하게 정의해야 한다.
+5. **Risk list read cache 범위**
+   - request 안에서 같은 Artifact/Mount read만 합친다. process-global cache는 stale authorization/metadata 위험 때문에 만들지 않았다. production trace에서 여전히 비용이 크면 canonical projection/version invalidation을 먼저 설계한다.
+6. **RiskEvent tamper evidence**
+   - append-only repository와 deterministic event ID는 중복/변경을 막지만 cryptographic hash chain은 아니다. 규제상 tamper-evident export가 요구되면 schema version, signing key custody, backfill과 verification tool을 함께 설계해야 한다.
+7. **Phase 13 진입 gate**
+   - 사용자가 `LOCAL_RUN_AND_TEST_GUIDE.md` 시나리오로 자체 로컬 실행을 마친 후에만 Phase 13 인계 마무리를 수행한다. 그 전에는 Phase 13을 선행하지 않는다.
+
+#### 검증 결과
+
+- Phase 12 concurrency stress: SourceChange/job claim/result/review 각각 32-way scenario 통과
+- exhaustive authorization: 4 Roles × 17 VwsAction 및 API 주요 action matrix 통과
+- shared contracts + Agent 1 control suite: `282 passed, 1 skipped`
+- Phase 12 frontend tests: `15 passed`
+- Python 3.14.7 compileall 및 `.venv/Scripts/python.exe -m pip check`: 통과
+- root TypeScript typecheck/build/resolution: 통과
+- `pnpm run generate`: 통과, generated contracts tracked diff 없음
+
+#### 제안 커밋 메시지
+
+```text
+feat: harden Control Plane observability and validation
+```
 
 ### 2026-08-17 — 직전 미완료 보완 및 Phase 11 완료
 
