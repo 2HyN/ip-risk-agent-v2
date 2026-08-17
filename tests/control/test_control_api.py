@@ -39,6 +39,12 @@ from ip_risk_agent.core.notifications import (
     NotificationStatus,
     NotificationType,
 )
+from ip_risk_agent.core.memberships import (
+    InvitationStatus,
+    MembershipInvitation,
+    MembershipRole,
+    invitation_id_for,
+)
 from ip_risk_agent.core.risk import (
     ReviewDisposition,
     Risk,
@@ -46,6 +52,7 @@ from ip_risk_agent.core.risk import (
     RiskEventType,
     RiskLifecycleState,
 )
+from ip_risk_agent.core.workspaces import RiskWorkspace
 
 NOW = datetime(2026, 8, 17, 0, 0, tzinfo=timezone.utc)
 SECRET = "phase-9-test-secret-that-is-at-least-32-characters"
@@ -238,6 +245,20 @@ def test_control_workspace_risk_history_security_notification_routes() -> None:
         )
         workspace = created.json()
         vws_id = workspace["id"]
+        dashboard = client.get(f"/api/v1/workspaces/{vws_id}/dashboard")
+        assert dashboard.status_code == 200
+        assert dashboard.json() == {
+            "new_risks": 0,
+            "monitoring_risks": 0,
+            "resolved_recently": 0,
+            "analysis_failed": 0,
+            "source_health": {
+                "active": 0,
+                "action_required": 0,
+                "offline": 0,
+                "disabled": 0,
+            },
+        }
         fetched_workspace = client.get(f"/api/v1/workspaces/{vws_id}")
         assert fetched_workspace.status_code == 200
         workspace_etag = fetched_workspace.headers["etag"]
@@ -465,6 +486,9 @@ def test_control_api_bundle_exposes_owned_routes_without_integration_wiring() ->
         "/api/v1/auth/me",
         "/api/v1/workspaces",
         "/api/v1/workspaces/{vws_id}",
+        "/api/v1/workspaces/{vws_id}/dashboard",
+        "/api/v1/invitations",
+        "/api/v1/invitations/{invitation_id}/accept",
         "/api/v1/workspaces/{vws_id}/members",
         "/api/v1/workspaces/{vws_id}/members/invitations",
         "/api/v1/workspaces/{vws_id}/members/{user_id}",
@@ -487,3 +511,56 @@ def test_control_api_bundle_exposes_owned_routes_without_integration_wiring() ->
     }.issubset(paths)
     assert not any(path.startswith("/api/v1/source-connections") for path in paths)
     assert not any(path.startswith("/internal/") for path in paths)
+
+
+def test_authenticated_user_explicitly_lists_and_accepts_email_invitation() -> None:
+    app, store, _oidc = build_api()
+    with TestClient(app) as client:
+        user_id, csrf = login(client)
+        invitation_id = invitation_id_for("invited-vws", "owner@example.com")
+
+        async def seed() -> None:
+            async with store() as uow:
+                await uow.workspaces.add(
+                    RiskWorkspace(
+                        id="invited-vws",
+                        name="Invited workspace",
+                        owner_user_id="inviter-user",
+                        security_policy_version="security-v1",
+                        retention_policy_version="balanced-v1",
+                        created_at=NOW,
+                        updated_at=NOW,
+                    )
+                )
+                await uow.memberships.add_invitation(
+                    MembershipInvitation(
+                        id=invitation_id,
+                        risk_workspace_id="invited-vws",
+                        email="owner@example.com",
+                        role=MembershipRole.RISK_REVIEWER,
+                        status=InvitationStatus.PENDING,
+                        invited_by="inviter-user",
+                        created_at=NOW,
+                        updated_at=NOW,
+                    )
+                )
+                await uow.commit()
+
+        import asyncio
+
+        asyncio.run(seed())
+        pending = client.get("/api/v1/invitations")
+        assert pending.status_code == 200
+        assert pending.json()["items"][0]["workspace_name"] == "Invited workspace"
+        assert pending.json()["items"][0]["acceptance_available"] is True
+
+        no_csrf = client.post(f"/api/v1/invitations/{invitation_id}/accept")
+        assert no_csrf.status_code == 403
+        accepted = client.post(
+            f"/api/v1/invitations/{invitation_id}/accept",
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["membership"]["user_id"] == user_id
+        assert accepted.json()["workspace"]["id"] == "invited-vws"
+        assert client.get("/api/v1/invitations").json()["items"] == []

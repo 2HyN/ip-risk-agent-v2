@@ -3,24 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import AwareDatetime, Field, model_validator
 
 from ip_risk_agent.application.auth import AuthenticationService
+from ip_risk_agent.application.analysis_jobs import AnalysisJobStatus
 from ip_risk_agent.application.repositories import (
     ControlUnitOfWorkFactory,
     RecordNotFoundError,
 )
 from ip_risk_agent.application.workspace_admin import WorkspaceAdministrationService
 from ip_risk_agent.core.memberships import (
+    InvitationStatus,
     MembershipRole,
     MembershipStatus,
     VwsAction,
 )
 from ip_risk_agent.core.mounts import MountStatus
+from ip_risk_agent.core.risk import ReviewDisposition, RiskLifecycleState
 from ip_risk_agent.core.workspaces import RiskWorkspaceStatus
 
 from ..authorization import require_workspace_action
@@ -114,6 +117,32 @@ class MountAliasUpdateRequest(StrictApiModel):
     alias: str = Field(min_length=1, max_length=200)
 
 
+class PendingInvitationResponse(InvitationResponse):
+    workspace_name: str
+    acceptance_available: bool
+
+
+class InvitationAcceptanceResponse(StrictApiModel):
+    invitation: InvitationResponse
+    membership: MembershipResponse
+    workspace: WorkspaceResponse
+
+
+class SourceHealthSummaryResponse(StrictApiModel):
+    active: int
+    action_required: int
+    offline: int
+    disabled: int
+
+
+class WorkspaceDashboardResponse(StrictApiModel):
+    new_risks: int
+    monitoring_risks: int
+    resolved_recently: int
+    analysis_failed: int
+    source_health: SourceHealthSummaryResponse
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceRouterDependencies:
     unit_of_work_factory: ControlUnitOfWorkFactory
@@ -178,6 +207,53 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
             workspace.updated_at.isoformat(),
         )
         return workspace
+
+    @router.get("/{vws_id}/dashboard", response_model=WorkspaceDashboardResponse)
+    async def get_dashboard(
+        vws_id: str,
+        principal: CurrentPrincipal = Depends(current),
+    ):
+        await require_workspace_action(
+            deps.unit_of_work_factory,
+            risk_workspace_id=vws_id,
+            actor_user_id=principal.user.id,
+            action=VwsAction.VWS_VIEW,
+        )
+        async with deps.unit_of_work_factory() as uow:
+            risks = await uow.risks.list_for_workspace(vws_id)
+            mounts = await uow.mounts.list_for_workspace(vws_id)
+            change_events = await uow.change_events.list_for_workspace(vws_id)
+            jobs = []
+            for event in change_events:
+                jobs.extend(await uow.analysis_jobs.list_for_change(event.id))
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        return WorkspaceDashboardResponse(
+            new_risks=sum(
+                risk.lifecycle_state is RiskLifecycleState.NEW for risk in risks
+            ),
+            monitoring_risks=sum(
+                risk.lifecycle_state is not RiskLifecycleState.RESOLVED
+                and risk.review_disposition is ReviewDisposition.MONITORING
+                for risk in risks
+            ),
+            resolved_recently=sum(
+                risk.lifecycle_state is RiskLifecycleState.RESOLVED
+                and risk.resolved_at is not None
+                and risk.resolved_at >= recent_cutoff
+                for risk in risks
+            ),
+            analysis_failed=sum(job.status is AnalysisJobStatus.FAILED for job in jobs),
+            source_health=SourceHealthSummaryResponse(
+                active=sum(mount.status is MountStatus.ACTIVE for mount in mounts),
+                action_required=sum(
+                    mount.status
+                    in {MountStatus.REAUTH_REQUIRED, MountStatus.MANAGER_ACTION_REQUIRED}
+                    for mount in mounts
+                ),
+                offline=sum(mount.status is MountStatus.SOURCE_OFFLINE for mount in mounts),
+                disabled=sum(mount.status is MountStatus.DISABLED for mount in mounts),
+            ),
+        )
 
     @router.patch("/{vws_id}", response_model=WorkspaceResponse)
     async def update_workspace(
@@ -384,8 +460,80 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
     return router
 
 
+def create_invitations_router(deps: WorkspaceRouterDependencies) -> APIRouter:
+    router = APIRouter(prefix="/api/v1/invitations", tags=["invitations"])
+    current = CurrentPrincipalDependency(deps.authentication)
+    csrf = CsrfGuard()
+
+    @router.get("", response_model=Page[PendingInvitationResponse])
+    async def list_pending_invitations(
+        principal: CurrentPrincipal = Depends(current),
+        cursor: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ):
+        async with deps.unit_of_work_factory() as uow:
+            invitations = await uow.memberships.list_invitations_for_email(
+                principal.user.email
+            )
+            invitations = tuple(
+                invitation
+                for invitation in invitations
+                if invitation.status is InvitationStatus.PENDING
+            )
+            values = []
+            for invitation in invitations:
+                workspace = await uow.workspaces.get(invitation.risk_workspace_id)
+                if workspace is not None:
+                    acceptance_available = (
+                        invitation.expires_at is None
+                        or invitation.expires_at > datetime.now(timezone.utc)
+                    )
+                    values.append(
+                        PendingInvitationResponse(
+                            **InvitationResponse.model_validate(invitation).model_dump(),
+                            workspace_name=workspace.name,
+                            acceptance_available=acceptance_available,
+                        )
+                    )
+        selected, next_cursor = paginate(
+            tuple(values),
+            cursor=cursor,
+            limit=limit,
+            scope=f"invitations:{principal.user.id}",
+            codec=deps.cursor_codec,
+        )
+        return Page(items=list(selected), next_cursor=next_cursor)
+
+    @router.post(
+        "/{invitation_id}/accept",
+        response_model=InvitationAcceptanceResponse,
+    )
+    async def accept_invitation(
+        invitation_id: str,
+        principal: CurrentPrincipal = Depends(current),
+        _csrf: None = Depends(csrf),
+    ):
+        plan = await deps.administration.accept_invitation(
+            invitation_id=invitation_id,
+            authenticated_user_id=principal.user.id,
+            verified_email=principal.user.email,
+        )
+        async with deps.unit_of_work_factory() as uow:
+            workspace = await uow.workspaces.get(plan.membership.risk_workspace_id)
+        if workspace is None:
+            raise RecordNotFoundError("invitation workspace was not found")
+        return InvitationAcceptanceResponse(
+            invitation=InvitationResponse.model_validate(plan.invitation),
+            membership=MembershipResponse.model_validate(plan.membership),
+            workspace=WorkspaceResponse.model_validate(workspace),
+        )
+
+    return router
+
+
 __all__ = [
     "WorkspaceResponse",
     "WorkspaceRouterDependencies",
+    "create_invitations_router",
     "create_workspaces_router",
 ]

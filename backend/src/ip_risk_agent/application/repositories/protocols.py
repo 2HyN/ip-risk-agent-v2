@@ -43,6 +43,9 @@ class MembershipRepository(Protocol):
     async def list_invitations(
         self, risk_workspace_id: str
     ) -> tuple[MembershipInvitation, ...]: ...
+    async def list_invitations_for_email(
+        self, email: str
+    ) -> tuple[MembershipInvitation, ...]: ...
 
 
 class SourceMetadataRepository(Protocol):
@@ -81,6 +84,9 @@ class ChangeEventRepository(Protocol):
     async def get_by_fingerprint(self, event_fingerprint: str) -> ChangeEvent | None: ...
     async def add(self, event: ChangeEvent) -> None: ...
     async def save(self, event: ChangeEvent) -> None: ...
+    async def list_for_workspace(
+        self, risk_workspace_id: str
+    ) -> tuple[ChangeEvent, ...]: ...
 
 
 class AnalysisJobRepository(Protocol):

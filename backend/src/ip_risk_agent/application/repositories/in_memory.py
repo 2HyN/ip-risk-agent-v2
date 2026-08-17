@@ -24,6 +24,7 @@ from ip_risk_agent.core.memberships import (
     MembershipInvitation,
     MembershipStatus,
     membership_id_for,
+    normalize_invitation_email,
 )
 from ip_risk_agent.core.mounts import SourceConnection, SourceWorkspace, WorkspaceMount, mount_alias_key
 from ip_risk_agent.core.notifications import Notification, NotificationStatus
@@ -268,6 +269,21 @@ class InMemoryMembershipRepository(_Repository):
             key=lambda invitation: invitation.id,
         )
 
+    async def list_invitations_for_email(
+        self, email: str
+    ) -> tuple[MembershipInvitation, ...]:
+        self._open()
+        normalized_email = normalize_invitation_email(email)
+        return _sorted(
+            [
+                record
+                for record in self._state.memberships.values()
+                if isinstance(record, MembershipInvitation)
+                and record.email == normalized_email
+            ],
+            key=lambda invitation: invitation.id,
+        )
+
 
 class InMemorySourceMetadataRepository(_Repository):
     async def get_connection(self, connection_id: str) -> SourceConnection | None:
@@ -447,6 +463,19 @@ class InMemoryChangeEventRepository(_Repository):
             raise _duplicate("change-event fingerprint", change_event.event_fingerprint)
         self._state.change_events[change_event.id] = change_event
         self._state.change_events_by_fingerprint[change_event.event_fingerprint] = change_event.id
+
+    async def list_for_workspace(
+        self, risk_workspace_id: str
+    ) -> tuple[ChangeEvent, ...]:
+        self._open()
+        return _sorted(
+            [
+                event
+                for event in self._state.change_events.values()
+                if event.risk_workspace_id == risk_workspace_id
+            ],
+            key=lambda event: event.id,
+        )
 
     async def save(self, change_event: ChangeEvent) -> None:
         self._open()

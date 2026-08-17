@@ -2,7 +2,7 @@
 
 ## 1. 구현 범위
 
-Agent 1은 canonical Control domain, authorization, Firestore persistence, SourceChange/AnalysisJob orchestration, Security Gate, AnalysisResult/Risk reconciliation, review/history/audit/notification, Google App Login, Control API와 Integration-facing facade를 제공한다.
+Agent 1은 canonical Control domain, authorization, Firestore persistence, SourceChange/AnalysisJob orchestration, Security Gate, AnalysisResult/Risk reconciliation, review/history/audit/notification, Google App Login, Control API, Product Web UI와 Integration-facing facade를 제공한다.
 
 Provider API, credential 내용, local filesystem, analyzer/Gemini/KIPRIS/RAG 구현은 포함하지 않는다. Control Plane은 raw source를 저장하거나 API로 proxy하지 않는다.
 
@@ -160,6 +160,8 @@ pnpm run generate
 python -m pytest shared/contracts/tests tests/control -q
 pnpm typecheck
 pnpm verify:resolution
+pnpm --filter @iprisk/frontend test
+pnpm --filter @iprisk/frontend build
 python -m pip check
 ```
 
@@ -172,7 +174,33 @@ python -m pip check
 - contract-change request는 현재 없다.
 - facade 입출력의 cross-plane payload는 Frozen Contract 또는 facade-owned content-free DTO다.
 
-## 12. Known issues와 Integration 확인 사항
+## 12. Frontend public surface와 Source UI slot
+
+Integration은 Agent 1 내부 component를 직접 조립하지 않고 다음 public entrypoint를 사용한다.
+
+```tsx
+import { ControlPlaneApp } from "@iprisk/frontend";
+
+<ControlPlaneApp
+  apiBaseUrl=""
+  router="browser"
+  integration={{
+    sourceNavigation: sourceNavigation,
+    sourcePanel: sourcePanel,
+    openOriginal: async ({ workspaceId, artifactId, action, sourceType }) => {
+      // Resolve through the bound Agent 2 adapter / owning desktop.
+    },
+  }}
+/>
+```
+
+- `router="browser"`는 Web, `router="hash"`는 Electron renderer 조립점이다.
+- `sourceNavigation`과 `sourcePanel`은 `frontend/src/sources/**`를 Agent 1이 import하거나 수정하지 않는 삽입 경계다.
+- `openOriginal`에는 opaque action, VWS/Artifact ID와 safe source type만 전달된다. raw content, provider credential, provider URL 또는 local absolute path는 UI state/API에 포함되지 않는다.
+- callback이 주입되지 않으면 provider별 Open Original button은 설명과 함께 disabled 상태로 남아 안전하게 fail closed한다.
+- Vite development server만 `/api`를 `http://127.0.0.1:8000`으로 proxy하며 production은 same-origin `/api/v1`을 사용한다.
+
+## 13. Known issues와 Integration 확인 사항
 
 - 실제 Google OIDC roundtrip은 staging credential/callback domain에서 확인해야 한다.
 - Firestore emulator가 설정되지 않은 환경에서는 emulator test 1개가 skip된다.
@@ -180,3 +208,6 @@ python -m pip check
 - Firestore pagination은 현재 signed offset cursor이며 native cursor/대규모 index 검증은 Phase 12 범위다.
 - production migration이 필요한 기존 document가 있으면 `User.session_version`과 `RiskWorkspace.global_ignore_text` backfill이 필요하다.
 - Cloud Tasks retry/rate/dead-letter, structured logging/correlation, CORS/host/proxy/rate-limit은 Integration/Phase 12에서 확정한다.
+- Agent 2 Source panel과 실제 `openOriginal` resolver는 위 public prop에 Integration이 주입해야 한다.
+- frontend list 화면은 MVP에서 API 첫 페이지(기본 50건)를 표시한다. signed cursor 기반 incremental loading/virtualization은 Phase 12 scale 검토 항목이다.
+- Phase 11 frontend exact version은 `frontend/package.json`과 dependency 문서에 기록했지만 root `pnpm-lock.yaml`은 소유 경계상 변경하지 않았다. Integration이 최종 lock pin을 생성해야 한다.

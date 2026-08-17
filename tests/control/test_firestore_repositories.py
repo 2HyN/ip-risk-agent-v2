@@ -251,6 +251,10 @@ def test_firestore_uow_runs_workspace_invitation_contract_without_sdk_types() ->
             email="viewer-1@example.com",
             role=MembershipRole.VIEWER,
         )
+        async with factory() as uow:
+            assert await uow.memberships.list_invitations_for_email(
+                "VIEWER-1@EXAMPLE.COM"
+            ) == (invitation.invitation,)
         await service.accept_invitation(
             invitation_id=invitation.invitation.id,
             authenticated_user_id="viewer-1",
@@ -562,6 +566,7 @@ def test_artifact_change_job_and_risk_history_commit_as_one_firestore_transactio
             assert await uow.artifacts.get("artifact-1") == artifact
             assert await uow.artifacts.get_state("artifact-1") == state
             assert await uow.change_events.get_by_fingerprint("fingerprint-1") == change
+            assert await uow.change_events.list_for_workspace("vws-1") == (change,)
             assert await uow.analysis_jobs.list_for_change("change-1") == (job,)
             assert await uow.risks.get_by_key("risk-key-1") == risk
             assert await uow.risks.list_evidence("risk-1") == (evidence,)

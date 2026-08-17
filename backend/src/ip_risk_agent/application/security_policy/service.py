@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
 from hashlib import sha256
+
+from iprisk_contracts import SourceType
 
 from ip_risk_agent.application.repositories import (
     ControlUnitOfWork,
@@ -46,11 +48,20 @@ class SecurityPolicyUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class ConnectedSourceSummary:
+    mount: WorkspaceMount
+    source_type: SourceType | None
+    provider_account_label: str | None
+    tracking_scope_summary: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
 class DataAccessSummary:
     risk_workspace_id: str
     retention_policy_version: str
     policy_version: str
     mounts: tuple[WorkspaceMount, ...]
+    connected_sources: tuple[ConnectedSourceSummary, ...]
     recent_access: tuple[SourceAccessEvent, ...]
     raw_source_persisted: bool = False
     analysis_artifact_persisted: bool = False
@@ -152,6 +163,32 @@ class WorkspaceSecurityService:
                 action=VwsAction.VWS_VIEW,
             )
             mounts = await uow.mounts.list_for_workspace(risk_workspace_id)
+            connected_sources = []
+            for mount in mounts:
+                source_workspace = await uow.source_metadata.get_source_workspace(
+                    mount.source_workspace_id
+                )
+                connection = await uow.source_metadata.get_connection(
+                    mount.source_connection_id
+                )
+                connected_sources.append(
+                    ConnectedSourceSummary(
+                        mount=mount,
+                        source_type=(
+                            None if source_workspace is None else source_workspace.source_type
+                        ),
+                        provider_account_label=(
+                            None
+                            if connection is None
+                            else connection.provider_account_label
+                        ),
+                        tracking_scope_summary=(
+                            {}
+                            if source_workspace is None
+                            else source_workspace.tracking_config_safe
+                        ),
+                    )
+                )
             access = await uow.audit.list_source_access(risk_workspace_id)
         recent = tuple(
             sorted(access, key=lambda event: (event.occurred_at, event.id), reverse=True)[
@@ -163,6 +200,7 @@ class WorkspaceSecurityService:
             retention_policy_version=workspace.retention_policy_version,
             policy_version=workspace.security_policy_version,
             mounts=mounts,
+            connected_sources=tuple(connected_sources),
             recent_access=recent,
         )
 
@@ -199,6 +237,7 @@ def _settings(workspace: RiskWorkspace) -> WorkspaceSecuritySettings:
 
 
 __all__ = [
+    "ConnectedSourceSummary",
     "DataAccessSummary",
     "SecurityPolicyConflictError",
     "SecurityPolicyUpdate",

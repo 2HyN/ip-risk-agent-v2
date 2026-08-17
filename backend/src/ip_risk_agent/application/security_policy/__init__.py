@@ -1,6 +1,7 @@
 """VWS security settings application boundary."""
 
 from .service import (
+    ConnectedSourceSummary,
     DataAccessSummary,
     SecurityPolicyConflictError,
     SecurityPolicyUpdate,
@@ -9,6 +10,7 @@ from .service import (
 )
 
 __all__ = [
+    "ConnectedSourceSummary",
     "DataAccessSummary",
     "SecurityPolicyConflictError",
     "SecurityPolicyUpdate",

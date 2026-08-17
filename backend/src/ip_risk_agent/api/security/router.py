@@ -86,10 +86,21 @@ class DataAccessSummaryResponse(StrictApiModel):
     retention_policy_version: str
     policy_version: str
     mounts: list[MountResponse]
+    connected_sources: list["ConnectedSourceResponse"]
     recent_access: list[SourceAccessResponse]
     raw_source_persisted: bool
     analysis_artifact_persisted: bool
     external_rag_reference_only: bool
+
+
+class ConnectedSourceResponse(StrictApiModel):
+    mount_id: str
+    alias: str
+    source_type: str | None
+    provider_account_label: str | None
+    status: str
+    tracking_scope_summary: dict[str, object]
+    mounted_by_user_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +169,20 @@ def create_security_router(deps: SecurityRouterDependencies) -> APIRouter:
             retention_policy_version=summary.retention_policy_version,
             policy_version=summary.policy_version,
             mounts=[MountResponse.model_validate(item) for item in summary.mounts],
+            connected_sources=[
+                ConnectedSourceResponse(
+                    mount_id=item.mount.id,
+                    alias=item.mount.alias,
+                    source_type=(
+                        None if item.source_type is None else item.source_type.value
+                    ),
+                    provider_account_label=item.provider_account_label,
+                    status=item.mount.status.value,
+                    tracking_scope_summary=dict(item.tracking_scope_summary),
+                    mounted_by_user_id=item.mount.mounted_by_user_id,
+                )
+                for item in summary.connected_sources
+            ],
             recent_access=[
                 SourceAccessResponse.from_event(item) for item in summary.recent_access
             ],

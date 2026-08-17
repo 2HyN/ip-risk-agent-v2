@@ -21,6 +21,7 @@ from ip_risk_agent.core.memberships import (
     MembershipInvitation,
     MembershipStatus,
     membership_id_for,
+    normalize_invitation_email,
 )
 from ip_risk_agent.core.mounts import (
     SourceConnection,
@@ -308,6 +309,18 @@ class FirestoreMembershipRepository(_Repository):
             invitation_from_document,
         )
 
+    async def list_invitations_for_email(
+        self, email: str
+    ) -> tuple[MembershipInvitation, ...]:
+        return await self._query(
+            MEMBERSHIPS,
+            (
+                QueryFilter("record_kind", "membership_invitation"),
+                QueryFilter("email", normalize_invitation_email(email)),
+            ),
+            invitation_from_document,
+        )
+
 
 class FirestoreSourceMetadataRepository(_Repository):
     async def get_connection(self, connection_id: str) -> SourceConnection | None:
@@ -582,6 +595,15 @@ class FirestoreChangeEventRepository(_Repository):
             owner_document_id=event.id,
         )
         await self._save(CHANGE_EVENTS, event.id, event, change_event_to_document)
+
+    async def list_for_workspace(
+        self, risk_workspace_id: str
+    ) -> tuple[ChangeEvent, ...]:
+        return await self._query(
+            CHANGE_EVENTS,
+            (QueryFilter("risk_workspace_id", risk_workspace_id),),
+            change_event_from_document,
+        )
 
 
 class FirestoreAnalysisJobRepository(_Repository):

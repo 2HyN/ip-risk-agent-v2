@@ -17,7 +17,11 @@ from .notifications import (
 )
 from .risks import RiskRouterDependencies, create_risks_router
 from .security import SecurityRouterDependencies, create_security_router
-from .workspaces import WorkspaceRouterDependencies, create_workspaces_router
+from .workspaces import (
+    WorkspaceRouterDependencies,
+    create_invitations_router,
+    create_workspaces_router,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +58,7 @@ class ControlApiBundle:
         router = APIRouter()
         router.include_router(create_auth_router(dependencies.auth))
         router.include_router(create_workspaces_router(dependencies.workspaces))
+        router.include_router(create_invitations_router(dependencies.workspaces))
         router.include_router(create_risks_router(dependencies.risks))
         router.include_router(create_history_router(dependencies.history))
         router.include_router(create_security_router(dependencies.security))

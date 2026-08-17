@@ -1,0 +1,50 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ControlPlaneApp } from "../app/control-plane-app";
+
+const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+const user = { id: "user-1", email: "owner@example.com", display_name: "Owner", avatar_url: null, csrf_token: "csrf-token" };
+const workspace = { id: "vws-1", name: "Counsel", description: "Product portfolio", owner_user_id: "user-1", security_policy_version: "security-v1", retention_policy_version: "balanced-v1", created_at: "2026-08-17T00:00:00Z", updated_at: "2026-08-17T00:00:00Z", status: "ACTIVE" };
+const membership = { id: "member-1", risk_workspace_id: "vws-1", user_id: "user-1", role: "OWNER", status: "ACTIVE", invited_by: "user-1", created_at: "2026-08-17T00:00:00Z", updated_at: "2026-08-17T00:00:00Z" };
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.location.hash = ""; });
+
+describe("ControlPlaneApp", () => {
+  it("shows the Google login boundary when no application session exists", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ code: "AUTHENTICATION_REQUIRED", message: "Authentication is required" }, 401)));
+    render(<ControlPlaneApp router="hash" />);
+    expect(await screen.findByRole("heading", { name: /know what changed/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue with google/i })).toBeEnabled();
+  });
+
+  it("renders the Agent 2 source slot without owning source UI", async () => {
+    window.location.hash = "#/w/vws-1/sources";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/auth/me")) return json(user);
+      if (path.endsWith("/workspaces/vws-1/members")) return json({ items: [membership], next_cursor: null });
+      if (path.endsWith("/workspaces/vws-1")) return json(workspace);
+      return json({ code: "NOT_FOUND", message: "Not found" }, 404);
+    }));
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <section><h1>Injected provider sources</h1></section> }} />);
+    expect(await screen.findByRole("heading", { name: "Injected provider sources" })).toBeInTheDocument();
+  });
+
+  it("delegates Open Original as an opaque callback and renders no source preview", async () => {
+    window.location.hash = "#/w/vws-1/risks/risk-1";
+    const openOriginal = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/auth/me")) return json(user);
+      if (path.endsWith("/workspaces/vws-1/members")) return json({ items: [membership], next_cursor: null });
+      if (path.endsWith("/workspaces/vws-1/risks/risk-1")) return json({ risk: { id: "risk-1", risk_workspace_id: "vws-1", artifact_id: "artifact-1", analysis_type: "PATENT", lifecycle_state: "NEW", review_disposition: "UNREVIEWED", review_priority: "HIGH", summary: "Potential claim overlap", first_seen_at: "2026-08-17T00:00:00Z", last_seen_at: "2026-08-17T00:00:00Z", updated_at: "2026-08-17T00:00:00Z", resolved_at: null, review_version: 0, latest_analysis_job_id: "job-1", latest_evidence_revision: "rev-1", artifact_display_name: "invention.md", artifact_logical_path: "/design/invention.md", mount_id: "mount-1", mount_alias: "Design", source_type: "GITHUB" }, evidence: [], open_original: { action: "SOURCE_OPEN_ORIGINAL", artifact_id: "artifact-1" } });
+      if (path.endsWith("/workspaces/vws-1")) return json(workspace);
+      return json({ code: "NOT_FOUND", message: "Not found" }, 404);
+    }));
+    render(<ControlPlaneApp router="hash" integration={{ openOriginal }} />);
+    await userEvent.click(await screen.findByRole("button", { name: /open on github/i }));
+    expect(openOriginal).toHaveBeenCalledWith({ workspaceId: "vws-1", artifactId: "artifact-1", action: "SOURCE_OPEN_ORIGINAL", sourceType: "GITHUB" });
+    expect(screen.getByText("No raw source preview")).toBeInTheDocument();
+  });
+});

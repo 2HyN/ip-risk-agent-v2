@@ -4,9 +4,9 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 10 — ControlPlaneFacade와 Integration surface |
-| 다음 개발 Phase | Phase 11 — Product Web UI |
-| 전체 진행률 | 11/14 Phase 완료 |
+| 현재 완료 Phase | Phase 11 — Product Web UI |
+| 다음 개발 Phase | Phase 12 — 관측성, 보안 hardening과 전체 검증 |
+| 전체 진행률 | 12/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
 | 마지막 업데이트 | 2026-08-17 |
@@ -49,11 +49,11 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - `application/auth`, `application/security_policy`와 `api/**`에는 Google OIDC identity upsert, server-revocable signed session, VWS security policy persistence와 전체 Control-owned FastAPI router factory가 구현됐다.
 - `application/public_facade`에는 cross-plane authorization/source metadata callback과 SourceChange→Security Gate→AnalysisResult 전체 pipeline을 감싸는 안정된 Integration surface가 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐고, Control-owned API 영역은 Phase 9 router/factory까지 구현됐다.
-- Frontend는 `frontend/src` 아래 Agent 1/2 소유 디렉토리만 있고, 현재 코드는 Frozen TypeScript Contract import 검증뿐이다. React/Vite 제품 UI는 아직 없다.
-- `tests/control`에는 Phase 1~10 Domain, policy, repository/Firestore persistence, application/API/facade orchestration test 174개가 구현됐으며 현재 환경에서는 173개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- Frontend에는 React 19/Vite 8 기반 browser-safe Product UI, auth/VWS context, app shell, role-aware routing, VWS/Risk/History/Security/Notification 화면과 Agent 2 Source UI/Open Original 삽입 경계가 구현됐다.
+- `tests/control`에는 Phase 1~11 Domain, policy, repository/Firestore persistence, application/API/facade/UI-support API orchestration test 175개가 구현됐으며 현재 환경에서는 174개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
-- Root Python dependency는 현재 Pydantic과 pytest뿐이고, Frontend dependency는 TypeScript와 `@iprisk/contracts`뿐이다.
+- Root manifest/lock은 변경하지 않았고, Frontend package에는 검증된 React 19.2.8, React Router 7.18.2, Vite 8.2.1, Vitest 4.1.10과 Testing Library exact pin이 기록됐다.
 - 현재 브랜치는 `platform-control`이며 `origin/platform-control`을 추적한다.
 
 ### 2.3 확정된 개발 기준점과 보호 항목
@@ -80,7 +80,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 8 | Human review, History, Audit, Notification | 완료 |
 | 9 | Google App Login과 Control API | 완료 |
 | 10 | ControlPlaneFacade와 Integration surface | 완료 |
-| 11 | Product Web UI | 미구현 |
+| 11 | Product Web UI | 완료 |
 | 12 | 관측성, 보안 hardening과 전체 검증 | 미구현 |
 | 13 | 인계 문서와 통합 준비 | 미구현 |
 
@@ -734,6 +734,111 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
 
 ## 9. 작업 현황 로그
+
+### 2026-08-17 — 직전 미완료 보완 및 Phase 11 완료
+
+#### 구현 완료 항목
+
+1. **Phase 10의 명시적 invitation acceptance 미완료 보완**
+   - 로그인 callback에서 membership을 암묵 변경하지 않는 기존 결정을 유지하고 `GET /api/v1/invitations`, `POST /api/v1/invitations/{invitation_id}/accept`를 추가했다.
+   - verified session email과 casefold-normalized invitation email이 일치하는 pending 초대만 조회하며, 수락은 CSRF 검증 후 기존 `WorkspaceAdministrationService.accept_invitation()` transaction을 사용한다.
+   - in-memory/Firestore MembershipRepository에 email-scoped invitation query를 추가하고 Firestore query index 선언을 갱신했다.
+   - 초대 응답에 workspace name과 expiration 기반 `acceptance_available`을 제공해 만료된 초대는 UI에서 disabled 상태로 표시한다.
+   - 초대 조회→CSRF 거부→명시적 수락→목록 제거를 API 회귀 테스트로 고정했다.
+2. **Phase 10 Open Original UI 경계 보완**
+   - Risk 상세가 반환하는 `SOURCE_OPEN_ORIGINAL + artifact_id`를 `ControlPlaneApp.integration.openOriginal` callback으로 전달한다.
+   - source type에 따라 Google Drive/GitHub/owning desktop 의미의 button label을 렌더링하고 callback 미주입 시 설명과 함께 disabled로 fail closed한다.
+   - raw source preview, provider URL, credential과 local absolute path를 UI/API state에 추가하지 않았다.
+   - component test에서 opaque callback payload와 `No raw source preview` 표시를 검증했다.
+3. **React/Vite dependency 선택과 실행 환경 확정**
+   - npm registry의 current stable/engine/peer metadata를 확인해 React/React DOM 19.2.8, React Router DOM 7.18.2, Vite 8.2.1, React plugin 6.0.5, Vitest 4.1.10, jsdom 30.0.1과 Testing Library exact versions를 선택했다.
+   - Node.js 24.19.0에서 root lockfile을 읽거나 쓰지 않는 검증 설치, strict TypeScript, Vitest와 production bundle을 통과했다.
+   - exact version과 호환 근거를 `agent-deliverables/agent-1-dependencies.md` 및 `frontend/package.json`에 기록했다. root `package.json`과 `pnpm-lock.yaml`은 수정하지 않았다.
+4. **공용 frontend 기반**
+   - credential 포함 same-origin fetch, safe API error envelope, session CSRF 자동 주입을 담당하는 typed `ApiClient`/`ControlApi`를 구현했다.
+   - Google App session provider, workspace/membership context, role capability projection, reusable async resource hook과 loading/error/empty state를 구현했다.
+   - Button/Card/Badge/Field/Table state 등 접근성 중심 primitive와 keyboard focus, reduced-motion, desktop/mobile responsive design system을 구현했다.
+5. **Web/Electron 공용 app shell과 routing**
+   - BrowserRouter(Web)와 HashRouter(Electron renderer)를 선택할 수 있는 `ControlPlaneApp` public entrypoint를 만들었다.
+   - auth guard, global navigation, VWS sidebar, role-aware route/action visibility와 not-found fallback을 구현했다.
+   - Agent 2 소유 `frontend/src/sources/**`를 변경하거나 import하지 않고 `sourceNavigation`/`sourcePanel` ReactNode 삽입 slot을 제공했다.
+6. **Phase 11 제품 화면 구현**
+   - Login, Workspace list/create, pending invitation acceptance, VWS dashboard, Members/roles, Risk list/filter, Risk detail/review, Risk timeline, Activity/Audit/Source Access, Security & Data Access, Notifications 화면을 구현했다.
+   - Owner만 member mutation/security policy/audit export를 보고, Reviewer 이상만 review form을 보도록 했다. 이는 UX gating일 뿐 모든 mutation은 기존 Backend authorization/CSRF가 최종 방어선이다.
+7. **canonical dashboard와 Risk API 보강**
+   - dashboard API가 Risk lifecycle/review disposition, AnalysisJob status와 Mount status에서 New/Monitoring/Resolved Recently/Analysis Failed/Source Health를 직접 계산한다.
+   - ChangeEvent workspace query를 통해 해당 VWS AnalysisJob만 집계하며 synthetic client count를 만들지 않는다.
+   - Risk API에 priority/mount/source filter와 artifact display name/logical path, mount alias/source type projection을 추가해 명세의 list/detail 정보를 제공한다.
+8. **Security & Data Access 투명성 보강**
+   - data-access summary에 source type, provider account label, tracking scope safe summary, mounted-by와 source status를 추가했다.
+   - 연결 범위, `.ipriskignore`, source/evidence retention, secret filtering, external RAG reference-only 보장과 실제 SourceAccessEvent를 별도 섹션으로 표시한다.
+   - raw source/approved artifact persistence boolean을 그대로 표시해 storage 의미를 숨기지 않는다.
+9. **접근성·반응형 및 브라우저 검증**
+   - Testing Library/Vitest test 9건으로 unauthenticated login, source slot, Open Original callback, CSRF request, safe error 처리와 4개 Role capability matrix를 고정했다.
+   - 실제 in-app browser에서 desktop dashboard/Risk detail과 390px mobile navigation을 검사했다.
+   - browser QA에서 mobile dashboard의 2열 override가 16px horizontal overflow를 만들던 문제를 발견해 1열로 수정했고 최종 `scrollWidth <= clientWidth`를 확인했다.
+10. **소유 경계와 생성물 보호**
+    - `frontend/src/sources/**`, `connectors/**`, `apps/desktop/**`, Integration `main.py`/`worker.py`/`composition/**`, root manifest/lock을 수정하지 않았다.
+    - 공식 contract 생성 후 Pydantic source 변경 없이 generated schema/TypeScript tracked diff 0을 확인했다.
+11. **예기치 않은 종료 이후 HEAD 기준 연속성 감사**
+    - 직전 커밋 `ba78363 feat: add Control Plane integration facade`와 working tree 전체를 다시 비교해 Phase 11 수정/미추적 파일 목록을 재구성했다.
+    - 모든 변경이 Agent 1 backend/API/frontend/test, `frontend/package.json`과 허용된 추적/인계 문서에만 있음을 확인했다. root manifest/lock, Frozen Pydantic source, Agent 2/3/Integration 소유 파일에는 diff가 없다.
+    - TODO/FIXME/임시 browser storage/unsafe HTML/raw-source route와 중단된 placeholder 구현이 없는지 검색했고 발견되지 않았다.
+    - Phase 11 화면↔route↔API 대응표, 4개 Role capability, Source UI slot, Open Original callback과 security transparency 응답을 재검토하고 Firestore 신규 query parity assertion을 보강했다.
+    - repository 전체 Python compile, shared+모든 현재 tests, contracts/frontend/desktop TypeScript build와 resolution을 다시 실행해 중단으로 인한 반쪽 산출물이 없음을 확인했다.
+
+#### 구현 미완료 항목 및 사유
+
+1. **Agent 2 Source panel과 실제 provider/desktop Open Original 실행**
+   - Agent 1은 public `sourceNavigation`, `sourcePanel`, `openOriginal` binding point와 안전한 fallback까지 완료했다. 실제 Drive/GitHub locator와 Local owning-device registry는 Source Plane 소유이며 Integration이 주입해야 한다.
+2. **frontend 전체 cursor pagination/infinite loading**
+   - 현재 list 화면은 각 signed cursor API의 첫 페이지(기본 50건)를 표시한다. 기능 MVP와 Phase 11 필수 화면은 완결되지만, 대규모 데이터의 incremental loading/virtualization 및 native Firestore cursor는 Phase 12 scale 검증과 함께 구현 여부를 결정한다.
+3. **production Google OIDC/Firestore/Cloud Tasks를 연결한 browser E2E**
+   - local component/browser 검증은 deterministic mock API로 수행했다. staging credential, Firestore emulator/production project와 Agent 2/3 wiring이 없으므로 실제 외부 service roundtrip은 Integration 환경에서만 가능하다.
+4. **frontend package의 root lock 반영**
+   - exact version은 검증하고 frontend manifest/dependency 문서에 기록했지만 root `pnpm-lock.yaml`은 Integration-only 영역이라 수정하지 않았다. Integration 단계가 다른 Agent dependency와 충돌을 확인해 최종 lock을 생성해야 한다.
+5. **Phase 12 cross-layer permission/observability hardening**
+   - 개별 role capability와 backend authorization은 각각 테스트했지만 전체 API permission matrix와 모든 frontend route/action의 자동 교차 테스트, structured correlation logging, concurrent stress scenario는 계획된 Phase 12 메인 범위다.
+
+#### 추가 검토가 필요한 사항
+
+1. **Dashboard query 비용**
+   - canonical correctness를 우선해 VWS ChangeEvent를 조회한 뒤 event별 AnalysisJob을 읽는다. 데이터 규모가 커지면 N+1 read가 발생하므로 Phase 12에서 Firestore 측 aggregate projection 또는 safe denormalized workspace key/index 도입 여부를 성능 측정 후 결정한다. client synthetic count로 대체하지 않는다.
+2. **Risk list enrichment 비용**
+   - artifact logical path/mount/source filter는 Risk마다 canonical Artifact/Mount를 조회한다. native Firestore join이 없으므로 Phase 12에서 page 크기와 read 비용을 측정하고, 필요할 때만 presentation projection을 별도 cache/denormalization한다.
+3. **Role gating은 의도적으로 중복 방어가 아니다**
+   - frontend는 불가능한 action을 숨기거나 disabled로 설명하지만 role 값을 신뢰 경계로 사용하지 않는다. Backend membership, permission, CSRF와 optimistic version이 항상 최종 판정한다. Phase 12 matrix test가 이 parity를 고정해야 한다.
+4. **Browser/Electron routing 의미**
+   - Web은 BrowserRouter, Electron은 HashRouter를 public prop으로 선택한다. Source panel은 같은 React context 안에서 렌더링되며 Electron preload/native IPC 객체를 Control package가 직접 import하지 않는다.
+5. **Open Original fail-closed UX**
+   - callback 미주입 시 button을 숨기지 않고 disabled로 표시해 사용자가 원본 경계가 존재하지만 Integration이 아직 연결되지 않았음을 알 수 있게 했다. production에서 항상 enabled여야 한다는 요구가 확정되면 Integration readiness check와 함께 조정한다.
+6. **`.ipriskignore` editor 범위**
+   - MVP는 accessible textarea와 optimistic policy version을 사용한다. syntax highlighting/autocomplete은 deny-only 정책 의미를 바꾸지 않는 보조 기능이며 현재 필수 범위가 아니므로 추가 dependency를 도입하지 않았다.
+7. **초대 expiration projection**
+   - 만료 시 canonical record를 조회 과정에서 쓰지 않고 `acceptance_available=false`로 projection한다. EXPIRED 상태 영속 전환/cleanup은 별도 scheduled lifecycle이 필요한 운영 정책이며 현재 accept transaction은 expired 요청을 계속 거부한다.
+8. **이전 검토 사항의 가벼운 재확인**
+   - PublicVwsAction parity, credential ref 비노출, canonical Gate policy resolver, SourceAccess identity와 safe failure 경계를 UI/API projection에서 다시 확인했다. 이번 Phase에서 이 원칙과 충돌하는 새 경로는 발견되지 않았다.
+9. **repository 전체 개발 현황의 범위 차이**
+   - 현재 repository에는 Agent 1 `tests/control` 17개 파일과 shared contract tests만 존재하며 `tests/connectors`, `tests/intelligence`, `tests/integration`, `tests/e2e`는 아직 비어 있다. `frontend/src/sources`도 아직 비어 있고 `composition/main.py/worker.py`는 Integration placeholder다.
+   - root TypeScript build는 현재 contracts/frontend/desktop 전부 통과하고 Python compileall은 connectors/intelligence를 포함한 backend 전체를 통과했다. 다만 다른 Plane의 기능 완료나 integration E2E를 Agent 1 test 결과로 오인해서는 안 되며, 이는 Phase 11 중단으로 생긴 회귀가 아니라 각 소유 Plane/Integration의 후속 개발 현황이다.
+
+#### 검증 결과
+
+- Phase 11 frontend tests: `9 passed`
+- Agent 1 control suite: `174 passed, 1 skipped`
+- shared contracts + Agent 1 control suite: `201 passed, 1 skipped`
+- Python 3.14.7 compileall 및 `.venv/Scripts/python.exe -m pip check`: 통과
+- root TypeScript typecheck/contract resolution과 frontend strict typecheck: 통과
+- root `pnpm run build`: contracts/frontend/desktop 전체 통과
+- Vite 8.2.1 production build: 45 modules, JS 272.82 kB(raw)/83.76 kB(gzip), 통과
+- Desktop/Risk detail/390px mobile browser QA: 통과, mobile horizontal overflow 수정 후 재검증
+- `pnpm run generate`: 통과, generated contracts tracked diff 없음
+
+#### 제안 커밋 메시지
+
+```text
+feat: build the Control Plane product web UI
+```
 
 ### 2026-08-17 — 직전 미완료 보완 및 Phase 10 완료
 

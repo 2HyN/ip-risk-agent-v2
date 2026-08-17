@@ -54,6 +54,7 @@ class CompositeIndex:
 REQUIRED_COMPOSITE_INDEXES = (
     CompositeIndex(MEMBERSHIPS, ("record_kind", "risk_workspace_id")),
     CompositeIndex(MEMBERSHIPS, ("record_kind", "user_id", "status")),
+    CompositeIndex(MEMBERSHIPS, ("record_kind", "email")),
     CompositeIndex(WORKSPACE_MOUNTS, ("record_kind", "risk_workspace_id")),
     CompositeIndex(
         WORKSPACE_MOUNTS,
@@ -64,6 +65,7 @@ REQUIRED_COMPOSITE_INDEXES = (
         ("record_kind", "artifact_id", "analysis_type", "lifecycle_state"),
     ),
     CompositeIndex(RISKS, ("record_kind", "risk_workspace_id")),
+    CompositeIndex(CHANGE_EVENTS, ("risk_workspace_id",)),
 )
 
 
