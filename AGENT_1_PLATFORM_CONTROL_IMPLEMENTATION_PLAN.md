@@ -4,12 +4,12 @@
 
 | 항목 | 상태 |
 |---|---|
-| 현재 완료 Phase | Phase 12 — 관측성, 보안 hardening과 전체 검증 |
-| 다음 개발 Phase | Phase 13 — 인계 문서와 통합 준비 (개발자 로컬 검증 후 진행) |
-| 전체 진행률 | 13/14 Phase 완료 |
+| 현재 완료 Phase | Phase 13 — 인계 문서와 통합 준비 |
+| 다음 개발 Phase | Integration |
+| 전체 진행률 | 14/14 Phase 완료 |
 | 기준 Python | CPython 3.14.7 |
 | 기준 Branch | `platform-control` |
-| 마지막 업데이트 | 2026-08-17 |
+| 마지막 업데이트 | 2026-08-18 |
 
 Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 커밋과 push를 실행하지 않고, 매 개발 요청 종료 시 제안 커밋 메시지만 제공한다.
 
@@ -50,7 +50,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 - `application/public_facade`에는 cross-plane authorization/source metadata callback과 SourceChange→Security Gate→AnalysisResult 전체 pipeline을 감싸는 안정된 Integration surface가 구현됐다.
 - `persistence/core_firestore`에는 canonical schema, strict document mapper, deterministic unique sentinel, production Google async backend와 Firestore UoW/repository가 구현됐고, Control-owned API 영역은 Phase 9 router/factory까지 구현됐다.
 - Frontend에는 React 19/Vite 8 기반 browser-safe Product UI, auth/VWS context, app shell, role-aware routing, VWS/Risk/History/Security/Notification 화면과 Agent 2 Source UI/Open Original 삽입 경계가 구현됐다.
-- `tests/control`에는 Phase 1~12 Domain, policy, repository/Firestore persistence, application/API/facade/관측성/동시성/권한 test 256개가 구현됐으며 현재 환경에서는 255개 통과, emulator test 1개가 환경 미설정으로 skip된다.
+- `tests/control`에는 Phase 1~13 Domain, policy, repository/Firestore persistence, application/API/facade/관측성/동시성/권한/delivery contract test 260개가 구현됐으며 현재 환경에서는 259개 통과, emulator test 1개가 환경 미설정으로 skip된다.
 - `shared/contracts/**`에는 Pydantic Contract v1, JSON Schema, 생성 TypeScript 타입, fixture, frozen test가 존재한다.
 - `main.py`, `worker.py`, `composition/**`는 Integration 전용 placeholder다.
 - Root manifest/lock은 변경하지 않았고, Frontend package에는 검증된 React 19.2.8, React Router 7.18.2, Vite 8.2.1, Vitest 4.1.10과 Testing Library exact pin이 기록됐다.
@@ -82,7 +82,7 @@ Git commit과 push 권한은 프로젝트 소유자에게만 있다. Agent 1은 
 | 10 | ControlPlaneFacade와 Integration surface | 완료 |
 | 11 | Product Web UI | 완료 |
 | 12 | 관측성, 보안 hardening과 전체 검증 | 완료 |
-| 13 | 인계 문서와 통합 준비 | 미구현 |
+| 13 | 인계 문서와 통합 준비 | 완료 |
 
 ## 3. Agent 1의 구현 범위와 절대 경계
 
@@ -734,6 +734,98 @@ Agent 1 개발은 다음 조건을 모두 만족할 때 완료한다.
 8. Integration Agent가 사용할 facade/router/frontend wiring point와 dependency가 인계 문서에 명확히 기록되어 있다.
 
 ## 9. 작업 현황 로그
+
+### 2026-08-18 — 직전 미완료 보완 및 Phase 13 완료
+
+#### 구현 완료 항목
+
+1. **Phase 12 미완료 항목 최종 분류와 보완**
+   - 실제 Google OIDC/Firestore/Cloud Tasks, 다른 Plane browser E2E, distributed ingress와 final app/worker는 Agent 1 내부 결함이 아니라 자격 증명·배포 topology·타 Plane code가 필요한 Integration 소유 항목임을 재확인했다.
+   - native Firestore cursor, Dashboard projection, RiskEvent hash chain, 대규모 table virtualization은 correctness 결함이 아니라 production profile 또는 schema/index/migration 공동 설계가 필요한 후속 선택으로 분류했다.
+   - 관측성 타입이 내부 module에서만 제공되던 조립 불편을 해소하기 위해 `CorrelationIds`, `StructuredLogger`, `StructuredEventSink`, safe error/log 타입을 안정된 `application.public_facade`에서 재export했다.
+2. **Integration public surface 자동 검증**
+   - `tests/control/test_delivery_contract.py`를 추가해 `ControlPlaneFacade` 생성자와 핵심 callback, raw-free `TaskEnqueuer`, Firestore UoW factory, Control API factory/dependency field, structured observability public export를 고정했다.
+   - `REQUIRED_COMPOSITE_INDEXES`의 collection/field manifest를 test로 고정해 문서와 실제 persistence query wiring이 조용히 달라지는 것을 방지했다.
+3. **`AGENT_DELIVERY.md` 최종 인계 문서화**
+   - 구현 범위, 변경 파일 그룹, 안정 import path와 facade 전체 method signature를 기록했다.
+   - production Firestore UoW/facade 조립, Source authz/metadata callback, raw-free queue contract, 실패 보존 pipeline, Security Gate constructor/config를 실제 code surface와 맞췄다.
+   - Control API의 application service, Google OIDC, cursor, router dependency와 bundle factory 조립 예제를 추가했다.
+   - frontend `ControlPlaneApp`, Source UI slot, Web/Electron router, Open Original callback과 backend 재권한 검증 경계를 기록했다.
+   - 환경 변수, 16개 canonical collection의 index manifest, 전체 실행/검증 명령, shared contract 준수, Integration 조립 순서와 알려진 제약을 정리했다.
+4. **Dependency 인계 최종화**
+   - `agent-deliverables/agent-1-dependencies.md` 상태를 Phase 13 완료로 바꾸고 Python 3.14.7/Node 24.19.0에서 검증한 exact version을 최종 root pin 후보로 확정했다.
+   - Agent 1 code가 직접 import하지 않는 Uvicorn은 final app/deployment와 함께 Integration이 선택하도록 명시했다.
+   - async test가 `asyncio.run`을 사용하므로 실제로 불필요한 `pytest-asyncio` 요청을 제거하고, Firestore index manifest 대조 요청을 추가했다.
+5. **Frozen Contract와 change request 최종 판정**
+   - cross-plane 입력이 Frozen Contract 또는 facade-owned content-free DTO로 모두 표현 가능함을 재확인했다.
+   - 공식 `pnpm.cmd run generate`를 실행했고 Pydantic source 변경 없이 schema/TypeScript generated tracked diff가 없음을 확인했다.
+   - Contract 부족이 없어 `contract-change-requests/agent1-XXX.md`는 생성하지 않았다.
+6. **전체 시스템 회귀 검증**
+   - shared contract와 `tests/**` 전체를 실행해 `286 passed, 1 skipped`를 확인했다. skip은 `FIRESTORE_EMULATOR_HOST`가 없는 환경의 실제 emulator test 1건뿐이다.
+   - Python 3.14.7 `compileall`과 `pip check`, root TypeScript typecheck와 resolution, frontend `15 passed`와 Vite production build를 모두 통과했다.
+   - Phase 12의 32-way SourceChange/job/result/review stress, 4 Role × 17 VwsAction permission matrix, fake end-to-end Control flow를 전체 회귀에 포함해 다시 통과했다.
+7. **소유 경계와 예기치 않은 변경 점검**
+   - 이번 Phase 수정은 public facade export, Agent 1 test, 인계/의존성/현황 문서로 제한했다.
+   - Agent 2/3, Integration 전용 composition, root manifest/lock, Frozen Pydantic source와 generated contract에 변경을 만들지 않았다.
+   - `git diff --check`를 통과했으며 commit/push는 수행하지 않았다.
+
+#### 구현 미완료 항목 및 사유
+
+1. **실제 클라우드와 타 Plane을 사용한 staging/browser E2E**
+   - Google credential/callback domain, Firestore project/emulator, Cloud Tasks queue, Agent 2 Source adapter와 Agent 3 analyzer가 현재 Agent 1 작업 환경에 조립되어 있지 않다.
+   - Agent 1은 fake OIDC/provider/analyzer와 production adapter surface까지 검증했다. 실제 연결은 인계 문서의 조립 순서에 따라 Integration이 수행해야 하며, Agent 1이 임의 credential이나 타 Plane 대체 구현을 만들지 않았다.
+2. **Firestore emulator 실제 transaction 실행**
+   - 현재 `FIRESTORE_EMULATOR_HOST`가 설정되지 않아 전체 suite의 emulator test 1건이 의도대로 skip된다.
+   - mapper/fake backend/repository/optimistic transaction test는 통과했고 emulator fixture와 실행 경로도 존재한다. emulator service를 가진 Integration 환경에서 최종 parity를 확인해야 한다.
+3. **최종 ASGI app/worker와 root dependency lock**
+   - `main.py`, `worker.py`, `composition/**`, root manifest/lock은 명세상 Integration 소유다. Agent 1은 필요한 factory/signature와 exact dependency 후보만 인계했다.
+4. **Production distributed protection과 deploy index**
+   - multi-instance rate limit, forwarded-header trust, WAF/IAM, Cloud Tasks retry/dead-letter와 실제 `firestore.indexes.json` 병합은 deployment topology와 전체 Plane query가 확정되어야 한다.
+   - Agent 1은 exact host/origin validation, local safety limiter, safe structured log와 코드 index manifest를 제공하며 이를 전역 운영 정책으로 오인하지 않도록 문서화했다.
+5. **Production scale 기반 optional 구조 변경**
+   - signed offset cursor, Dashboard ChangeEvent→Job read, request-scope Risk enrichment cache는 현재 canonical schema와 correctness를 보존하며 전체 기능 test를 통과한다.
+   - native cursor/projection/global cache를 근거 없이 일부 endpoint에만 도입하면 snapshot 의미, authorization freshness와 migration이 불일치하므로 실제 trace/load profile이 제공될 때 Integration 후속 작업으로 수행한다.
+
+#### 추가 검토가 필요한 사항
+
+1. **Integration invariant checklist**
+   - Source Plane은 Control authorization 뒤에도 provider credential authority를 재검증해야 하며 queue/callback/log에는 raw content, token, provider URL과 local absolute path를 넣지 않아야 한다.
+   - Agent 3는 Security Gate가 승인한 `AnalysisArtifact`만 받아야 하며 provider/analyzer 실패를 empty success로 변환해서는 안 된다. 이 두 항목은 staging E2E의 필수 실패 시나리오다.
+2. **OIDC/session 운영 설정**
+   - Google redirect URI와 exact public origin/host, HTTPS-only cookie, 32자 이상 환경별 `SESSION_SECRET`, secret rotation 시 기존 session invalidation을 배포 설정에서 확인한다.
+3. **Firestore index와 migration**
+   - `REQUIRED_COMPOSITE_INDEXES`는 query manifest이지 배포 JSON 자체가 아니다. Integration은 실제 Firestore error/index recommendation과 대조해 deploy config를 만들고 emulator/production query를 재실행한다.
+   - 기존 document가 있는 배포만 `User.session_version`, `RiskWorkspace.global_ignore_text` backfill이 필요하다. 신규 database에는 불필요한 migration을 실행하지 않는다.
+4. **Observability sink와 운영 보존 정책**
+   - Integration sink는 allow-list record를 그대로 전달하고 free-form payload를 추가하지 않아야 한다. Cloud Logging resource/severity, sampling, retention, alert와 trace 연계는 배포 환경에서 확정한다.
+   - 외부 version label이 safe-label 규칙을 벗어나면 원문 대신 omission flag를 남기는 현재 정책을 유지하고 Agent 3와 opaque version naming을 맞춘다.
+5. **Scale와 tamper evidence의 후속 판단**
+   - native cursor/projection/virtualization은 실제 latency/read count/row profile을 근거로 endpoint 전체 의미를 함께 설계한다.
+   - cryptographic RiskEvent chain은 현재 필수 명세가 아니다. 규제 요구가 확인될 때 schema version, signing key custody, backfill과 verifier를 하나의 change로 설계한다.
+6. **최종 결론**
+   - Phase 0~13의 Agent 1 acceptance criteria는 모두 충족됐다. 남은 항목은 Integration 환경 또는 production evidence가 필요한 명시적 인계 사항이며, 현재 Agent 1 public surface를 내부 재작성 없이 조립할 수 있다.
+
+#### 검증 결과
+
+```text
+pnpm.cmd run generate                                  PASS
+generated contract tracked diff                       NONE
+shared/contracts/tests + tests/**                     286 passed, 1 skipped
+tests/control/test_delivery_contract.py               4 passed
+Python 3.14.7 compileall                              PASS
+Python pip check                                      PASS (no broken requirements)
+root TypeScript typecheck                             PASS
+root TypeScript resolution                            PASS
+frontend Vitest                                       15 passed
+frontend Vite production build                        PASS (47 modules)
+git diff --check                                      PASS
+```
+
+#### 제안 커밋 메시지
+
+```text
+docs: finalize Control Plane integration handoff
+```
 
 ### 2026-08-17 — 직전 미완료 보완 및 Phase 12 완료
 

@@ -3,13 +3,13 @@
 ## Status
 
 - Owner: Agent 1 — Platform & Control Plane
-- State: Agent 1 feature 단계별 자체 선택/설치 허용; 최종 root pin은 Integration 단계 검토
+- State: Phase 13 최종화 완료; 아래 검증 후보를 Integration root pin 검토 대상으로 인계
 - Python compatibility target: CPython 3.14.7
 - Existing fixed packages: Pydantic 2.13.4, pytest 9.1.1
 
 Agent 1은 각 feature 구현에 필요한 package를 독자적으로 선택하고 현재 `.venv`/workspace에서 호환성을 검사해 설치할 수 있다. 선택 버전과 검사 결과는 이 문서에 누적한다. Root manifest와 최종 lockfile pin은 Integration 단계에서 다른 Plane과의 충돌 여부를 확인해 최대한 반영한다. 모든 선택은 Python 3.14.7 또는 Node.js 24.19.0과 호환되어야 한다.
 
-Phase 0~3, Phase 10과 Phase 12에서는 신규 package가 필요하지 않아 추가 설치를 수행하지 않았다. Phase 11에서는 아래 React/Vite dependency를 root lockfile 변경 없이 `frontend/package.json`에 pin하고 Node.js 24.19.0에서 설치·typecheck·test·production build를 검증했다. Phase 12 observability, TrustedHost/CORS와 local rate limit은 Python 표준 library 및 기존 FastAPI/Starlette runtime으로 구현했다.
+Phase 0~3, Phase 10과 Phase 12~13에서는 신규 package가 필요하지 않아 추가 설치를 수행하지 않았다. Phase 11에서는 아래 React/Vite dependency를 root lockfile 변경 없이 `frontend/package.json`에 pin하고 Node.js 24.19.0에서 설치·typecheck·test·production build를 검증했다. Phase 12 observability, TrustedHost/CORS와 local rate limit은 Python 표준 library 및 기존 FastAPI/Starlette runtime으로 구현했다.
 
 ## 검증 완료 dependency 선택
 
@@ -24,7 +24,7 @@ Phase 0~3, Phase 10과 Phase 12에서는 신규 package가 필요하지 않아 �
 | 11 | `react`, `react-dom` | `19.2.8` | Node.js 24.19.0, strict TypeScript, Testing Library component test와 Vite production build 통과 |
 | 11 | `react-router-dom` | `7.18.2` | React 19 peer 및 Node >=20 조건 확인, BrowserRouter/HashRouter Web·Electron 공용 route test 통과 |
 | 11 | `vite`, `@vitejs/plugin-react` | `8.2.1`, `6.0.5` | Node `^20.19 || >=22.12` 조건 확인, 45 modules production build 통과 |
-| 11 | `vitest`, `jsdom` | `4.1.10`, `30.0.1` | Node.js 24.19.0에서 jsdom 조건(`^24.15` branch) 충족, 9 frontend test 통과 |
+| 11 | `vitest`, `jsdom` | `4.1.10`, `30.0.1` | Node.js 24.19.0에서 jsdom 조건(`^24.15` branch) 충족, Phase 12 기준 15 frontend test 통과 |
 | 11 | Testing Library | `@testing-library/react 16.3.2`, `dom 10.4.1`, `user-event 14.6.4`, `jest-dom 7.0.1` | React 19 peer, 접근성 role 기반 component test 통과 |
 | 11 | React/Node type packages | `@types/react 19.2.18`, `@types/react-dom 19.2.4`, `@types/node 26.2.0` | TypeScript 5.9.3 strict/noUnchecked/exactOptional 전체 통과 |
 
@@ -39,7 +39,7 @@ Phase 11 dependency metadata는 2026-08-17 npm registry의 current stable releas
 | Package/capability | Purpose | Requirement |
 |---|---|---|
 | FastAPI | Control-owned HTTP API와 dependency injection | `fastapi==0.141.1` 검증 완료 |
-| Uvicorn | 개발 및 Cloud Run ASGI runtime | 선택한 FastAPI/Starlette와 호환 |
+| Uvicorn 또는 동등 ASGI server | 최종 app의 local/Cloud Run runtime | Agent 1이 직접 import하지 않음; Integration이 전체 app/deployment와 함께 선택 |
 | Google Cloud Firestore client | Canonical Firestore repositories와 transaction | `google-cloud-firestore==2.28.1` 검증 완료 |
 | Authlib 또는 동등 OIDC client | Google OIDC authorization-code flow, discovery, state/nonce/ID token 검증과 PKCE | `authlib==1.7.2` 검증 완료 |
 | HTTPX 또는 동등 async HTTP client | OIDC discovery/token/userinfo 통신 | `httpx==0.28.1` 검증 완료 |
@@ -49,7 +49,7 @@ Phase 11 dependency metadata는 2026-08-17 npm registry의 current stable releas
 
 | Package/capability | Purpose | Requirement |
 |---|---|---|
-| pytest-asyncio | Async application/repository/API test | pytest 9.1.1 및 Python 3.14.7 호환 |
+| pytest | 전체 Python test | `pytest==9.1.1` 검증 완료; async test는 `asyncio.run` 기반이라 `pytest-asyncio` 불필요 |
 | HTTPX2 | Starlette TestClient transport | `httpx2==2.10.0` 검증 완료 |
 | Firestore emulator support | Transaction, deterministic ID, concurrency persistence test | production credential 불필요 |
 
@@ -100,6 +100,15 @@ FIRESTORE_EMULATOR_HOST  # emulator test에서만 사용
 3. Firestore emulator test command와 필요한 environment binding을 제공한다.
 4. Windows contract test 실행 시 `PNPM_EXECUTABLE`에 `pnpm.cmd`를 지정한다.
 5. Agent 1 router/facade의 실제 등록은 Integration 전용 `composition/**`, `main.py`, `worker.py`에서 수행한다.
+6. `ip_risk_agent.persistence.core_firestore.REQUIRED_COMPOSITE_INDEXES`를 실제 Firestore 배포 index와 대조한다.
+
+## Phase 13 최종 판단
+
+- 위 exact version은 모두 Agent 1 기준 runtime과 전체 회귀에서 검증한 Integration pin 후보다.
+- Uvicorn은 Agent 1 직접 dependency가 아니므로 임의 pin하지 않았다.
+- `pytest-asyncio`는 구현이나 test가 사용하지 않으므로 요청 목록에서 제외했다.
+- Firestore emulator binary/service와 Google OIDC credential은 package가 아니라 Integration 환경 자원이다.
+- root manifest/lock 변경은 Agent 1 소유 경계 밖이므로 수행하지 않았다.
 
 ## Version selection policy
 

@@ -1,5 +1,14 @@
 """Stable Integration-facing Control Plane API."""
 
+from ip_risk_agent.application.observability import (
+    CorrelationIds,
+    ErrorCategory,
+    PythonLoggingSink,
+    SafeErrorDescriptor,
+    StructuredEventSink,
+    StructuredLogger,
+)
+
 from .models import (
     AnalysisArtifactBuildResult,
     AnalysisExecutionClaim,
@@ -27,10 +36,14 @@ __all__ = [
     "AnalysisResultReceipt",
     "ControlPlaneFacade",
     "ControlPlaneFacadeConfig",
+    "CorrelationIds",
+    "ErrorCategory",
     "EvidenceRetentionConfig",
     "FacadeAuthorizationDecision",
     "OriginalSourceRequest",
     "PublicVwsAction",
+    "PythonLoggingSink",
+    "SafeErrorDescriptor",
     "SecurityGatePolicyConfig",
     "SourceAccessReceiptContext",
     "SourceAccessRegistration",
@@ -41,5 +54,7 @@ __all__ = [
     "SourceMetadataRegistrationCallback",
     "SourceScopeInput",
     "SourceWorkspaceContext",
+    "StructuredEventSink",
+    "StructuredLogger",
 ]
 
