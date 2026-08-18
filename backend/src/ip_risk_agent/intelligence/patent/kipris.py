@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from typing import Protocol
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element
+
+import httpx
+from defusedxml.ElementTree import ParseError, fromstring
 
 from ..common.errors import FailureCategory, ProviderFailureError
 
@@ -76,7 +76,7 @@ class PatentSearchProvider(Protocol):
         ...
 
 
-def _text(element: ElementTree.Element, tag: str) -> str:
+def _text(element: Element, tag: str) -> str:
     return (element.findtext(tag) or "").strip()
 
 
@@ -94,12 +94,28 @@ class KiprisClient:
         base_url: str = BASE_URL,
         timeout_seconds: float = _TIMEOUT_SECONDS,
         max_concurrency: int = 2,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self._access_key = access_key
         self._base_url = base_url.rstrip("/")
-        self._timeout_seconds = timeout_seconds
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient(
+            timeout=timeout_seconds,
+            headers={"User-Agent": "ip-risk-agent/1.0"},
+        )
         # 공공 API 는 동시 호출에 민감하다. 스스로 조인다.
         self._gate = asyncio.Semaphore(max_concurrency)
+
+    async def aclose(self) -> None:
+        """직접 만든 연결만 닫는다. 주입받은 것은 호출자 소유다."""
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def __aenter__(self) -> "KiprisClient":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        await self.aclose()
 
     async def search(self, query: str, *, rows: int = 5) -> list[PatentSearchHit]:
         root = await self._get(
@@ -107,77 +123,91 @@ class KiprisClient:
             {"searchAny": query, "docsCount": str(rows), "currentPage": "1"},
         )
         hits: list[PatentSearchHit] = []
-        # 응답 항목 태그는 <item> 이 아니라 <searchResult> 다.
+        # 실제 응답 기준. 항목 태그는 <item> 이 아니라 <searchResult> 이고,
+        # 필드도 applicationNumber/inventionTitle 이 아니라 아래 이름을 쓴다.
         for element in root.iter("searchResult"):
-            number = normalize_application_number(_text(element, "applicationNumber"))
+            number = normalize_application_number(_text(element, "applicationNo"))
             if not number:
                 continue
             hits.append(
                 PatentSearchHit(
                     application_number=number,
-                    title=_text(element, "inventionTitle") or _text(element, "title"),
+                    title=_text(element, "inventionName"),
                     query=query,
-                    metadata={"registerStatus": _text(element, "registerStatus")},
+                    metadata={
+                        "applicationDate": _text(element, "applicationDate"),
+                        "registerDate": _text(element, "registerDate"),
+                        "ipc": _text(element, "ipc"),
+                    },
                 )
             )
         return hits
 
     async def fetch_detail(self, application_number: str) -> PatentDocument:
-        """영문 초록과 국문 명칭을 각각 조회해 합친다."""
-        abstract_root = await self._get(
+        """서지 정보와 국문 초록을 합친다.
+
+        검사 대상 문서는 대개 한국어다. 국문 초록이 있으면 그것을 대조에 쓰고,
+        없을 때만 영문 초록을 쓴다. 언어가 다르면 겹치는 표현을 찾기 어렵다.
+        """
+        bibliographic = await self._get(
             BIBLIOGRAPHIC_PATH, {"applicationNumber": application_number}
         )
-        abstract = (abstract_root.findtext(".//astrtCont") or "").strip()
+        english_abstract = (bibliographic.findtext(".//astrtCont") or "").strip()
+        english_title = (bibliographic.findtext(".//inventionTitle") or "").strip()
 
-        title = ""
+        korean_abstract = korean_title = ""
         try:
-            korean_root = await self._get(
+            korean = await self._get(
                 KOREAN_ABSTRACT_PATH, {"applicationNumber": application_number}
             )
-            title = (korean_root.findtext(".//inventionTitle") or "").strip()
+            korean_abstract = (korean.findtext(".//korAbstract") or "").strip()
+            korean_title = (korean.findtext(".//inventionName") or "").strip()
         except ProviderFailureError:
-            # 국문 명칭은 표시용이다. 없어도 대조는 가능하므로 실패를 삼킨다.
-            title = ""
+            # 국문 조회는 보조 경로다. 실패해도 영문으로 대조할 수 있다.
+            pass
 
+        abstract = korean_abstract or english_abstract
         return PatentDocument(
             application_number=application_number,
-            title=title,
+            title=korean_title or english_title,
             abstract=abstract,
-            metadata={"abstract_language": "en"},
+            metadata={
+                "abstract_language": "ko" if korean_abstract else "en",
+                "english_title": english_title,
+            },
         )
 
     # ------------------------------------------------------------ 내부
 
-    async def _get(self, path: str, params: dict[str, str]) -> ElementTree.Element:
-        query = urllib.parse.urlencode({**params, "accessKey": self._access_key})
-        url = f"{self._base_url}/{path}?{query}"
+    async def _get(self, path: str, params: dict[str, str]) -> Element:
+        url = f"{self._base_url}/{path}"
         async with self._gate:
-            return await asyncio.to_thread(self._fetch_xml, url)
+            try:
+                response = await self._client.get(
+                    url, params={**params, "accessKey": self._access_key}
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code
+                category = {
+                    401: FailureCategory.AUTH,
+                    403: FailureCategory.AUTH,
+                    429: FailureCategory.RATE_LIMITED,
+                }.get(status, FailureCategory.UNAVAILABLE)
+                raise ProviderFailureError(PROVIDER, category, f"HTTP {status}") from exc
+            except httpx.TimeoutException as exc:
+                raise ProviderFailureError(
+                    PROVIDER, FailureCategory.TIMEOUT, "request timed out"
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise ProviderFailureError(
+                    PROVIDER, FailureCategory.UNAVAILABLE, type(exc).__name__
+                ) from exc
 
-    def _fetch_xml(self, url: str) -> ElementTree.Element:
-        request = urllib.request.Request(url, headers={"User-Agent": "ip-risk-agent/1.0"})
+        # 외부에서 받은 XML 이다. 엔티티 확장 공격을 막는 파서를 쓴다.
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout_seconds) as response:
-                payload = response.read()
-        except urllib.error.HTTPError as exc:
-            category = {
-                401: FailureCategory.AUTH,
-                403: FailureCategory.AUTH,
-                429: FailureCategory.RATE_LIMITED,
-            }.get(exc.code, FailureCategory.UNAVAILABLE)
-            raise ProviderFailureError(PROVIDER, category, f"HTTP {exc.code}") from exc
-        except TimeoutError as exc:
-            raise ProviderFailureError(
-                PROVIDER, FailureCategory.TIMEOUT, "request timed out"
-            ) from exc
-        except (urllib.error.URLError, OSError) as exc:
-            raise ProviderFailureError(
-                PROVIDER, FailureCategory.UNAVAILABLE, type(exc).__name__
-            ) from exc
-
-        try:
-            return ElementTree.fromstring(payload)
-        except ElementTree.ParseError as exc:
+            return fromstring(response.content)
+        except ParseError as exc:
             raise ProviderFailureError(
                 PROVIDER, FailureCategory.MALFORMED_OUTPUT, "response was not valid XML"
             ) from exc

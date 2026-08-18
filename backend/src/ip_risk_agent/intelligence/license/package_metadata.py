@@ -10,13 +10,10 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
+
+import httpx
 
 from . import spdx
 from .dependency_models import Ecosystem
@@ -54,17 +51,6 @@ class PackageMetadataProvider(Protocol):
         ...
 
 
-def _fetch_json(url: str) -> dict:
-    """동기 HTTP. 호출부에서 스레드로 넘긴다.
-
-    표준 라이브러리만 쓴다. root 의존성을 늘리지 않기 위해서다.
-    HTTP client 를 추가하면 agent-3-dependencies.md 를 통해 요청한다.
-    """
-    request = urllib.request.Request(url, headers={"User-Agent": "ip-risk-agent/1.0"})
-    with urllib.request.urlopen(request, timeout=_TIMEOUT_SECONDS) as response:
-        return json.loads(response.read())
-
-
 class HttpPackageMetadataProvider:
     """deps.dev 우선, 실패하거나 미상이면 레지스트리 원문으로 보완."""
 
@@ -73,10 +59,30 @@ class HttpPackageMetadataProvider:
         deps_dev_base_url: str = DEPS_DEV_BASE_URL,
         pypi_base_url: str = PYPI_BASE_URL,
         npm_base_url: str = NPM_BASE_URL,
+        *,
+        client: httpx.AsyncClient | None = None,
+        timeout_seconds: float = _TIMEOUT_SECONDS,
     ) -> None:
         self._deps_dev = deps_dev_base_url.rstrip("/")
         self._pypi = pypi_base_url.rstrip("/")
         self._npm = npm_base_url.rstrip("/")
+        self._owns_client = client is None
+        # 의존성 수만큼 호출하므로 연결을 재사용한다.
+        self._client = client or httpx.AsyncClient(
+            timeout=timeout_seconds,
+            headers={"User-Agent": "ip-risk-agent/1.0"},
+            follow_redirects=True,
+        )
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def __aenter__(self) -> "HttpPackageMetadataProvider":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        await self.aclose()
 
     async def get_license(
         self, ecosystem: Ecosystem, package: str, version: str | None
@@ -105,11 +111,7 @@ class HttpPackageMetadataProvider:
         if version is None:
             return None  # 버전 없이 조회하면 어느 버전의 답인지 알 수 없다.
         system = "PYPI" if ecosystem is Ecosystem.PYPI else "NPM"
-        url = (
-            f"{self._deps_dev}/systems/{system}/packages/"
-            f"{urllib.parse.quote(package, safe='')}/versions/"
-            f"{urllib.parse.quote(version, safe='')}"
-        )
+        url = f"{self._deps_dev}/systems/{system}/packages/{package}/versions/{version}"
         payload = await self._get(url, "DEPS_DEV")
         if payload is None:
             return None
@@ -134,7 +136,7 @@ class HttpPackageMetadataProvider:
             raw = str((payload or {}).get("info", {}).get("license") or "")
             source = "pypi.org"
         else:
-            payload = await self._get(f"{self._npm}/{urllib.parse.quote(package, safe='@/')}", "NPM")
+            payload = await self._get(f"{self._npm}/{package}", "NPM")
             info = payload or {}
             if version and isinstance(info.get("versions"), dict):
                 info = info["versions"].get(version, info)
@@ -145,9 +147,13 @@ class HttpPackageMetadataProvider:
             return None
 
         # 레지스트리 값은 표현식이 아니라 설명문인 경우가 많다.
-        expression = spdx.normalize(raw)
+        # 표현식으로 읽히면 그대로 쓰고, 아니면 추정한 뒤 그 사실을 남긴다.
+        # 추정임을 밝히지 않으면 사용자가 조회된 값과 구분할 수 없다.
+        parsed = spdx.try_parse_expression(raw)
         inferred = False
-        if expression == spdx.UNKNOWN_LICENSE and raw:
+        if parsed is not None and not spdx.is_all_unknown(parsed):
+            expression = str(parsed)
+        else:
             expression = spdx.from_free_text(raw)
             inferred = expression != spdx.UNKNOWN_LICENSE
         return PackageLicenseFact(
@@ -164,19 +170,33 @@ class HttpPackageMetadataProvider:
     async def _get(self, url: str, provider: str) -> dict | None:
         """404 는 정상적인 '없음'이고, 그 외 실패는 provider 장애다."""
         try:
-            return await asyncio.to_thread(_fetch_json, url)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return None
-            category = (
-                FailureCategory.RATE_LIMITED if exc.code == 429 else FailureCategory.UNAVAILABLE
-            )
-            raise ProviderFailureError(provider, category, f"HTTP {exc.code}") from exc
-        except TimeoutError as exc:
-            raise ProviderFailureError(provider, FailureCategory.TIMEOUT, "request timed out") from exc
-        except (urllib.error.URLError, json.JSONDecodeError, OSError) as exc:
+            response = await self._client.get(url)
+        except httpx.TimeoutException as exc:
+            raise ProviderFailureError(
+                provider, FailureCategory.TIMEOUT, "request timed out"
+            ) from exc
+        except httpx.HTTPError as exc:
             raise ProviderFailureError(
                 provider, FailureCategory.UNAVAILABLE, type(exc).__name__
+            ) from exc
+
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            category = (
+                FailureCategory.RATE_LIMITED
+                if response.status_code == 429
+                else FailureCategory.UNAVAILABLE
+            )
+            raise ProviderFailureError(
+                provider, category, f"HTTP {response.status_code}"
+            )
+
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ProviderFailureError(
+                provider, FailureCategory.MALFORMED_OUTPUT, "response was not valid JSON"
             ) from exc
 
 

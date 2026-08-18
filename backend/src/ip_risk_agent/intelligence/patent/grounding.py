@@ -86,6 +86,10 @@ def suggested_priority(comparison: GroundedComparison) -> ReviewPriority:
     """검토 우선순위. 침해 가능성이 아니라 '먼저 볼 것'의 순서다.
 
     청구항 근거가 있으면 권리 범위와 직접 대조된 것이므로 무겁게 본다.
+    다만 KIPRIS 가 실제로 주는 것은 대개 초록뿐이다. 청구항을 요구하면 실측에서
+    모든 후보가 LOW 로 깔려 우선순위가 정보를 주지 못한다. 그래서 초록 근거만으로도
+    겹치는 구성이 둘 이상이면 MEDIUM 으로 올린다.
+
     불확실 표시가 붙으면 한 단계 낮춘다. 확신이 낮은 것을 위로 올리면
     사람이 가짜 우선순위를 따라가게 된다.
     """
@@ -94,7 +98,7 @@ def suggested_priority(comparison: GroundedComparison) -> ReviewPriority:
 
     if comparison.has_claim_evidence and comparison.match_count >= 2:
         level = ReviewPriority.HIGH
-    elif comparison.has_claim_evidence or comparison.match_count >= 3:
+    elif comparison.has_claim_evidence or comparison.match_count >= 2:
         level = ReviewPriority.MEDIUM
     else:
         level = ReviewPriority.LOW

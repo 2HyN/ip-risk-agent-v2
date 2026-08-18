@@ -34,16 +34,18 @@ backend/src/ip_risk_agent/intelligence/
              license_explain}_v1.md
   rag/       corpus_manifest · versioning · retrieval · engine · ingestion
 
-rag-corpus/          manifest.toml · sources/ 3건 · README.md
+rag-corpus/          manifest.yaml · sources/ 3건 · README.md
 tests/intelligence/  test_license · test_patent · test_rag
 agent-deliverables/  AGENT_DELIVERY.md · agent-3-dependencies.md
 ```
 
 ## 3. 외부 dependency
 
-**추가 없이 동작한다.** 실제 provider 연결 시 `google-genai` 와
-`google-cloud-aiplatform` 이 필요하며, 둘 다 선택 의존성으로 다뤄 없어도 나머지가
-동작한다. 상세는 `agent-3-dependencies.md`.
+`httpx` · `defusedxml` · `PyYAML` · `google-genai` · `google-auth` (runtime),
+`pytest-asyncio` (dev). 버전과 선택 사유, 검증 결과는 `agent-3-dependencies.md` 참조.
+
+`google-cloud-aiplatform` 은 쓰지 않는다. 100MB 가 넘는데 필요한 기능은
+`retrieveContexts` 하나뿐이라 `google-auth` + REST 로 대체했다.
 
 ## 4. Environment variables
 
@@ -65,16 +67,24 @@ provider 를 직접 지정하려면 `create_analyzer_registry(...)` 를 쓴다.
 ## 6. Test
 
 ```bash
-PYTHONPATH="shared/contracts/python;backend/src" python -m pytest tests/intelligence -q
-```
+export PYTHONPATH="shared/contracts/python;backend/src"
 
-**58 passed.** 외부 호출 없이 동작한다. 실제 클라우드 자격증명을 요구하지 않는다.
+python -m pytest tests/intelligence -m "not live"   # 58 passed · 자격증명 불필요
+python -m pytest tests/intelligence -m live         # 10 passed · 실제 provider
+```
 
 | 파일 | 건수 | 내용 |
 |---|---|---|
 | `test_license.py` | 24 | 파서·SPDX·정책·provider 실패·환각 인용 |
 | `test_patent.py` | 19 | 0건과 실패 구분·중복 제거·순위·근거 검증·우선순위 |
 | `test_rag.py` | 15 | 버전·검색·매니페스트·적재·경로 이탈 방지 |
+| `test_live_providers.py` | 10 | deps.dev·PyPI·npm·KIPRIS·Gemini 실호출 |
+
+`live` 표시가 붙은 것은 키가 없으면 건너뛴다. CI 는 자격증명 없이 58건을 돌리면 된다.
+
+전체 파이프라인을 실제 API 로 한 번 통과시켰다. 라이선스는
+`PyMuPDF → AGPL-3.0-only → POLICY_CONFLICT`, 특허는 KIPRIS 후보 3건에 대해
+근거가 붙은 결과를 얻었다.
 
 ## 7. Shared Contract 준수
 
@@ -114,12 +124,13 @@ PYTHONPATH="shared/contracts/python;backend/src" python -m pytest tests/intellig
 
 **RAG corpus 가 초기 3건이다.**
 AGPL-3.0, LGPL-2.1, 고지형 라이선스 의무사항만 있다. 84종 전체 적재는 자료 확보 후
-`manifest.toml` 에 추가하고 `corpus_version` 을 올리면 된다.
+`manifest.yaml` 에 추가하고 `corpus_version` 을 올리면 된다.
 
 **특허 청구항을 쓰지 못한다.**
 KIPRIS Plus 가 제공하는 범위가 초록이다. `PatentDocument.claims` 는 구현되어 있어
-청구항을 얻을 수 있게 되면 그대로 동작한다. 현재는 초록 근거만 쌓이므로 우선순위가
-`HIGH` 까지 올라가기 어렵다.
+청구항을 얻을 수 있게 되면 그대로 동작한다. 현재는 초록 근거만 쌓이므로 `HIGH` 가
+나오지 않는다. 그래서 초록 근거 둘 이상이면 `MEDIUM` 으로 올리도록 조정했다.
+국문 초록이 있으면 그것을 우선 사용한다. 검사 대상 문서가 대개 한국어이기 때문이다.
 
 **후보를 상위 6건만 판정한다.**
 비용 때문이다. 판정하지 못한 후보가 있으면 coverage 가 `PARTIAL` 이 되어 Control 이
@@ -129,11 +140,11 @@ KIPRIS Plus 가 제공하는 범위가 초록이다. `PatentDocument.claims` 는
 Master Spec 의 "Gemini 3.6 Flash" 는 실재하는 식별자가 아니다. 환경변수로 받으므로
 코드 변경 없이 지정할 수 있으나 배포 전에 값이 필요하다.
 
-**`manifest.toml` 을 사용했다.**
-Spec 34 의 예시는 `manifest.yaml` 이지만 TOML 로 두었다. 표준 라이브러리로 읽을 수
-있어 root 의존성을 늘리지 않고도 테스트가 돈다. 항목 구성은 명세와 같다.
-YAML 이 필요하면 `corpus_manifest.load_manifest` 만 교체하면 된다.
+**RAG Engine 만 실호출 미검증이다.**
+deps.dev·PyPI·npm·KIPRIS·Gemini 는 실제 호출로 확인했다. RAG Engine 은 GCP 프로젝트와
+corpus 가 있어야 해서 아직 확인하지 못했다. 요청 형식과 오류 분류는 구현되어 있으며,
+`RAG_CORPUS_ID` 가 준비되면 `test_live_providers.py` 에 같은 방식으로 추가하면 된다.
 
-**실제 provider 는 미검증이다.**
-KIPRIS·Gemini·RAG Engine 호출 경로는 구현되어 있으나 실 자격증명으로 확인하지
-않았다. 키가 준비되면 통합 테스트가 필요하다.
+**실호출로 다섯 가지를 고쳤다.**
+KIPRIS 응답 필드명, 국문 초록 사용, Gemini 스키마 호환, 라이선스 추정 표시,
+우선순위 기준. 상세는 `agent-3-dependencies.md` 의 특이사항 항목에 있다.

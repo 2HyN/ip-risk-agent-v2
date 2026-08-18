@@ -3,8 +3,9 @@
 Application Plane 은 서울, RAG Engine 은 외부 GA region 에 둔다 (Blueprint 20).
 그래서 region 을 하드코딩하지 않고 설정으로 받는다 (Agent 3 Spec 32).
 
-SDK 는 선택 의존성이다. 없으면 생성 시점에 알리고, 개발과 테스트는
-:class:`~.retrieval.InMemoryReferenceRetriever` 로 진행한다.
+``google-cloud-aiplatform`` SDK 대신 REST 를 직접 호출한다. 그 SDK 는 100MB 를
+넘고 이 plane 이 쓰는 기능은 retrieveContexts 하나뿐이다. 자격증명 처리만
+``google-auth`` 에 맡기고 HTTP 는 이미 쓰고 있는 httpx 로 보낸다.
 """
 
 from __future__ import annotations
@@ -12,10 +13,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+import httpx
+
 from ..common.errors import FailureCategory, ProviderFailureError
 from ..license.explanation import ReferenceChunk
 
 PROVIDER = "RAG_ENGINE"
+SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 
 @dataclass(frozen=True)
@@ -25,7 +29,7 @@ class RagEngineConfig:
     project_id: str
     region: str
     corpus_id: str
-    corpus_version: str
+    corpus_version: str = "unversioned"
     top_k: int = 3
     timeout_seconds: float = 15.0
 
@@ -46,65 +50,125 @@ class RagEngineConfig:
             corpus_version=env.get("RAG_CORPUS_VERSION", "unversioned"),
         )
 
+    @property
+    def corpus_resource(self) -> str:
+        return (
+            f"projects/{self.project_id}/locations/{self.region}"
+            f"/ragCorpora/{self.corpus_id}"
+        )
+
+    @property
+    def endpoint(self) -> str:
+        return (
+            f"https://{self.region}-aiplatform.googleapis.com/v1/"
+            f"projects/{self.project_id}/locations/{self.region}:retrieveContexts"
+        )
+
 
 class RagEngineRetriever:
     """관리형 RAG Engine 을 :class:`ReferenceRetriever` 규약에 맞춘다."""
 
-    def __init__(self, config: RagEngineConfig) -> None:
-        try:
-            import vertexai  # noqa: PLC0415 - 선택 의존성
-            from vertexai import rag  # noqa: PLC0415
-        except ImportError as exc:  # pragma: no cover - 설치 여부에 따라 갈린다
-            raise RuntimeError(
-                "google-cloud-aiplatform is required for RagEngineRetriever; "
-                "see agent-deliverables/agent-3-dependencies.md"
-            ) from exc
+    def __init__(
+        self,
+        config: RagEngineConfig,
+        *,
+        credentials: object | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if credentials is None:
+            try:
+                import google.auth  # noqa: PLC0415 - 선택 의존성
+            except ImportError as exc:  # pragma: no cover - 설치 여부에 따라 갈린다
+                raise RuntimeError(
+                    "google-auth is required for RagEngineRetriever; "
+                    "see agent-deliverables/agent-3-dependencies.md"
+                ) from exc
+            credentials, _project = google.auth.default(scopes=[SCOPE])
 
-        self._rag = rag
         self._config = config
-        vertexai.init(project=config.project_id, location=config.region)
-        self._corpus = (
-            f"projects/{config.project_id}/locations/{config.region}"
-            f"/ragCorpora/{config.corpus_id}"
-        )
+        self._credentials = credentials
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient(timeout=config.timeout_seconds)
 
     @property
     def corpus_version(self) -> str:
         return self._config.corpus_version
 
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
     async def retrieve(
-        self, query: str, *, filters: dict[str, str] | None = None, top_k: int | None = None
+        self,
+        query: str,
+        *,
+        filters: dict[str, str] | None = None,
+        top_k: int | None = None,
     ) -> list[ReferenceChunk]:
-        limit = top_k or self._config.top_k
+        payload = {
+            "vertex_rag_store": {
+                "rag_resources": [{"rag_corpus": self._config.corpus_resource}]
+            },
+            "query": {
+                "text": query,
+                "rag_retrieval_config": {"top_k": top_k or self._config.top_k},
+            },
+        }
+
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self._query, query, limit),
-                timeout=self._config.timeout_seconds,
+            token = await asyncio.to_thread(self._access_token)
+            response = await self._client.post(
+                self._config.endpoint,
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
             )
-        except TimeoutError as exc:
+        except httpx.TimeoutException as exc:
             raise ProviderFailureError(
                 PROVIDER, FailureCategory.TIMEOUT, "retrieval timed out"
             ) from exc
-        except Exception as exc:  # noqa: BLE001 - SDK 예외 종류가 넓다
+        except httpx.HTTPError as exc:
             raise ProviderFailureError(
                 PROVIDER, FailureCategory.UNAVAILABLE, type(exc).__name__
             ) from exc
+        except Exception as exc:  # noqa: BLE001 - 자격증명 갱신 실패
+            raise ProviderFailureError(
+                PROVIDER, FailureCategory.AUTH, type(exc).__name__
+            ) from exc
 
-        return [
-            ReferenceChunk(
-                source_id=context.source_display_name or "corpus",
-                chunk_id=context.chunk_id or str(index),
-                text=context.text or "",
-                canonical_reference=context.source_uri or self._corpus,
-                metadata={"corpus_version": self.corpus_version},
+        if response.status_code >= 400:
+            category = {
+                401: FailureCategory.AUTH,
+                403: FailureCategory.AUTH,
+                429: FailureCategory.RATE_LIMITED,
+            }.get(response.status_code, FailureCategory.UNAVAILABLE)
+            raise ProviderFailureError(
+                PROVIDER, category, f"HTTP {response.status_code}"
             )
-            for index, context in enumerate(response)
-        ]
 
-    def _query(self, query: str, top_k: int):
-        response = self._rag.retrieval_query(
-            rag_resources=[self._rag.RagResource(rag_corpus=self._corpus)],
-            text=query,
-            rag_retrieval_config=self._rag.RagRetrievalConfig(top_k=top_k),
-        )
-        return list(response.contexts.contexts)
+        return self._to_chunks(response.json())
+
+    # ------------------------------------------------------------ 내부
+
+    def _access_token(self) -> str:
+        """만료되었으면 갱신한다. 토큰은 로그에 남기지 않는다."""
+        from google.auth.transport.requests import Request  # noqa: PLC0415
+
+        if not getattr(self._credentials, "valid", False):
+            self._credentials.refresh(Request())
+        return self._credentials.token
+
+    def _to_chunks(self, payload: dict) -> list[ReferenceChunk]:
+        contexts = (payload.get("contexts") or {}).get("contexts") or []
+        chunks: list[ReferenceChunk] = []
+        for index, context in enumerate(contexts):
+            uri = context.get("sourceUri") or self._config.corpus_resource
+            chunks.append(
+                ReferenceChunk(
+                    source_id=context.get("sourceDisplayName") or "corpus",
+                    chunk_id=str(context.get("chunkId") or index),
+                    text=context.get("text") or "",
+                    canonical_reference=uri,
+                    metadata={"corpus_version": self.corpus_version},
+                )
+            )
+        return chunks

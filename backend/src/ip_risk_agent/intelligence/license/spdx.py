@@ -230,19 +230,36 @@ class _Parser:
         return LicenseNode(identifier=identifier, exception=exception)
 
 
+def try_parse_expression(expression: str) -> ExpressionNode | None:
+    """표현식으로 읽히면 구조를, 아니면 None 을 돌려준다.
+
+    추정과 파싱을 구분해야 호출부가 "추측한 값"임을 표시할 수 있다.
+    :func:`parse_expression` 은 실패를 흡수하므로 그것만으로는 알 수 없다.
+    """
+    tokens = _TOKEN.findall(expression or "")
+    if not tokens:
+        return None
+    try:
+        return _Parser(tokens).parse()
+    except SpdxParseError:
+        return None
+
+
+def is_all_unknown(node: ExpressionNode) -> bool:
+    """등장하는 식별자가 전부 미상인가. 자유 서술 추정을 시도할 기준이다."""
+    return all(leaf.is_unknown for leaf in leaves(node))
+
+
 def parse_expression(expression: str) -> ExpressionNode:
     """SPDX 표현식을 구조로 바꾼다.
 
     파싱에 실패하면 자유 서술로 보고 한 번 더 추정한다. 레지스트리 값이
     표현식이 아닌 설명문인 경우가 흔하다.
     """
-    tokens = _TOKEN.findall(expression or "")
-    if not tokens:
-        return LicenseNode(UNKNOWN_LICENSE)
-    try:
-        return _Parser(tokens).parse()
-    except SpdxParseError:
+    parsed = try_parse_expression(expression)
+    if parsed is None:
         return LicenseNode(from_free_text(expression))
+    return parsed
 
 
 def leaves(node: ExpressionNode) -> list[LicenseNode]:

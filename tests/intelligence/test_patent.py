@@ -162,14 +162,19 @@ def test_priority_is_computed_from_verified_evidence_not_the_model():
     claim_backed = grounding.GroundedComparison(
         PATENT_A, ["a", "b"], ["x"], [], has_claim_evidence=True
     )
-    abstract_only = grounding.GroundedComparison(
+    abstract_only_single = grounding.GroundedComparison(
         PATENT_A, ["a"], ["x"], [], has_claim_evidence=False
+    )
+    abstract_only_multi = grounding.GroundedComparison(
+        PATENT_A, ["a", "b"], ["x"], [], has_claim_evidence=False
     )
     uncertain = grounding.GroundedComparison(
         PATENT_A, ["a", "b"], ["x"], ["abstract only"], has_claim_evidence=True
     )
     assert grounding.suggested_priority(claim_backed) is ReviewPriority.HIGH
-    assert grounding.suggested_priority(abstract_only) is ReviewPriority.LOW
+    assert grounding.suggested_priority(abstract_only_single) is ReviewPriority.LOW
+    # KIPRIS 는 청구항을 주지 않는다. 초록만으로도 둘 이상 겹치면 올린다.
+    assert grounding.suggested_priority(abstract_only_multi) is ReviewPriority.MEDIUM
     # 불확실 표시가 있으면 한 단계 낮춘다.
     assert grounding.suggested_priority(uncertain) is ReviewPriority.MEDIUM
 

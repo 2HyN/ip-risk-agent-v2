@@ -94,14 +94,14 @@ def test_corpus_version_is_exposed_for_result_versioning():
 
 
 def test_repository_manifest_is_valid():
-    manifest = load_manifest(CORPUS_ROOT / "manifest.toml")
+    manifest = load_manifest(CORPUS_ROOT / "manifest.yaml")
     CorpusVersion.parse(manifest.corpus_version)
     assert manifest.validate_for_ingestion()
 
 
 def test_ingestion_uploads_every_approved_source():
     uploader = InMemoryCorpusUploader()
-    report = asyncio.run(ingest(CORPUS_ROOT / "manifest.toml", uploader))
+    report = asyncio.run(ingest(CORPUS_ROOT / "manifest.yaml", uploader))
     assert report.is_clean
     assert report.uploaded == len(report.prepared) > 0
     assert uploader.corpus_version == report.corpus_version
@@ -151,39 +151,43 @@ def test_private_source_type_is_rejected():
 def test_checksum_mismatch_stops_ingestion(tmp_path: Path):
     (tmp_path / "sources").mkdir()
     (tmp_path / "sources" / "a.md").write_text("실제 내용", encoding="utf-8")
-    (tmp_path / "manifest.toml").write_text(
-        'corpus_version = "2026-08-14.1"\n\n'
-        "[[sources]]\n"
-        'source_id = "a"\n'
-        'version = "1"\n'
-        'source_type = "OBLIGATION_GUIDE"\n'
-        'canonical_reference = "https://example.org"\n'
-        'checksum = "sha256:wrong"\n'
-        'path = "sources/a.md"\n'
-        "approved_for_rag = true\n",
+    (tmp_path / "manifest.yaml").write_text(
+        """
+corpus_version: 2026-08-14.1
+sources:
+  - source_id: a
+    version: "1"
+    source_type: OBLIGATION_GUIDE
+    canonical_reference: https://example.org
+    checksum: sha256:wrong
+    path: sources/a.md
+    approved_for_rag: true
+""",
         encoding="utf-8",
     )
     with pytest.raises(ManifestError, match="checksum mismatch"):
-        asyncio.run(ingest(tmp_path / "manifest.toml", InMemoryCorpusUploader()))
+        asyncio.run(ingest(tmp_path / "manifest.yaml", InMemoryCorpusUploader()))
 
 
 def test_path_escaping_the_corpus_is_rejected(tmp_path: Path):
     outside = tmp_path.parent / "outside.md"
     outside.write_text("바깥 파일", encoding="utf-8")
-    (tmp_path / "manifest.toml").write_text(
-        'corpus_version = "2026-08-14.1"\n\n'
-        "[[sources]]\n"
-        'source_id = "escape"\n'
-        'version = "1"\n'
-        'source_type = "OBLIGATION_GUIDE"\n'
-        'canonical_reference = "https://example.org"\n'
-        f'checksum = "{checksum("바깥 파일")}"\n'
-        'path = "../outside.md"\n'
-        "approved_for_rag = true\n",
+    (tmp_path / "manifest.yaml").write_text(
+        f"""
+corpus_version: 2026-08-14.1
+sources:
+  - source_id: escape
+    version: "1"
+    source_type: OBLIGATION_GUIDE
+    canonical_reference: https://example.org
+    checksum: {checksum("바깥 파일")}
+    path: ../outside.md
+    approved_for_rag: true
+""",
         encoding="utf-8",
     )
     with pytest.raises(ManifestError, match="outside"):
-        asyncio.run(ingest(tmp_path / "manifest.toml", InMemoryCorpusUploader()))
+        asyncio.run(ingest(tmp_path / "manifest.yaml", InMemoryCorpusUploader()))
 
 
 # --------------------------------------------------------------- 통합

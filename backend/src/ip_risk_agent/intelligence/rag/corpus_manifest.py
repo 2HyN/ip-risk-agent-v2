@@ -3,14 +3,14 @@
 corpus 에는 참조 지식만 넣는다. 비공개 저장소나 Drive 문서 원문은 넣지 않는다
 (Blueprint 19). 그 경계를 문서가 아니라 코드로 지킨다.
 
-명세의 예시는 YAML 이지만 TOML 로 둔다. 표준 라이브러리로 읽을 수 있어서
-root 의존성을 늘리지 않고도 테스트가 돈다. 형식만 다르고 항목은 같다.
+형식은 명세(Agent 3 Spec 34)대로 YAML 이다.
 """
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
+
+import yaml
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -81,9 +81,14 @@ class CorpusManifest(BaseModel):
 
 
 def load_manifest(path: Path) -> CorpusManifest:
-    """매니페스트 파일을 읽는다."""
+    """매니페스트 파일을 읽는다.
+
+    ``safe_load`` 를 쓴다. corpus 정의가 임의 객체를 만들어 낼 수 있으면 안 된다.
+    """
     try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise ManifestError(f"{path.name} is not valid TOML: {exc}") from exc
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ManifestError(f"{path.name} is not valid YAML: {exc}") from exc
+    if not isinstance(document, dict):
+        raise ManifestError(f"{path.name} must contain a mapping at the top level")
     return CorpusManifest.model_validate(document)

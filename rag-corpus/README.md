@@ -8,7 +8,7 @@
 ## 구성
 
 ```
-manifest.toml    적재 대상과 체크섬
+manifest.yaml    적재 대상과 체크섬
 sources/         실제 자료
 ```
 
@@ -18,7 +18,7 @@ sources/         실제 자료
 from ip_risk_agent.intelligence.rag.ingestion import ingest
 ```
 
-`manifest.toml` 의 `checksum` 이 파일 내용과 다르면 적재를 중단한다.
+`manifest.yaml` 의 `checksum` 이 파일 내용과 다르면 적재를 중단한다.
 자료를 고치면 체크섬과 `corpus_version` 을 함께 올린다.
 
 ## 버전

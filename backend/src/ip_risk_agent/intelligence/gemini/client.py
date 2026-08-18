@@ -28,6 +28,38 @@ _VERSION = re.compile(r"^version:\s*(?P<value>\S+)\s*$", re.M)
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
+# Gemini 는 JSON Schema 를 그대로 받지 않는다. Pydantic 이 붙이는 부가 항목 중
+# 일부를 모르는 필드로 보고 400 을 돌려준다. 검증은 우리 쪽에서 계속 엄격하게 하고,
+# API 에는 이해할 수 있는 형태만 보낸다.
+_SCHEMA_DROP = ("additionalProperties", "title", "$schema", "default", "examples")
+
+
+def to_api_schema(model: type[BaseModel]) -> dict:
+    """Pydantic 모델을 Gemini 가 받는 스키마로 바꾼다.
+
+    ``$ref`` 는 펼친다. 중첩 모델을 참조로 남기면 해석하지 못한다.
+    """
+    schema = model.model_json_schema()
+    definitions = schema.pop("$defs", {})
+
+    def convert(node: object) -> object:
+        if isinstance(node, list):
+            return [convert(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        if "$ref" in node:
+            name = str(node["$ref"]).rsplit("/", 1)[-1]
+            return convert(dict(definitions.get(name, {})))
+        return {
+            key: convert(value)
+            for key, value in node.items()
+            if key not in _SCHEMA_DROP
+        }
+
+    return convert(schema)  # type: ignore[return-value]
+
+
+
 
 @dataclass(frozen=True)
 class Prompt:
@@ -132,7 +164,7 @@ class GoogleGenAIClient:
                     contents=prompt,
                     config={
                         "response_mime_type": "application/json",
-                        "response_schema": output_model,
+                        "response_schema": to_api_schema(output_model),
                         "http_options": {"timeout": int(self._timeout_seconds * 1000)},
                     },
                 )
