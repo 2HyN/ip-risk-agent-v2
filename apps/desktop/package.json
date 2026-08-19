@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.json",
     "verify:resolution": "node ../../scripts/verify_typescript_resolution.mjs",
-    "test": "node --test \"dist/security/*.test.js\" \"dist/watcher/*.test.js\""
+    "test": "node --test \"dist/security/*.test.js\" \"dist/watcher/*.test.js\" \"dist/local-registry/*.test.js\" \"dist/preload/*.test.js\""
   },
   "dependencies": {
     "@iprisk/contracts": "workspace:*",

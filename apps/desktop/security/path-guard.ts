@@ -3,8 +3,13 @@
  * Agent 2 Spec 27번: relative path -> canonical root와 join -> realpath ->
  * root의 descendant인지 검증 -> 아니면 deny.
  *
- * realpath()는 symlink를 실제 목적지로 풀어내므로, root 안의 symlink가
- * root 밖을 가리켜도 이 함수가 그 실제 경로를 보고 거부할 수 있다.
+ * 2단계 검증:
+ * 1. 문자열 기준(lexical) 검사 — 파일 존재 여부와 무관하게 ../ 탈출을
+ *    즉시 잡는다. 중간 경로가 통째로 존재하지 않는 깊은 탈출 시도에도
+ *    안전하다.
+ * 2. symlink 방어 — 실제로 존재하는 가장 가까운 조상 디렉터리까지
+ *    올라가며 realpath로 검증한다. 문자열 검사로는 symlink가 실제로
+ *    어디를 가리키는지 알 수 없기 때문에 별도로 필요하다.
  */
 
 import { realpathSync } from "node:fs";
@@ -25,21 +30,36 @@ export function resolveWithinRoot(canonicalRoot: string, relativePath: string): 
   const resolvedRoot = realpathSync(canonicalRoot);
   const joined = join(resolvedRoot, relativePath);
 
-  let resolvedTarget: string;
-  try {
-    resolvedTarget = realpathSync(joined);
-  } catch {
-    const resolvedParentDir = realpathSync(dirname(joined));
-    resolvedTarget = join(resolvedParentDir, relativePath.split(/[\\/]/).pop() ?? "");
-  }
-
-  const rel = relative(resolvedRoot, resolvedTarget);
-  const isRootItself = rel === "";
-  const escapes = !isRootItself && (rel.startsWith("..") || isAbsolute(rel));
-
-  if (escapes) {
+  // 1단계: 문자열 기준 검사. 존재하지 않는 경로에도 항상 동작한다.
+  const lexicalRel = relative(resolvedRoot, joined);
+  if (lexicalRel !== "" && (lexicalRel.startsWith("..") || isAbsolute(lexicalRel))) {
     throw new RootEscapeError(`path escapes root: ${relativePath}`);
   }
 
-  return resolvedTarget;
+  // 2단계: symlink 방어. 실제로 존재하는 가장 가까운 조상까지 올라간다.
+  let current = joined;
+  for (;;) {
+    try {
+      const resolvedTarget = realpathSync(current);
+      const finalRel = relative(resolvedRoot, resolvedTarget);
+      const isRootItself = finalRel === "";
+      if (!isRootItself && (finalRel.startsWith("..") || isAbsolute(finalRel))) {
+        throw new RootEscapeError(`path escapes root: ${relativePath}`);
+      }
+      if (current === joined) {
+        return resolvedTarget;
+      }
+      const remainder = relative(current, joined);
+      return join(resolvedTarget, remainder);
+    } catch (err) {
+      if (err instanceof RootEscapeError) {
+        throw err;
+      }
+      const parent = dirname(current);
+      if (parent === current) {
+        throw new RootEscapeError(`unable to resolve path safely: ${relativePath}`);
+      }
+      current = parent;
+    }
+  }
 }
