@@ -31,3 +31,9 @@ pytest tests/connectors/ -v
 ## 향후 추가 예상
 
 - google-cloud-secret-manager — production CredentialVault용 (Integration 단계, 아직 미검증)
+
+## Node.js / Electron dependencies (apps/desktop)
+
+| Package | Version (검증됨) | 용도 | 검증 결과 | 특이사항 |
+|---|---|---|---|---|
+| electron | 43.4.0 | Local Desktop 앱 shell (Agent2 Spec §23 Electron main/preload) | `pnpm --filter @iprisk/desktop add -D electron` 로컬 설치 후, main process에서 BrowserWindow 생성 스모크 테스트 실행 → 실제 데스크톱 창 렌더링 확인 (스크린샷 보관) | root `pnpm-lock.yaml`은 workspace 공유 파일이라 커밋하지 않음. `apps/desktop/package.json`에 electron을 정식으로 선언하는 시점(D-3, 실제 watcher 코드 작성 시)에 다시 다룰 예정. 그 전까지 로컬 재현은 `pnpm --filter @iprisk/desktop add -D electron` 재실행으로 가능. |
