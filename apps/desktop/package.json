@@ -6,12 +6,15 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.json",
-    "verify:resolution": "node ../../scripts/verify_typescript_resolution.mjs"
+    "verify:resolution": "node ../../scripts/verify_typescript_resolution.mjs",
+    "test": "node --test \"dist/security/*.test.js\" \"dist/watcher/*.test.js\""
   },
   "dependencies": {
-    "@iprisk/contracts": "workspace:*"
+    "@iprisk/contracts": "workspace:*",
+    "chokidar": "^5.0.0"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "typescript": "5.9.3"
   }
 }
