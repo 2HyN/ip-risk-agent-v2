@@ -40,10 +40,22 @@
 
 ### 2. `source-integration-desktop`
 
-- 상태: 대기
-- merge commit: 미정
-- conflict: 미정
-- 해결/검증: 미정
+- 상태: 완료
+- merge commit: `12c5b9f9dd71c981a2b6614099245fbc3e5493b9`
+- conflict: 아래 네 frontend 설정 파일
+  - `frontend/index.html`
+  - `frontend/package.json`
+  - `frontend/tsconfig.json`
+  - `frontend/vite.config.ts`
+- 해결/검증:
+  - `index.html`: Control Product entrypoint와 metadata를 유지하고 `lang="ko"` 적용
+  - `package.json`: Control의 exact dependency, router, Vitest/Testing Library 및 no-emit build 체계 유지
+  - `tsconfig.json`: Control의 Bundler/no-emit/strict 설정을 유지하고 Source test compile을 위한 `node` type 추가
+  - `vite.config.ts`: Control의 API proxy, sourcemap, Vitest/jsdom 설정 유지
+  - 네 파일의 conflict marker 및 unmerged entry가 없음을 확인
+  - Source의 `pnpm-lock.yaml`은 merge 결과를 그대로 수용했으며 최종 재생성은 이후 dependency 통합 단계로 보류
+  - Source test의 Vitest 포팅과 dev preview 제거는 semantic integration이므로 이번 단계에서 수행하지 않음
+  - staged whitespace 검사에서 incoming `AGENT_2_DELIVERY.md`의 EOF 빈 줄 1건이 보고됐으나, branch 원문을 보존하기 위해 수정하지 않음
 
 ### 3. `risk-intelligence-rag`
 
