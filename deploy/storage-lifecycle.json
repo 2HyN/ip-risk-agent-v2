@@ -1,0 +1,14 @@
+{
+  "lifecycle": {
+    "rule": [
+      {
+        "action": { "type": "Delete" },
+        "condition": { "age": 1, "matchesPrefix": ["staging/"] }
+      },
+      {
+        "action": { "type": "AbortIncompleteMultipartUpload" },
+        "condition": { "age": 1 }
+      }
+    ]
+  }
+}

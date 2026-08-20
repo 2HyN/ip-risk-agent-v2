@@ -34,7 +34,9 @@ class Settings:
     public_base_url: str
     session_secret: str = field(repr=False)
     gcp_project_id: str | None = None
+    gcp_region: str | None = None
     firestore_database: str | None = None
+    frontend_dist_dir: str | None = None
     google_login_client_id: str | None = None
     google_login_client_secret: str | None = field(default=None, repr=False)
     google_login_redirect_uri: str | None = None
@@ -55,6 +57,7 @@ class Settings:
     cloud_tasks_queue: str | None = None
     analysis_worker_url: str | None = None
     cloud_tasks_service_account: str | None = None
+    scheduler_service_account: str | None = None
     gemini_model_id: str = "gemini-3.6-flash"
     gemini_api_key: str | None = field(default=None, repr=False)
     vertex_config: str | None = None
@@ -93,7 +96,9 @@ class Settings:
             public_base_url=value("APP_PUBLIC_BASE_URL") or "http://127.0.0.1:8000",
             session_secret=value("SESSION_SECRET") or "",
             gcp_project_id=value("GCP_PROJECT_ID"),
+            gcp_region=value("GCP_REGION"),
             firestore_database=value("FIRESTORE_DATABASE"),
+            frontend_dist_dir=value("FRONTEND_DIST_DIR"),
             google_login_client_id=value("GOOGLE_LOGIN_CLIENT_ID"),
             google_login_client_secret=value("GOOGLE_LOGIN_CLIENT_SECRET"),
             google_login_redirect_uri=value("GOOGLE_LOGIN_REDIRECT_URI"),
@@ -114,6 +119,7 @@ class Settings:
             cloud_tasks_queue=value("CLOUD_TASKS_QUEUE"),
             analysis_worker_url=value("ANALYSIS_WORKER_URL"),
             cloud_tasks_service_account=value("CLOUD_TASKS_SERVICE_ACCOUNT"),
+            scheduler_service_account=value("SCHEDULER_SERVICE_ACCOUNT"),
             gemini_model_id=value("GEMINI_MODEL_ID") or "gemini-3.6-flash",
             gemini_api_key=value("GEMINI_API_KEY"),
             vertex_config=value("VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG"),
@@ -184,6 +190,7 @@ class Settings:
                 raise SettingsError("production APP_PUBLIC_BASE_URL must use HTTPS")
             required = {
                 "GCP_PROJECT_ID": self.gcp_project_id,
+                "GCP_REGION": self.gcp_region,
                 "FIRESTORE_DATABASE": self.firestore_database,
                 "Google login group": login[0] if all(login) else None,
                 "Google Drive group": drive[0] if all(drive) else None,
@@ -195,6 +202,9 @@ class Settings:
                 "KIPRIS_API_KEY_SECRET_ID": self.kipris_api_key_secret_id,
                 "PACKAGE_METADATA_BASE_URL": self.package_metadata_base_url,
             }
+            if self.role is AppRole.API:
+                required["FRONTEND_DIST_DIR"] = self.frontend_dist_dir
+                required["SCHEDULER_SERVICE_ACCOUNT"] = self.scheduler_service_account
             missing = sorted(name for name, item in required.items() if item is None)
             if missing:
                 raise SettingsError(

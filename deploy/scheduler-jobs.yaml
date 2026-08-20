@@ -1,0 +1,22 @@
+jobs:
+  - name: drive-watch-renewal
+    schedule: "0 */6 * * *"
+    path: /internal/scheduler/drive-watch-renewal
+    body: { cursor: null, limit: 100 }
+  - name: drive-reconciliation
+    schedule: "*/15 * * * *"
+    path: /internal/scheduler/drive-reconciliation
+    body: { cursor: null, limit: 100 }
+  - name: expired-state-cleanup
+    schedule: "15 * * * *"
+    path: /internal/scheduler/expired-state-cleanup
+    body: { cursor: null, limit: 500 }
+  - name: source-health-refresh
+    schedule: "*/10 * * * *"
+    path: /internal/scheduler/source-health-refresh
+    body: { cursor: null, limit: 100 }
+defaults:
+  timeZone: Asia/Seoul
+  attemptDeadline: 300s
+  oidcAudience: ${API_BASE_URL}
+  serviceAccountEmail: ${SCHEDULER_SERVICE_ACCOUNT}

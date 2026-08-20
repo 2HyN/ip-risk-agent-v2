@@ -1,0 +1,27 @@
+substitutions:
+  _REGION: asia-northeast3
+  _REPOSITORY: ip-risk-agent
+  _IMAGE: application
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+      - --tag
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:latest
+      - .
+  - id: smoke-import-api
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+    entrypoint: python
+    args: ["-c", "from ip_risk_agent.main import create_app; print('api import ok')"]
+  - id: smoke-import-worker
+    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+    entrypoint: python
+    args: ["-c", "from ip_risk_agent.worker import create_app; print('worker import ok')"]
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:latest
+options:
+  logging: CLOUD_LOGGING_ONLY

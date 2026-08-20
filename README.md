@@ -2,7 +2,7 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain, P0 경계, API/Worker composition과 Phase 5 Web/Electron 제품 흐름이 합쳐져 있다. Product UI는 현재 workspace에서 Google Drive·GitHub·Local source 연결과 상태 관리, Open Original을 수행하고, Electron은 one-time enrollment, OS 암호화 credential, bearer background event와 watcher 복구를 제공한다. Production용 Firestore·Cloud Tasks·Secret Manager·GCS adapter와 정적 frontend 배포 조립은 Phase 6 소유이므로 아직 완성된 배포 애플리케이션은 아니다.
+현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain, P0 경계, API/Worker composition, Web/Electron 제품 흐름과 Phase 6 GCP 내부 배포 기반이 합쳐져 있다. Product UI는 현재 workspace에서 Google Drive·GitHub·Local source 연결과 상태 관리, Open Original을 수행하고, Electron은 one-time enrollment, OS 암호화 credential, bearer background event와 watcher 복구를 제공한다. Firestore operational store, Secret Manager/GCS/Cloud Tasks/OIDC adapter, same-origin 정적 hosting, non-root image와 Cloud Build/Run/Tasks/Scheduler/TTL 입력물은 저장소 안에서 검증된다. 실제 GCP resource와 credential을 만드는 외부 작업은 아직 수행하지 않았다.
 
 ## 통합 상태
 
@@ -15,7 +15,8 @@ IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 �
 | P0 경계 보강 | 완료 |
 | API/Worker composition과 local integration E2E | 완료 |
 | Web/Electron 제품 wiring | 완료 |
-| GCP 내부 구성과 외부 배포 | 예정 |
+| GCP 내부 adapter와 배포 입력물 | 완료 |
+| GCP 외부 resource/IAM/live 배포 | 예정 |
 
 세부 상태와 검증 증거는 `INTEGRATION_V2_PROGRESS_LOG.md`에 기록한다. 이 로그는 통합 작업용 비규범 문서이며, 설계와 의존성 결정은 `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 `INTEGRATION_V2_EXECUTION_PLAN.md`가 우선한다.
 
@@ -29,13 +30,15 @@ backend/src/ip_risk_agent/
   core/                           domain model과 policy
   persistence/                    in-memory/Firestore persistence
   composition/                    설정/container, API/Worker, browser runtime과 Plane 사이 경계
+  gcp/                            durable Google Cloud adapter와 foundation factory
   connectors/                     Drive, GitHub, Local source adapters
   intelligence/                   Patent, License, Gemini, RAG
 frontend/                         React/Vite Product UI, SourcePanel과 provider completion flow
 apps/desktop/                     보안 Electron shell, enrollment, Local watcher와 registry
 rag-corpus/                       reference-only RAG corpus와 provenance
 tests/                            contracts/control/connectors/intelligence/integration/e2e
-scripts/                          contract generation과 resolution 검증
+scripts/                          contract/deploy 검증과 RAG ingestion dry-run
+deploy/                           Cloud Build/Run/Tasks/Scheduler, Firestore TTL/index, GCS lifecycle
 docs/                             Agent별 통합 참조 문서
 ```
 
@@ -117,12 +120,12 @@ Copy-Item .env.example .env
 | Group | Variables |
 |---|---|
 | Runtime | `APP_ENV`, `APP_ROLE`, `LOG_LEVEL` |
-| Shared/GCP | `GCP_PROJECT_ID`, `FIRESTORE_DATABASE`, `APP_PUBLIC_BASE_URL`, `SESSION_SECRET`, `FIRESTORE_EMULATOR_HOST` |
+| Shared/GCP | `GCP_PROJECT_ID`, `GCP_REGION`, `FIRESTORE_DATABASE`, `APP_PUBLIC_BASE_URL`, `SESSION_SECRET`, `FRONTEND_DIST_DIR`, `FIRESTORE_EMULATOR_HOST` |
 | Google login | `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`, `GOOGLE_LOGIN_REDIRECT_URI` |
 | Google Drive | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI`, `GOOGLE_DRIVE_WEBHOOK_BASE_URL`, `DRIVE_WATCH_CHANNEL_TOKEN`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER` |
 | GitHub App | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CALLBACK_URL`, `GITHUB_APP_PRIVATE_KEY_SECRET_ID`, `GITHUB_WEBHOOK_SECRET_ID` |
 | Local Desktop | `LOCAL_STAGING_BUCKET`, `IPRISK_SERVER_BASE_URL`, `IPRISK_DESKTOP_RENDERER_URL` |
-| Cloud Tasks | `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT` |
+| Cloud Tasks/Scheduler | `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT`, `SCHEDULER_SERVICE_ACCOUNT` |
 | Intelligence | `GEMINI_MODEL_ID`, `GEMINI_API_KEY`, `VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG`, `KIPRIS_API_KEY_SECRET_ID`, `KIPRIS_ACCESS_KEY`, `RAG_REGION`, `RAG_CORPUS_ID`, `RAG_CORPUS_VERSION`, `PACKAGE_METADATA_BASE_URL` |
 
 `GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. `FIRESTORE_EMULATOR_HOST`는 test 전용이며 production에서 설정하지 않는다. Cloud Tasks 네 변수는 하나의 configuration group으로 취급하고 일부만 설정된 상태에서 in-memory fallback하지 않는다. Google Picker는 browser API key와 Cloud project number를 함께 설정해야 하며, production 시작 시 두 값이 모두 필요하다.
@@ -153,6 +156,9 @@ pnpm run verify:resolution
 pnpm --filter @iprisk/frontend test
 pnpm --filter @iprisk/desktop test
 pnpm install --frozen-lockfile
+
+python scripts/validate_gcp_deployment.py
+python scripts/prepare_rag_ingestion.py
 ```
 
 Windows sandbox나 제한된 계정에서 pytest의 기본 temp 경로 권한이 거부되면 repository 내부의 ignored 경로를 명시할 수 있다.
@@ -184,7 +190,7 @@ Frontend 개발 서버는 다음과 같이 실행할 수 있다.
 pnpm --filter @iprisk/frontend dev
 ```
 
-Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. 로그인 후 Source 화면은 현재 workspace ID를 사용해 OAuth/install을 시작하고, callback 뒤 Drive Picker 또는 GitHub repository/branch 선택을 mount 생성까지 이어간다. Google Picker가 필요하면 `GOOGLE_PICKER_API_KEY`와 `GOOGLE_CLOUD_PROJECT_NUMBER`를 API 환경에 함께 설정한다. 실제 provider route/store와 production static hosting binding은 Phase 6 composition에서 주입한다.
+Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. 로그인 후 Source 화면은 현재 workspace ID를 사용해 OAuth/install을 시작하고, callback 뒤 Drive Picker 또는 GitHub repository/branch 선택을 mount 생성까지 이어간다. Google Picker가 필요하면 `GOOGLE_PICKER_API_KEY`와 `GOOGLE_CLOUD_PROJECT_NUMBER`를 API 환경에 함께 설정한다. Built frontend는 production image의 `FRONTEND_DIST_DIR`에서 API와 same-origin으로 제공된다.
 
 Desktop 개발 실행과 검증:
 

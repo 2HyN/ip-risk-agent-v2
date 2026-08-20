@@ -1,0 +1,47 @@
+services:
+  api:
+    name: ip-risk-agent-api
+    role: api
+    port: 8080
+    command: [python, -m, uvicorn, ip_risk_agent.main:create_app, --factory, --host, 0.0.0.0, --port, "8080"]
+    serviceAccount: ${API_SERVICE_ACCOUNT}
+    ingress: all
+    allowUnauthenticated: true
+    minInstances: 0
+    maxInstances: 10
+    concurrency: 40
+    cpu: "1"
+    memory: 1Gi
+  worker:
+    name: ip-risk-agent-worker
+    role: worker
+    port: 8080
+    command: [python, -m, uvicorn, ip_risk_agent.worker:create_app, --factory, --host, 0.0.0.0, --port, "8080"]
+    serviceAccount: ${WORKER_SERVICE_ACCOUNT}
+    ingress: internal
+    allowUnauthenticated: false
+    minInstances: 0
+    maxInstances: 20
+    concurrency: 10
+    cpu: "2"
+    memory: 2Gi
+requiredEnvironment:
+  common:
+    - APP_ENV
+    - APP_ROLE
+    - APP_PUBLIC_BASE_URL
+    - GCP_PROJECT_ID
+    - GCP_REGION
+    - FIRESTORE_DATABASE
+    - CLOUD_TASKS_LOCATION
+    - CLOUD_TASKS_QUEUE
+    - ANALYSIS_WORKER_URL
+    - CLOUD_TASKS_SERVICE_ACCOUNT
+  api:
+    - SESSION_SECRET
+    - FRONTEND_DIST_DIR
+    - SCHEDULER_SERVICE_ACCOUNT
+  worker:
+    - VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG
+    - KIPRIS_API_KEY_SECRET_ID
+    - PACKAGE_METADATA_BASE_URL

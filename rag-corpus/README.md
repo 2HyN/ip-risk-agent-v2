@@ -25,3 +25,15 @@ from ip_risk_agent.intelligence.rag.ingestion import ingest
 
 `YYYY-MM-DD.N` 형식이며 분석 결과에 기록된다.
 과거 판단이 어떤 지식에 근거했는지 되짚기 위한 것이다.
+
+## Phase 6 ingestion dry-run
+
+외부 corpus에 쓰기 전에 repository root에서 다음 명령을 실행한다.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/prepare_rag_ingestion.py
+```
+
+이 명령은 manifest에 승인된 경로만 읽고 checksum과 corpus version을 검증한다.
+출력의 `external_write_performed`는 항상 `false`이며, 실제 RAG corpus upload와
+resource ID 확정은 GCP 외부 작업에서 별도 승인 후 수행한다.

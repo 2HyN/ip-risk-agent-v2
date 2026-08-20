@@ -1,0 +1,11 @@
+.git
+.venv
+.pnpm-store
+node_modules
+apps/desktop
+tests
+**/__pycache__
+**/*.pyc
+.env
+.env.*
+!.env.example

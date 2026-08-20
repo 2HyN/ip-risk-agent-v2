@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from fastapi import APIRouter
@@ -38,6 +39,24 @@ def api_settings() -> Settings:
         public_base_url="http://testserver",
         session_secret=SESSION_SECRET,
     )
+
+
+def test_api_hosts_built_product_routes_same_origin(tmp_path) -> None:
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (tmp_path / "index.html").write_text("<main>product</main>", encoding="utf-8")
+    (assets / "app.js").write_text("console.log('ok')", encoding="utf-8")
+    settings = replace(api_settings(), frontend_dist_dir=str(tmp_path))
+    app = create_api_app(build_container(settings))
+
+    client = TestClient(app)
+    product = client.get("/app")
+    assert product.text == "<main>product</main>"
+    assert product.headers["cache-control"] == "no-cache"
+    assert client.get("/w/workspace-1/sources").text == "<main>product</main>"
+    asset = client.get("/assets/app.js")
+    assert asset.status_code == 200
+    assert asset.text == "console.log('ok')"
 
 
 def test_integrated_api_mounts_control_source_health_and_runs_lifespan_cleanup() -> None:

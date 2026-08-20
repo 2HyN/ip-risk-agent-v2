@@ -76,6 +76,7 @@ class ContainerOverrides:
     observer: StructuredLogger | None = None
     close_callbacks: tuple[Any, ...] = ()
     device_auth_service: DesktopDeviceAuthService | None = None
+    device_auth_store: Any | None = None
 
 
 @dataclass(slots=True)
@@ -137,12 +138,15 @@ def build_container(
 
     device_auth_service = overrides.device_auth_service
     if settings.role is AppRole.API and device_auth_service is None:
-        if settings.profile is RuntimeProfile.PRODUCTION:
+        if (
+            settings.profile is RuntimeProfile.PRODUCTION
+            and overrides.device_auth_store is None
+        ):
             raise SettingsError(
-                "production API requires a durable desktop device auth service"
+                "production API requires a durable desktop device auth store"
             )
         device_auth_service = DesktopDeviceAuthService(
-            store=InMemoryDeviceAuthStore(),
+            store=overrides.device_auth_store or InMemoryDeviceAuthStore(),
             session_version_validator=session_is_current,
             clock=utc_now,
         )

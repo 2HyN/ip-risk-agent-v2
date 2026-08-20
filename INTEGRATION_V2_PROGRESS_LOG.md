@@ -491,3 +491,105 @@ Python skip 1건은 이전 phase와 동일한 `FIRESTORE_EMULATOR_HOST` 미설�
 - [x] Frozen Contract와 dependency manifest/lock 무변경
 
 종료 gate: **통과**. Phase 6에서는 이 제품 surface를 유지하면서 production durable adapter, static hosting과 GCP repository-internal deploy 산출물을 구현한다.
+
+## Phase 6 — GCP 내부 구성과 배포 준비
+
+### 시작 상태와 범위
+
+- 시작 HEAD: `e89c6e033db0d5cef10284965bd16a8f480a48d3`
+- 목표: Phase 4/5의 public surface를 유지하면서 production durable foundation,
+  same-origin frontend image, GCP deploy 입력물, scheduler/RAG/운영 검증을 저장소
+  내부에서 완성한다.
+- 포함: Firestore operational store와 index/TTL, Secret Manager/GCS/Cloud Tasks/OIDC
+  adapter, durable device store injection, static Product hosting, non-root multi-stage
+  image, Cloud Build/Run/Tasks/Scheduler 선언, RAG checksum dry-run, readiness/운영 handoff.
+- 제외: GCP project/resource 생성, IAM binding, OAuth/GitHub console 설정, 실제 Secret
+  값 등록, RAG upload, domain/TLS와 live provider test. 이는 승인받은 외부 작업 소유다.
+
+### 수렴 결과
+
+1. **Firestore durable foundation**
+   - canonical `FirestoreControlUnitOfWorkFactory`와 하나의 Async Firestore client를
+     공유하는 Google Cloud foundation factory를 추가했다.
+   - OAuth state, pending connection/binding, desktop challenge/device/credential/mount,
+     Drive/GitHub/Local runtime과 tracking scope를 `source_operational_*` namespace로
+     분리했다.
+   - raw lookup/state/credential을 document ID로 쓰지 않고 SHA-256 key를 사용하며,
+     OAuth state consume는 transaction과 명시적 expiry/consumed 검사를 함께 사용한다.
+   - canonical composite index와 OAuth/pending/challenge `expires_at` TTL을
+     `deploy/firestore.indexes.json`에 고정하고 코드 선언과 정적 대조한다.
+
+2. **GCP managed adapter**
+   - Secret Manager vault는 project/provider scope의 opaque resource와 immutable version
+     추가/조회/disable을 구현하고 project 밖 reference를 거부한다.
+   - GCS Local staging은 UTF-8/1MB 상한, random private object, uniform bucket-level
+     access 확인, no-store와 metadata denylist, best-effort delete를 적용했다.
+   - Cloud Tasks는 exact ID-only JSON, deterministic task name, 240초 deadline과
+     caller service account OIDC/audience를 사용하며 `AlreadyExists`를 idempotent
+     success로 처리한다.
+   - Worker/Scheduler용 Google-signed OIDC verifier는 audience와 exact verified service
+     account email을 모두 확인한다.
+
+3. **Product image와 deploy 입력물**
+   - Node 24.19.0/pnpm 11.19.0 frontend build stage와 Python 3.14 non-root runtime
+     stage를 가진 공용 Dockerfile을 추가했다. API는 build된 Product UI를 `/app`,
+     `/w/*`, `/login` 등에서 same-origin으로 제공한다.
+   - Cloud Build image build/smoke, API/Worker Cloud Run desired state, Cloud Tasks queue,
+     네 Scheduler job, GCS lifecycle을 `deploy/`에 문서화했다.
+   - API/Worker/Tasks/Scheduler/Deploy identity를 분리한 최소 권한 matrix와 외부
+     작업 handoff 값을 `docs/GCP_INTERNAL_DEPLOYMENT.md`에 정리했다.
+
+4. **Scheduler와 RAG 준비**
+   - Drive watch renewal/reconciliation, expired state cleanup, source health refresh를
+     OIDC 보호된 POST endpoint와 cursor/limit 기반 최대 500건 batch contract로
+     고정했다.
+   - RAG dry-run 도구는 approved manifest path만 읽고 corpus version과 모든 checksum을
+     검증한다. 세 public reference 문서를 준비했으며 외부 write는 수행하지 않았다.
+
+5. **운영 안전장치와 검증 가능성**
+   - production API 설정에 region, built frontend, Scheduler identity를 필수화했고
+     durable device store가 없으면 시작을 거부한다. test/local만 in-memory fallback을
+     유지한다.
+   - deploy validator가 image/config 파일 존재, YAML/JSON parse, canonical index,
+     operational TTL, staging lifecycle을 offline gate로 확인한다.
+   - operational schema, TTL의 비-즉시성, emulator 원칙, 허용/금지 log field와 최소
+     alert set을 문서화했다.
+
+### 검증 기록
+
+| 검증 | 결과 |
+|---|---|
+| Phase 6 GCP/Scheduler/deploy/static focused suite | `14 passed` |
+| Python `compileall` + `pip check` | 통과 |
+| contracts/control/connectors/intelligence/integration/e2e non-live 전체 suite | `597 passed, 1 skipped, 10 deselected` |
+| root TypeScript typecheck/build/resolution | 통과 |
+| Frontend Vitest | `9 files, 30 passed` |
+| Desktop Node test | `72 tests, 70 passed, 2 skipped` |
+| `pnpm install --frozen-lockfile` | 통과, lock 변경 없음 |
+| deploy static validator | `GCP deployment inputs: valid` |
+| RAG ingestion dry-run | version `2026-08-14.1`, 3 documents, checksum 일치, external write 없음 |
+| contract 재생성과 `shared/contracts/**` diff | 변경 없음 |
+| Docker image 실제 build | 현재 host에 Docker CLI가 없어 미실행; Cloud Build 입력과 Dockerfile은 static gate 통과 |
+
+Python skip 1건은 이전 phase와 동일하게 `FIRESTORE_EMULATOR_HOST` 미설정이며,
+deselected 10건은 실제 provider credential이 필요한 `live` test다. Desktop skip 2건도
+Windows symlink 권한 제약이다. 새 GCP adapter는 provider client 대역으로 payload,
+privacy, one-time consume, version/ref, identity 경계를 검증했다. 실제 emulator와 image
+build는 해당 runtime이 있는 외부/CI 환경에서 같은 commit을 대상으로 재실행한다.
+
+### Phase 6 gate
+
+- [x] canonical/operational Firestore 분리와 durable factory
+- [x] operational namespace, schema version, index와 TTL deploy declaration
+- [x] Secret Manager/GCS/Cloud Tasks/OIDC concrete adapter
+- [x] production durable device store injection과 in-memory fallback 금지
+- [x] same-origin built Product hosting과 non-root 공용 image
+- [x] Cloud Build/Run/Tasks/Scheduler/GCS repository input
+- [x] OIDC 보호·bounded Scheduler endpoint contract
+- [x] manifest-bounded RAG ingestion dry-run
+- [x] service identity/IAM handoff와 observability/readiness 기준
+- [x] 전체 non-live 회귀 및 Frozen Contract/dependency lock 무변경
+
+종료 gate: **repository-internal 범위 통과**. Firestore emulator와 Docker runtime이 없는
+현재 host의 두 실환경 검증은 명시적으로 보류되었으며, GCP 외부 resource/IAM/live
+provider 작업 전에 CI 또는 배포 host에서 재확인한다. 다른 worktree는 수정하지 않았다.

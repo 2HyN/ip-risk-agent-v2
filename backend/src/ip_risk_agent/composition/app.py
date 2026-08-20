@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .container import RuntimeContainer
 from .health import create_health_router
+from .frontend_hosting import install_product_frontend
 from .frontend_runtime import create_frontend_runtime_router
 from .pipeline import (
     InvalidPipelineTaskError,
@@ -49,6 +50,8 @@ def create_api_app(container: RuntimeContainer) -> FastAPI:
     for router in container.extra_api_routers:
         app.include_router(router)
     app.include_router(create_health_router(container.health))
+    if container.settings.frontend_dist_dir is not None:
+        install_product_frontend(app, container.settings.frontend_dist_dir)
     return app
 
 

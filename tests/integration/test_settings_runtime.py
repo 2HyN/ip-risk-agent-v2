@@ -56,6 +56,7 @@ def test_local_worker_allows_absent_external_groups_but_production_never_falls_b
         public_base_url="https://worker.example.com",
         session_secret="",
         gcp_project_id="project-1",
+        gcp_region="asia-northeast3",
         firestore_database="(default)",
         google_login_client_id="login-client",
         google_login_client_secret="login-secret",

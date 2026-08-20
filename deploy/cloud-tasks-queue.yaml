@@ -1,0 +1,12 @@
+queue:
+  name: analysis-changes
+  location: asia-northeast3
+  rateLimits:
+    maxDispatchesPerSecond: 10
+    maxConcurrentDispatches: 20
+  retryConfig:
+    maxAttempts: 8
+    maxRetryDuration: 86400s
+    minBackoff: 5s
+    maxBackoff: 3600s
+    maxDoublings: 8
