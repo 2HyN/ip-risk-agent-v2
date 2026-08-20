@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 4 완료 — Phase 5 진입 대기**
+> 현재 단계: **통합 Phase 5 완료 — Phase 6 진입 대기**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -96,8 +96,8 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 | 1 | 계획 확정과 agent 문서 통합 | 전체 phase 계획, Agent 1/2/3 단일 문서, 삭제 보류 목록 | source 문서 coverage와 보존 확인 | 완료 (`31e3fc4`) |
 | 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 완료 (`83c901f`) |
 | 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 완료 (`dfa1193`) |
-| 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 완료 |
-| 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 대기 |
+| 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 완료 (`bbbcd2b`) |
+| 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 완료 (본 commit) |
 | 6 | GCP 내부 구현 | Firestore operational stores, Secret Manager/GCS/Tasks adapters, indexes, Docker/Cloud Run/Scheduler/RAG tooling | emulator 및 staging-ready dry run | 대기 |
 | 7 | 전체 검증과 release freeze | 전체 회귀, 보안/실패/복구 test, live-test runbook, blocker 0건 | 통합 완료 승인 | 대기 |
 | 8 | 문서 정리와 배포 후보 고정 | 구 agent 문서 삭제, README/운영 문서 최종화, release candidate commit | 삭제 후 전체 검증 재통과 | 대기 |
@@ -410,3 +410,84 @@ Python skip 1건은 이전 phase와 동일한 `FIRESTORE_EMULATOR_HOST` 미설�
 - [x] Frozen Contract와 dependency/lock 무변경
 
 종료 gate: **통과**. Phase 5에서는 현재 API/Worker public surface를 기준으로 Web Source flow와 Electron enrollment/local flow를 제품 UI에 연결한다.
+
+## Phase 5 — Web/Electron 제품 통합
+
+### 시작 상태와 범위
+
+- 시작 HEAD: `bbbcd2bfdc8e5e246b8c3e2d35d5ff9894fe51dc`
+- 목표: Phase 4의 API surface를 유일한 Product UI entrypoint와 Electron shell에 연결하고, source 선택부터 mount 생성·상태·Open Original까지의 사용자 흐름을 완성한다.
+- 포함: SourcePanel composition, CSRF-aware Source client, OAuth/install completion redirect, Drive Picker, GitHub repository/branch, Local enrollment/mount, Electron renderer 보안, credential rotation/revoke, bearer background event와 watcher 복구.
+- 제외: production Source operational store/router concrete binding, Firestore/Secret Manager/GCS/Cloud Tasks adapter, built frontend static serving, packaging/signing/update, 실제 provider credential과 GCP Console 작업. 전자는 Phase 6, 외부 작업은 Phase 9 소유다.
+
+### 수렴 결과
+
+1. **Product UI composition과 Source 상태**
+   - `frontend/src/main.tsx`만 Control과 Source 구현을 함께 아는 composition point로 두고 `ControlPlaneRoutes.integration`에 SourcePanel과 Open Original handler를 주입했다.
+   - SourcePanel은 현재 workspace context와 Control data-access summary를 사용해 connected status, reconnect와 Owner mount disable을 제공한다. 기존 Source 전용 `dev/preview.tsx`와 고정 `dev-workspace` 경로는 제거했다.
+
+2. **인증된 provider completion**
+   - Source client는 Control `ApiClient`를 재사용하므로 same-origin cookie와 모든 mutation의 CSRF header를 공유한다.
+   - Drive/GitHub callback은 token이나 provider 원문을 query에 싣지 않고 provider, bounded opaque connection ID와 connected status만 Product source route로 303 redirect한다.
+   - Drive는 short-lived Picker token과 browser runtime config를 사용해 명시적으로 선택된 고유 file ID만 mount 요청에 넣는다. GitHub는 접근 가능한 repository와 branch를 선택해 현재 workspace mount를 생성한다.
+   - browser-safe runtime endpoint에는 Picker browser key와 Cloud project number만 포함하며 OAuth access/refresh token과 client secret은 노출하지 않는다. 두 설정은 all-or-none이고 production에서 필수다.
+
+3. **Open Original 경계**
+   - Web은 backend 재인가 결과가 정확한 `drive.google.com` 또는 `github.com` HTTPS URL일 때만 이동한다.
+   - Local은 서버가 반환한 device/artifact opaque ID만 Electron main에 전달하고 renderer나 cloud response에 absolute path를 포함하지 않는다.
+
+4. **Local enrollment와 credential 수명주기**
+   - 로그인 session에서 발급한 one-time challenge만 unauthenticated enrollment exchange에 사용한다. device credential은 Electron `safeStorage`로 암호화하고 plaintext 저장·renderer getter를 제공하지 않는다.
+   - rotation은 같은 device identity에 새 challenge를 교환해 이전 server hash를 교체한다. revoke는 소유 session+CSRF API로 server credential을 폐기한 뒤 watcher를 닫고 local ciphertext를 삭제한다.
+   - 폴더 선택은 one-time opaque selection ID와 display name만 renderer에 반환하며 main process의 canonical path는 mount 등록 성공 후 local registry에만 기록한다.
+
+5. **Electron Product runtime과 background event**
+   - `data:` smoke page를 제거하고 local loopback Vite 또는 production same-origin `/app`을 로드한다. Production renderer와 API origin이 다르면 시작을 거부한다.
+   - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, 고정 CommonJS preload와 최소 IPC allowlist를 적용했다. Electron 공식 제약에 맞춰 sandboxed preload의 ESM import를 제거했다.
+   - navigation은 Product/API·Google account·GitHub origin으로 제한하고 external open은 정확한 Drive/GitHub host만 허용한다.
+   - background HTTP는 device bearer, network/429/5xx bounded retry를 사용한다. 실행 중 offline queue는 event 순서를 유지해 재전송하고 credential이 있으면 app restart 후 ACTIVE watcher를 복구한다. process restart를 넘는 durable event spool은 Phase 6 운영 adapter 범위로 명시했다.
+
+6. **통합 중 발견한 오류 보정**
+   - 기존 Electron event reporter가 server mount ID가 아닌 local handle을 전송하던 오류를 `serverMountId` 사용으로 수정했다.
+   - 기존 renderer directory selection 응답이 canonical absolute path를 노출하던 경계를 opaque one-time selection으로 교체했다.
+   - sandboxed renderer와 `.mjs` preload 조합이 Electron에서 ESM import를 지원하지 않는 문제를 공용 capability 목록 기반 `.cjs` preload로 수정했다.
+   - device enrollment/revoke router가 factory로만 존재하고 API container에 포함되지 않던 404 wiring 공백을 수정했다. test/local은 명시적 in-memory service를 조립하고 production은 durable device auth service가 없으면 시작을 거부한다.
+
+### 검증 기록
+
+| 검증 | 결과 |
+|---|---|
+| Phase 5 focused backend boundary/composition suite | `19 passed` |
+| Python `compileall` + `pip check` | 통과 |
+| contracts/control/connectors/intelligence/integration/e2e non-live 전체 suite | `586 passed, 1 skipped, 10 deselected` |
+| root TypeScript typecheck/build/resolution | 통과 |
+| Frontend Vitest | `9 files, 30 passed` |
+| Desktop Node test | `72 tests, 70 passed, 2 skipped` |
+| 실제 API+Vite browser smoke | `/`에서 미인증 `/login` 수렴, Product login UI 표시, console error 없음 |
+| `pnpm install --frozen-lockfile` | 통과, lock 변경 없음 |
+| contract 재생성과 `shared/contracts/**` diff | 변경 없음 |
+
+Python skip 1건은 이전 phase와 동일한 `FIRESTORE_EMULATOR_HOST` 미설정이며 deselected 10건은 실제 provider credential이 필요한 `live` test다. Desktop skip 2건도 Windows symlink 권한 제약이다. 실제 Google/GitHub Picker·OAuth는 credential과 외부 resource가 필요한 Phase 9 live 검증으로 남겼고, 제품 흐름은 DOM integration test의 명시적 file ID, current workspace, CSRF, opaque local selection assertion으로 검증했다.
+
+구현 중 최초 Desktop 실행은 preload capability의 exact 목록을 검사하는 기존 test가 새 enrollment/Open Original 채널을 반영하지 않아 실패했다. allowlist source와 assertion을 함께 갱신하고, 이어서 공식 Electron sandbox 제약에 따라 공용 CommonJS 채널 모듈로 수렴한 뒤 전체 Desktop `70 passed, 2 skipped`를 재확인했다.
+
+### 명시적 후속 범위
+
+- Phase 6에서 production Source router/store와 pending binding, Drive watch, Secret Manager/GCS/Cloud Tasks adapter를 container에 연결한다.
+- built frontend를 API의 same-origin `/app`으로 제공하는 image/static hosting과 Electron production packaging은 Phase 6 배포 산출물에 포함한다.
+- 실행 중 queue는 offline 재전송을 제공하지만 crash/restart까지 보존하는 durable event spool은 Phase 6에서 local/GCP delivery 정책과 함께 구현한다.
+- 실제 Google Picker API key restriction, OAuth consent/App 설치, credential 기반 provider live E2E와 GCP Console/IAM 작업은 Phase 9 전에는 수행하지 않는다.
+
+### Phase 5 gate
+
+- [x] sole Product UI composition point와 current workspace SourcePanel
+- [x] same-origin cookie/CSRF-aware Source client
+- [x] safe OAuth/install callback과 Drive/GitHub mount completion
+- [x] connected status/reconnect/disable와 provider/local Open Original
+- [x] Electron Product renderer, sandbox/preload/navigation 경계
+- [x] one-time enrollment, encrypted credential, rotation/revoke
+- [x] opaque Local selection, mount 등록, watcher와 ordered offline retry
+- [x] browser smoke, frontend/desktop test와 전체 non-live 회귀 통과
+- [x] Frozen Contract와 dependency manifest/lock 무변경
+
+종료 gate: **통과**. Phase 6에서는 이 제품 surface를 유지하면서 production durable adapter, static hosting과 GCP repository-internal deploy 산출물을 구현한다.

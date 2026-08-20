@@ -65,6 +65,9 @@ def test_integrated_api_mounts_control_source_health_and_runs_lifespan_cleanup()
     assert "/api/v1/auth/me" in paths
     assert "/api/v1/source-composition-probe" in paths
     assert "/health/live" in paths and "/health/ready" in paths
+    assert "/api/v1/runtime-config" in paths
+    assert "/api/v1/desktop/enrollment-challenges" in paths
+    assert "/api/v1/desktop/devices/{device_id}/revoke" in paths
     assert any("open-original" in path for path in paths)
 
     with TestClient(app) as client:
@@ -78,6 +81,13 @@ def test_integrated_api_mounts_control_source_health_and_runs_lifespan_cleanup()
         assert client.get("/api/v1/source-composition-probe").json() == {
             "status": "mounted"
         }
+        assert client.get("/api/v1/runtime-config").json() == {
+            "drive_picker": {
+                "enabled": False,
+                "browser_api_key": None,
+                "cloud_project_number": None,
+            }
+        }
         assert client.get("/api/v1/auth/me").status_code == 401
         assert client.get(
             "/api/v1/auth/google/login", follow_redirects=False
@@ -87,6 +97,12 @@ def test_integrated_api_mounts_control_source_health_and_runs_lifespan_cleanup()
         ).status_code == 303
         me = client.get("/api/v1/auth/me")
         assert me.status_code == 200
+        enrollment = client.post(
+            "/api/v1/desktop/enrollment-challenges",
+            headers={"X-CSRF-Token": me.json()["csrf_token"]},
+        )
+        assert enrollment.status_code == 200
+        assert enrollment.json()["expires_in_seconds"] == 300
         created = client.post(
             "/api/v1/workspaces",
             headers={"X-CSRF-Token": me.json()["csrf_token"]},

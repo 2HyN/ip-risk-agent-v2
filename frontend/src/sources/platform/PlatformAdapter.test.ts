@@ -27,29 +27,35 @@ test("ElectronPlatformAdapter.chooseLocalDirectory delegates to desktopApi", asy
   const fakeApi = {
     chooseTrackedDirectory: async () => {
       called = true;
-      return { canonicalRootPath: "/tmp/example" };
+      return { selectionId: "selection-123", displayName: "example" };
     },
-    connectLocalMount: async () => ({}),
+    enrollDesktopDevice: async () => ({ deviceId: "d", mountCount: 0, enrolled: true }),
+    clearDesktopCredential: async () => ({ deviceId: "d", mountCount: 0, enrolled: false }),
+    connectLocalMount: async () => ({ localMountHandle: "h", serverMountId: "m", sourceWorkspaceId: "s", status: "ACTIVE" as const }),
     openTrackedArtifact: async () => {},
     showTrackedArtifactInFolder: async () => {},
-    getDesktopConnectionStatus: async () => ({ deviceId: "d", mountCount: 0 }),
+    getDesktopConnectionStatus: async () => ({ deviceId: "d", mountCount: 0, enrolled: true }),
+    openLocalOriginal: async () => {},
   };
   const adapter = new ElectronPlatformAdapter(fakeApi);
 
   const result = await adapter.chooseLocalDirectory();
 
   expect(called).toBe(true);
-  expect(result?.canonicalRootPath).toBe("/tmp/example");
+  expect(result?.selectionId).toBe("selection-123");
   expect(adapter.platform).toBe("desktop");
 });
 
 test("detectPlatformAdapter returns desktop adapter when window.desktopApi is present", () => {
   const fakeApi = {
     chooseTrackedDirectory: async () => null,
-    connectLocalMount: async () => ({}),
+    enrollDesktopDevice: async () => ({ deviceId: "d", mountCount: 0, enrolled: true }),
+    clearDesktopCredential: async () => ({ deviceId: "d", mountCount: 0, enrolled: false }),
+    connectLocalMount: async () => ({ localMountHandle: "h", serverMountId: "m", sourceWorkspaceId: "s", status: "ACTIVE" as const }),
     openTrackedArtifact: async () => {},
     showTrackedArtifactInFolder: async () => {},
-    getDesktopConnectionStatus: async () => ({ deviceId: "d", mountCount: 0 }),
+    getDesktopConnectionStatus: async () => ({ deviceId: "d", mountCount: 0, enrolled: true }),
+    openLocalOriginal: async () => {},
   };
   (globalThis as unknown as { window: { desktopApi: typeof fakeApi } }).window = {
     desktopApi: fakeApi,

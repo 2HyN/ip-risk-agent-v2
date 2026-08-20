@@ -1,131 +1,235 @@
-import type {
-  AnalysisArtifact,
-  AnalysisResult,
-  SourceChange,
-  SourceSnapshot,
-} from "@iprisk/contracts";
-export type DesktopContractImportProof = {
-  change: SourceChange;
-  snapshot: SourceSnapshot;
-  artifact: AnalysisArtifact;
-  result: AnalysisResult;
-};
-
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { LocalSourceService } from "../core/local-source-service.js";
+import {
+  LocalSourceService,
+  type ConnectLocalMountParams,
+} from "../core/local-source-service.js";
 import { ensureDeviceIdentity, FileDeviceIdentityStore } from "../local-registry/device-identity.js";
 import { FileLocalRegistryStore, type LocalMountRecord } from "../local-registry/store.js";
+import { EncryptedFileDeviceCredentialStore } from "../security/device-credential-store.js";
 import { startLocalWatcher, type LocalWatcherHandle } from "../watcher/watcher.js";
 import { DesktopEventReporter, FetchHttpClient } from "./desktop-event-reporter.js";
+import { RetryingDesktopEventQueue } from "./desktop-event-queue.js";
+import { DeviceEnrollmentClient } from "./device-enrollment-client.js";
 import { ElectronArtifactOpener } from "./electron-artifact-opener.js";
 import { ElectronDirectoryPicker } from "./electron-directory-picker.js";
 import { HttpMountRegistrationClient } from "./mount-registration-client.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-
-const SERVER_BASE_URL = process.env["IPRISK_SERVER_BASE_URL"] ?? "http://localhost:8000";
+const runtimeProfile = process.env["APP_ENV"] ?? "local";
+const serverBaseUrl = trustedApplicationUrl(
+  process.env["IPRISK_SERVER_BASE_URL"] ?? "http://127.0.0.1:8000",
+  runtimeProfile,
+);
 
 async function bootstrap(): Promise<void> {
   const userDataDir = app.getPath("userData");
   const registry = new FileLocalRegistryStore(join(userDataDir, "local-mounts.json"));
   const deviceStore = new FileDeviceIdentityStore(join(userDataDir, "device-identity.json"));
+  const credentialStore = new EncryptedFileDeviceCredentialStore(
+    join(userDataDir, "device-credential.enc.json"),
+    {
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      encryptString: (value) => safeStorage.encryptString(value),
+      decryptString: (value) => safeStorage.decryptString(Buffer.from(value)),
+    },
+  );
   const device = await ensureDeviceIdentity(deviceStore, hostname());
-
-  const httpClient = new FetchHttpClient(SERVER_BASE_URL);
+  const enrollmentClient = new DeviceEnrollmentClient(serverBaseUrl);
+  const httpClient = new FetchHttpClient(serverBaseUrl, credentialStore);
   const mountRegistrationClient = new HttpMountRegistrationClient(httpClient);
-
-  // 앱이 뜰 때마다 이 컴퓨터를 서버에 등록해둔다 (device_id를 app_user에
-  // 연결하는 건 서버 콜백 몫 — 우리는 호출만 한다).
-  try {
-    await mountRegistrationClient.registerDevice(device.deviceId, device.deviceLabel);
-  } catch (err) {
-    console.error("failed to register this device with the server:", err);
-  }
-
   const service = new LocalSourceService(
     new ElectronDirectoryPicker(),
     registry,
     device,
     new ElectronArtifactOpener(),
-    mountRegistrationClient
+    mountRegistrationClient,
   );
-
   const activeWatchers = new Map<string, LocalWatcherHandle>();
+  const eventQueues = new Map<string, RetryingDesktopEventQueue>();
 
   const startWatchingMount = async (record: LocalMountRecord): Promise<void> => {
-    if (activeWatchers.has(record.localMountHandle)) {
-      return;
-    }
+    if (activeWatchers.has(record.localMountHandle)) return;
     const reporter = new DesktopEventReporter(httpClient, {
       riskWorkspaceId: record.riskWorkspaceId,
-      mountId: record.localMountHandle,
+      mountId: record.serverMountId,
       sourceWorkspaceId: record.sourceWorkspaceId,
       deviceId: record.deviceId,
     });
+    const queue = new RetryingDesktopEventQueue(reporter);
     const handle = await startLocalWatcher(record.canonicalRootPath, (event) => {
-      reporter.report(event).catch((err: unknown) => {
-        console.error(`failed to report local change for ${record.localMountHandle}:`, err);
-      });
+      queue.enqueue(event);
     });
     activeWatchers.set(record.localMountHandle, handle);
+    eventQueues.set(record.localMountHandle, queue);
   };
 
-  // 앱 재시작 후에도 이미 연결돼있던 mount들은 계속 감시를 이어간다.
-  for (const record of await registry.list()) {
-    if (record.status === "ACTIVE") {
-      await startWatchingMount(record);
+  const restoreWatchers = async (): Promise<void> => {
+    if ((await credentialStore.getCredential()) === null) return;
+    for (const record of await registry.list()) {
+      if (record.status === "ACTIVE") await startWatchingMount(record);
     }
-  }
+  };
+  await restoreWatchers();
 
   ipcMain.handle("chooseTrackedDirectory", () => service.chooseTrackedDirectory());
-  ipcMain.handle("connectLocalMount", async (_event, params) => {
+  ipcMain.handle("enrollDesktopDevice", async (_event, rawChallenge: unknown) => {
+    const challenge = boundedString(rawChallenge, "challenge", 32, 512);
+    const enrolled = await enrollmentClient.exchange(
+      challenge,
+      device.deviceId,
+      device.deviceLabel,
+    );
+    await credentialStore.saveCredential(enrolled.deviceCredential);
+    await restoreWatchers();
+    return desktopStatus(service, credentialStore);
+  });
+  ipcMain.handle("clearDesktopCredential", async () => {
+    for (const watcher of activeWatchers.values()) await watcher.close();
+    activeWatchers.clear();
+    eventQueues.clear();
+    await credentialStore.clear();
+    return desktopStatus(service, credentialStore);
+  });
+  ipcMain.handle("connectLocalMount", async (_event, rawParams: unknown) => {
+    const params = connectParams(rawParams);
     const record = await service.connectLocalMount(params);
     await startWatchingMount(record);
-    return record;
+    return {
+      localMountHandle: record.localMountHandle,
+      serverMountId: record.serverMountId,
+      sourceWorkspaceId: record.sourceWorkspaceId,
+      status: record.status,
+    };
   });
-  ipcMain.handle("openTrackedArtifact", (_event, handle: string, relativePath: string) =>
-    service.openTrackedArtifact(handle, relativePath)
+  ipcMain.handle("openTrackedArtifact", (_event, rawHandle: unknown, rawPath: unknown) =>
+    service.openTrackedArtifact(
+      boundedString(rawHandle, "localMountHandle", 1, 256),
+      boundedString(rawPath, "relativePath", 1, 4096),
+    ),
   );
-  ipcMain.handle("showTrackedArtifactInFolder", (_event, handle: string, relativePath: string) =>
-    service.showTrackedArtifactInFolder(handle, relativePath)
+  ipcMain.handle("showTrackedArtifactInFolder", (_event, rawHandle: unknown, rawPath: unknown) =>
+    service.showTrackedArtifactInFolder(
+      boundedString(rawHandle, "localMountHandle", 1, 256),
+      boundedString(rawPath, "relativePath", 1, 4096),
+    ),
   );
-  ipcMain.handle("getDesktopConnectionStatus", () => service.getDesktopConnectionStatus());
+  ipcMain.handle("openLocalOriginal", (_event, rawDeviceId: unknown, rawArtifactId: unknown) =>
+    service.openLocalOriginal(
+      boundedString(rawDeviceId, "deviceId", 1, 256),
+      boundedString(rawArtifactId, "sourceArtifactId", 1, 4096),
+    ),
+  );
+  ipcMain.handle("getDesktopConnectionStatus", () => desktopStatus(service, credentialStore));
 
+  const rendererUrl = trustedApplicationUrl(
+    process.env["IPRISK_DESKTOP_RENDERER_URL"] ?? `${serverBaseUrl}/app`,
+    runtimeProfile,
+  );
+  if (
+    runtimeProfile === "production" &&
+    new URL(rendererUrl).origin !== new URL(serverBaseUrl).origin
+  ) {
+    throw new Error("Production desktop renderer must share the API origin");
+  }
   const window = new BrowserWindow({
-    width: 900,
-    height: 640,
+    width: 1180,
+    height: 780,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
-      preload: join(currentDir, "../preload/preload.mjs"),
+      sandbox: true,
+      preload: join(currentDir, "../preload/preload.cjs"),
     },
   });
-
-  const smokeTestHtml = [
-    "<h1>IP Risk Agent Desktop</h1>",
-    "<p>Phase 3 (Electron wiring) smoke test.</p>",
-    '<button id="pick">Choose Tracked Directory</button>',
-    '<pre id="result"></pre>',
-    "<script>",
-    "document.getElementById('pick').addEventListener('click', async () => {",
-    "  const r = await window.desktopApi.chooseTrackedDirectory();",
-    "  document.getElementById('result').textContent = JSON.stringify(r, null, 2);",
-    "});",
-    "</script>",
-  ].join("");
-
-  void window.loadURL(`data:text/html,${encodeURIComponent(smokeTestHtml)}`);
+  applyNavigationPolicy(window, rendererUrl, serverBaseUrl);
+  await window.loadURL(rendererUrl);
 }
 
-app.whenReady().then(bootstrap);
+async function desktopStatus(
+  service: LocalSourceService,
+  credentials: EncryptedFileDeviceCredentialStore,
+) {
+  const status = await service.getDesktopConnectionStatus();
+  return { ...status, enrolled: (await credentials.getCredential()) !== null };
+}
+
+function connectParams(value: unknown): ConnectLocalMountParams {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("connectLocalMount parameters are invalid");
+  }
+  const item = value as Record<string, unknown>;
+  const allowed = new Set([
+    "selectionId",
+    "riskWorkspaceId",
+    "includePatterns",
+    "excludePatterns",
+  ]);
+  if (Object.keys(item).some((key) => !allowed.has(key))) {
+    throw new Error("connectLocalMount contains an unexpected field");
+  }
+  return {
+    selectionId: boundedString(item["selectionId"], "selectionId", 8, 256),
+    riskWorkspaceId: boundedString(item["riskWorkspaceId"], "riskWorkspaceId", 1, 256),
+    includePatterns: stringList(item["includePatterns"], "includePatterns"),
+    excludePatterns: stringList(item["excludePatterns"], "excludePatterns"),
+  };
+}
+
+function stringList(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.length > 100) throw new Error(`${name} is invalid`);
+  return value.map((item) => boundedString(item, name, 1, 512));
+}
+
+function boundedString(value: unknown, name: string, minimum: number, maximum: number): string {
+  if (typeof value !== "string" || value.length < minimum || value.length > maximum) {
+    throw new Error(`${name} is invalid`);
+  }
+  return value;
+}
+
+function trustedApplicationUrl(raw: string, profile: string): string {
+  const parsed = new URL(raw);
+  const loopback = ["127.0.0.1", "localhost", "::1"].includes(parsed.hostname);
+  if (parsed.username || parsed.password || (parsed.protocol !== "https:" && !(profile !== "production" && parsed.protocol === "http:" && loopback))) {
+    throw new Error("Desktop application URL must be HTTPS or a local loopback development URL");
+  }
+  return parsed.toString().replace(/\/$/u, "");
+}
+
+function applyNavigationPolicy(
+  window: BrowserWindow,
+  rendererUrl: string,
+  apiUrl: string,
+): void {
+  const allowedOrigins = new Set([
+    new URL(rendererUrl).origin,
+    new URL(apiUrl).origin,
+    "https://accounts.google.com",
+    "https://github.com",
+  ]);
+  window.webContents.on("will-navigate", (event, target) => {
+    if (!allowedOrigins.has(new URL(target).origin)) event.preventDefault();
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    const parsed = new URL(url);
+    if (
+      parsed.protocol === "https:" &&
+      ["drive.google.com", "github.com"].includes(parsed.hostname) &&
+      !parsed.username &&
+      !parsed.password
+    ) {
+      void shell.openExternal(parsed.toString());
+    }
+    return { action: "deny" };
+  });
+}
+
+app.whenReady().then(() => bootstrap().catch(() => app.quit()));
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });

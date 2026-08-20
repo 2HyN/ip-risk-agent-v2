@@ -1,7 +1,7 @@
 # Agent 2 — Source Integration & Desktop 통합 참조
 
 > 문서 상태: Agent 2 분산 문서 통합본
-> 코드 기준: `source-integration-desktop` merge 결과 (`ee861b730d161caf876d2a300b476783d03bbaf6`)
+> 코드 기준: Agent 2 merge 결과와 `integration-v2` Phase 5 제품 통합
 > 적용 branch: `integration-v2`
 > 최종 dependency 결정: [`../INTEGRATION_V2_DEPENDENCY_BASELINE.md`](../INTEGRATION_V2_DEPENDENCY_BASELINE.md)
 > 전체 조립 계획: [`../INTEGRATION_V2_EXECUTION_PLAN.md`](../INTEGRATION_V2_EXECUTION_PLAN.md)
@@ -72,11 +72,10 @@ apps/desktop/
   core/ local-registry/ main/ preload/ security/ watcher/
 
 frontend/src/sources/
-  AddSourceChooser.tsx
+  SourcePanel.tsx AddSourceChooser.tsx openOriginal.ts
   ConnectLocalSource.tsx
   api/connectionClient.ts
-  platform/PlatformAdapter.ts
-  dev/preview.tsx
+  platform/PlatformAdapter.ts DrivePickerAdapter.ts
 
 tests/connectors/
 ```
@@ -242,7 +241,7 @@ installation ID는 secret이 아니며 GitHub App private key는 app-level provi
 | `POST /desktop/staging` | transient text를 staging store에 저장 |
 | `POST /desktop/events` | metadata-only SourceChange 생성/전달 |
 
-`GET /desktop/mounts/{id}/status`는 branch에 없다.
+별도 `GET /desktop/mounts/{id}/status`는 만들지 않는다. Product UI의 canonical mount 상태는 Control의 data-access summary에서 조회하고, 해당 Desktop의 enrollment/local registry 상태는 allow-listed `getDesktopConnectionStatus` IPC에서 조회한다. 두 상태의 소유권을 섞는 중복 Source endpoint는 추가하지 않는다.
 
 ### Cloud request data
 
@@ -265,33 +264,28 @@ risk_workspace_id, device_id, include_patterns, exclude_patterns
 - preload: allow-listed IPC만 renderer에 노출
 - `LocalSourceService`: directory 선택, mount 연결, original open
 
-### 현재 통합 공백
+### Phase 5 통합 결과
 
-Agent 2 branch의 HTTP client는 cookie/CSRF/device credential 없이 호출한다. Source authz를 fail closed하면 background request가 401이 된다. Integration은 one-time enrollment, hashed server credential, Electron `safeStorage`, bearer 인증과 revoke/rotation을 구현한다.
-
-현재 Electron main은 Product renderer가 아니라 `data:` smoke page를 연다. Source frontend의 Local component도 directory 선택 뒤 `connectLocalMount`를 호출하지 않는다. 두 항목은 Phase 5에서 완성한다.
+- session이 발급한 one-time challenge를 Electron main이 교환하고 credential은 Electron `safeStorage`로 암호화해 저장한다.
+- background staging/event/mount request는 device bearer를 사용하며 network/429/5xx에 bounded retry를 적용한다.
+- 실행 중 offline event는 순서를 보존해 재전송하고, 앱 재시작 시 credential이 유효하면 ACTIVE watcher를 복구한다.
+- rotation은 새 challenge 교환으로 이전 server credential을 폐기하고, revoke는 session+CSRF API 호출 후 watcher 중지와 local credential 삭제를 수행한다.
+- Electron은 Product renderer를 로드하며 production same-origin HTTPS, sandbox, context isolation, node integration 비활성화와 navigation allowlist를 강제한다.
+- 폴더 선택 결과는 one-time opaque selection ID와 표시명만 renderer에 전달하고 absolute path는 main registry에만 남긴다.
 
 ## 8. Source frontend
 
-제공 요소:
+Phase 5 제품 요소:
 
+- `SourcePanel`의 connected status/reconnect/Owner disable
 - `AddSourceChooser`
 - `ConnectLocalSource`
-- `HttpConnectionApiClient`
+- Control `ApiClient`를 재사용하는 CSRF-aware `SourceApiClient`
 - Web/Electron `PlatformAdapter`
+- OAuth/install 완료 후 Drive Picker·GitHub repository/branch·mount flow
+- provider URL/local opaque identity를 분리하는 Open Original
 
-현재 Drive/GitHub 버튼은 connection start endpoint까지 호출한다. Product integration에서 추가할 것:
-
-- current VWS 사용, `dev-workspace` 제거
-- Control session의 CSRF-aware client 사용
-- OAuth/install callback completion route
-- Drive Picker와 mount create
-- GitHub repository/branch와 mount create
-- connected source/status/reconnect UI
-- Local directory 선택 후 실제 IPC mount 연결
-- `frontend/src/sources/dev/preview.tsx` 삭제
-
-Control UI에는 `ControlPlaneApp.integration.sourcePanel/sourceNavigation`으로 주입한다.
+`frontend/src/main.tsx`만 Control과 Source를 함께 아는 composition point다. `ControlPlaneRoutes.integration` slot으로 `SourcePanel`과 Open Original handler를 주입하며 Control component가 Source 구현을 직접 import하지 않는다. 기존 `dev/preview.tsx`는 제거했다.
 
 ## 9. Retry와 error 의미
 
@@ -325,6 +319,8 @@ GOOGLE_DRIVE_CLIENT_SECRET
 GOOGLE_DRIVE_REDIRECT_URI
 GOOGLE_DRIVE_WEBHOOK_BASE_URL
 DRIVE_WATCH_CHANNEL_TOKEN
+GOOGLE_PICKER_API_KEY
+GOOGLE_CLOUD_PROJECT_NUMBER
 
 GITHUB_APP_ID
 GITHUB_APP_SLUG
@@ -335,6 +331,7 @@ GITHUB_APP_CALLBACK_URL
 LOCAL_STAGING_BUCKET
 GCP_PROJECT_ID
 IPRISK_SERVER_BASE_URL
+IPRISK_DESKTOP_RENDERER_URL
 ```
 
 실제 secret은 source나 `.env.example`에 넣지 않는다. 최종 설정 group과 Secret Manager reference 규칙은 통합 기준 문서를 따른다.
@@ -387,14 +384,13 @@ Source frontend tests는 merge 후 Vitest 체계로 포팅해야 한다. Windows
 
 ## 14. Known issues와 우선순위
 
-### Phase 3~5 blocker
+### Phase 6 production blocker
 
-- production authz/CSRF와 desktop device auth
-- pending connection/canonical mount persistence
-- production vault/runtime/tracking/lookup/staging
-- Drive watch 생성/갱신
-- OAuth callback 이후 mount completion UI
-- desktop mount status와 Product renderer
+- production pending connection/canonical mount 및 operational store persistence
+- production vault/runtime/tracking/lookup/staging adapter
+- Drive watch 생성/갱신과 concrete Source router composition
+- built frontend의 API `/app` static hosting 조립
+- durable process-restart event spool과 packaging/signing/update 정책
 
 ### 후속/제한
 

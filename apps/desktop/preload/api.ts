@@ -1,23 +1,9 @@
 /**
- * Agent 2 Spec 34번: Renderer에 노출할 최소 capability 목록.
- * 이 파일은 계약(contract) 그 자체다 — main/preload/renderer 어디서든
- * 이 목록 밖의 이름을 노출하면 안 된다.
+ * ESM 기반 test/renderer가 CommonJS preload와 동일한 capability 계약을
+ * 사용하도록 하는 얇은 re-export다.
  */
-
-export const ALLOWED_RENDERER_CHANNELS = [
-  "chooseTrackedDirectory",
-  "connectLocalMount",
-  "openTrackedArtifact",
-  "showTrackedArtifactInFolder",
-  "getDesktopConnectionStatus",
-] as const;
-
-export type AllowedRendererChannel = (typeof ALLOWED_RENDERER_CHANNELS)[number];
-
-export const FORBIDDEN_RENDERER_CHANNELS = [
-  "readFile",
-  "writeFile",
-  "openPath",
-  "listDirectory",
-  "executeShell",
-] as const;
+export {
+  ALLOWED_RENDERER_CHANNELS,
+  FORBIDDEN_RENDERER_CHANNELS,
+  type AllowedRendererChannel,
+} from "./channels.cjs";

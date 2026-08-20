@@ -11,7 +11,7 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import Protocol
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from ip_risk_agent.api.common import CsrfGuard, CsrfValidationError
@@ -211,6 +211,12 @@ class DesktopDeviceAuthService:
             )
         )
 
+    async def revoke_owned(self, *, device_id: str, owner_user_id: str) -> None:
+        device = await self._store.get_device(device_id)
+        if device is None or device.owner_user_id != owner_user_id:
+            raise HTTPException(status_code=404, detail="desktop device not found")
+        await self.revoke(device_id)
+
     async def resolve_mount_binding(self, mount_id: str) -> DeviceMountBinding | None:
         return await self._store.get_mount_binding(mount_id)
 
@@ -298,6 +304,19 @@ def create_device_enrollment_router(
             device_label=body.device_label,
         )
         return EnrollmentResponse(device_credential=credential)
+
+    @router.post("/api/v1/desktop/devices/{device_id}/revoke", status_code=204)
+    async def revoke(request: Request, device_id: str) -> Response:
+        principal = await principal_resolver(request)
+        try:
+            await csrf(request, x_csrf_token=request.headers.get("X-CSRF-Token"))
+        except CsrfValidationError as exc:
+            raise HTTPException(status_code=403, detail="CSRF validation failed") from exc
+        await devices.revoke_owned(
+            device_id=device_id,
+            owner_user_id=principal.user.id,
+        )
+        return Response(status_code=204)
 
     return router
 

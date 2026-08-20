@@ -61,6 +61,12 @@ function setupTempDir(): { dir: string; root: string; registryPath: string } {
   return { dir, root, registryPath: join(dir, "registry.json") };
 }
 
+async function selectDirectory(service: LocalSourceService): Promise<string> {
+  const selection = await service.chooseTrackedDirectory();
+  assert.ok(selection);
+  return selection.selectionId;
+}
+
 test("chooseTrackedDirectory returns null when user cancels the picker", async () => {
   const { dir, registryPath } = setupTempDir();
   try {
@@ -80,7 +86,7 @@ test("chooseTrackedDirectory returns null when user cancels the picker", async (
   }
 });
 
-test("chooseTrackedDirectory returns the canonicalized root path", async () => {
+test("chooseTrackedDirectory returns an opaque selection without the absolute path", async () => {
   const { dir, root, registryPath } = setupTempDir();
   try {
     const service = new LocalSourceService(
@@ -94,7 +100,8 @@ test("chooseTrackedDirectory returns the canonicalized root path", async () => {
     const result = await service.chooseTrackedDirectory();
 
     assert.ok(result);
-    assert.equal(result?.canonicalRootPath, root);
+    assert.equal(result?.displayName, root.split(/[\\/]/u).at(-1));
+    assert.equal("canonicalRootPath" in result, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
@@ -108,15 +115,16 @@ test("connectLocalMount registers with the server first, then saves locally with
     const registrationClient = new FakeMountRegistrationClient();
     registrationClient.nextResult = { serverMountId: "server-mount-42", sourceWorkspaceId: "sw-42" };
     const service = new LocalSourceService(
-      new FakeDirectoryPicker(null),
+      new FakeDirectoryPicker(root),
       registry,
       fakeDevice(),
       new FakeArtifactOpener(),
       registrationClient
     );
 
+    const selectionId = await selectDirectory(service);
     const record = await service.connectLocalMount({
-      canonicalRootPath: root,
+      selectionId,
       riskWorkspaceId: "rw1",
       includePatterns: ["**/*.py"],
       excludePatterns: [],
@@ -135,6 +143,15 @@ test("connectLocalMount registers with the server first, then saves locally with
     const loaded = await registry.get(record.localMountHandle);
     assert.ok(loaded);
     assert.equal(loaded?.serverMountId, "server-mount-42");
+    await assert.rejects(
+      () => service.connectLocalMount({
+        selectionId,
+        riskWorkspaceId: "rw1",
+        includePatterns: [],
+        excludePatterns: [],
+      }),
+      /unknown or consumed/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
@@ -150,14 +167,14 @@ test("openTrackedArtifact resolves the path and calls the opener", async () => {
     const registry = new FileLocalRegistryStore(registryPath);
     const opener = new FakeArtifactOpener();
     const service = new LocalSourceService(
-      new FakeDirectoryPicker(null),
+      new FakeDirectoryPicker(root),
       registry,
       fakeDevice(),
       opener,
       new FakeMountRegistrationClient()
     );
     const record = await service.connectLocalMount({
-      canonicalRootPath: root,
+      selectionId: await selectDirectory(service),
       riskWorkspaceId: "rw1",
       includePatterns: [],
       excludePatterns: [],
@@ -183,14 +200,14 @@ test("openTrackedArtifact throws when the opener reports an error", async () => 
     const opener = new FakeArtifactOpener();
     opener.openError = "no application registered for this file type";
     const service = new LocalSourceService(
-      new FakeDirectoryPicker(null),
+      new FakeDirectoryPicker(root),
       registry,
       fakeDevice(),
       opener,
       new FakeMountRegistrationClient()
     );
     const record = await service.connectLocalMount({
-      canonicalRootPath: root,
+      selectionId: await selectDirectory(service),
       riskWorkspaceId: "rw1",
       includePatterns: [],
       excludePatterns: [],
@@ -208,14 +225,14 @@ test("openTrackedArtifact rejects a path escaping the mount root", async () => {
   try {
     const registry = new FileLocalRegistryStore(registryPath);
     const service = new LocalSourceService(
-      new FakeDirectoryPicker(null),
+      new FakeDirectoryPicker(root),
       registry,
       fakeDevice(),
       new FakeArtifactOpener(),
       new FakeMountRegistrationClient()
     );
     const record = await service.connectLocalMount({
-      canonicalRootPath: root,
+      selectionId: await selectDirectory(service),
       riskWorkspaceId: "rw1",
       includePatterns: [],
       excludePatterns: [],
@@ -237,14 +254,14 @@ test("showTrackedArtifactInFolder calls opener.showInFolder", async () => {
     const registry = new FileLocalRegistryStore(registryPath);
     const opener = new FakeArtifactOpener();
     const service = new LocalSourceService(
-      new FakeDirectoryPicker(null),
+      new FakeDirectoryPicker(root),
       registry,
       fakeDevice(),
       opener,
       new FakeMountRegistrationClient()
     );
     const record = await service.connectLocalMount({
-      canonicalRootPath: root,
+      selectionId: await selectDirectory(service),
       riskWorkspaceId: "rw1",
       includePatterns: [],
       excludePatterns: [],
@@ -259,12 +276,45 @@ test("showTrackedArtifactInFolder calls opener.showInFolder", async () => {
   }
 });
 
+test("openLocalOriginal resolves an opaque artifact only on the owning device and mount", async () => {
+  const { dir, root, registryPath } = setupTempDir();
+  try {
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "main.py"), "print(1)");
+    const opener = new FakeArtifactOpener();
+    const service = new LocalSourceService(
+      new FakeDirectoryPicker(root),
+      new FileLocalRegistryStore(registryPath),
+      fakeDevice(),
+      opener,
+      new FakeMountRegistrationClient(),
+    );
+    await service.connectLocalMount({
+      selectionId: await selectDirectory(service),
+      riskWorkspaceId: "rw1",
+      includePatterns: [],
+      excludePatterns: [],
+    });
+    const artifactId = Buffer.from(
+      ["dev-1", "server-mount-1", "src/main.py"].join("\u001f"),
+    ).toString("base64url");
+
+    await service.openLocalOriginal("dev-1", artifactId);
+
+    assert.equal(opener.openedPaths.length, 1);
+    await assert.rejects(() => service.openLocalOriginal("other-device", artifactId));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("getDesktopConnectionStatus reports device id and mount count", async () => {
   const { dir, root, registryPath } = setupTempDir();
   try {
     const registry = new FileLocalRegistryStore(registryPath);
     const service = new LocalSourceService(
-      new FakeDirectoryPicker(null),
+      new FakeDirectoryPicker(root),
       registry,
       fakeDevice(),
       new FakeArtifactOpener(),
@@ -276,7 +326,7 @@ test("getDesktopConnectionStatus reports device id and mount count", async () =>
     assert.equal(before.deviceId, "dev-1");
 
     await service.connectLocalMount({
-      canonicalRootPath: root,
+      selectionId: await selectDirectory(service),
       riskWorkspaceId: "rw1",
       includePatterns: [],
       excludePatterns: [],

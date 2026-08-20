@@ -10,18 +10,46 @@
 
 export type Platform = "web" | "desktop";
 
+export interface ConnectLocalMountParams {
+  selectionId: string;
+  riskWorkspaceId: string;
+  includePatterns: string[];
+  excludePatterns: string[];
+}
+
+export interface LocalMountConnection {
+  localMountHandle: string;
+  serverMountId: string;
+  sourceWorkspaceId: string;
+  status: "ACTIVE" | "PAUSED" | "ERROR";
+}
+
+export interface DesktopConnectionStatus {
+  deviceId: string;
+  mountCount: number;
+  enrolled: boolean;
+}
+
 export interface PlatformAdapter {
   platform: Platform;
-  chooseLocalDirectory(): Promise<{ canonicalRootPath: string } | null>;
+  chooseLocalDirectory(): Promise<{ selectionId: string; displayName: string } | null>;
+  enrollDesktopDevice(challenge: string): Promise<DesktopConnectionStatus>;
+  clearDesktopCredential(): Promise<DesktopConnectionStatus>;
+  connectLocalMount(params: ConnectLocalMountParams): Promise<LocalMountConnection>;
+  getDesktopConnectionStatus(): Promise<DesktopConnectionStatus>;
+  openLocalOriginal(deviceId: string, sourceArtifactId: string): Promise<void>;
   openTrackedArtifact(localMountHandle: string, relativePath: string): Promise<void>;
 }
 
 interface DesktopApi {
-  chooseTrackedDirectory: () => Promise<{ canonicalRootPath: string } | null>;
-  connectLocalMount: (params: unknown) => Promise<unknown>;
+  chooseTrackedDirectory: () => Promise<{ selectionId: string; displayName: string } | null>;
+  enrollDesktopDevice: (challenge: string) => Promise<DesktopConnectionStatus>;
+  clearDesktopCredential: () => Promise<DesktopConnectionStatus>;
+  connectLocalMount: (params: ConnectLocalMountParams) => Promise<LocalMountConnection>;
   openTrackedArtifact: (handle: string, relativePath: string) => Promise<void>;
   showTrackedArtifactInFolder: (handle: string, relativePath: string) => Promise<void>;
-  getDesktopConnectionStatus: () => Promise<{ deviceId: string; mountCount: number }>;
+  getDesktopConnectionStatus: () => Promise<DesktopConnectionStatus>;
+  openLocalOriginal: (deviceId: string, sourceArtifactId: string) => Promise<void>;
 }
 
 declare global {
@@ -33,9 +61,29 @@ declare global {
 export class WebPlatformAdapter implements PlatformAdapter {
   readonly platform: Platform = "web";
 
-  async chooseLocalDirectory(): Promise<{ canonicalRootPath: string } | null> {
+  async chooseLocalDirectory(): Promise<{ selectionId: string; displayName: string } | null> {
     // Master Spec §30/§65: Local Folder는 Desktop 전용이다.
     return null;
+  }
+
+  async enrollDesktopDevice(_challenge: string): Promise<DesktopConnectionStatus> {
+    throw new Error("Device enrollment is only available in the Desktop app.");
+  }
+
+  async clearDesktopCredential(): Promise<DesktopConnectionStatus> {
+    return { deviceId: "", mountCount: 0, enrolled: false };
+  }
+
+  async connectLocalMount(_params: ConnectLocalMountParams): Promise<LocalMountConnection> {
+    throw new Error("Local folders can only be connected from the Desktop app.");
+  }
+
+  async getDesktopConnectionStatus(): Promise<DesktopConnectionStatus> {
+    return { deviceId: "", mountCount: 0, enrolled: false };
+  }
+
+  async openLocalOriginal(_deviceId: string, _sourceArtifactId: string): Promise<void> {
+    throw new Error("Local artifacts can only be opened from the Desktop app.");
   }
 
   async openTrackedArtifact(_localMountHandle: string, _relativePath: string): Promise<void> {
@@ -48,8 +96,28 @@ export class ElectronPlatformAdapter implements PlatformAdapter {
 
   constructor(private readonly api: DesktopApi) {}
 
-  async chooseLocalDirectory(): Promise<{ canonicalRootPath: string } | null> {
+  async chooseLocalDirectory(): Promise<{ selectionId: string; displayName: string } | null> {
     return this.api.chooseTrackedDirectory();
+  }
+
+  async enrollDesktopDevice(challenge: string): Promise<DesktopConnectionStatus> {
+    return this.api.enrollDesktopDevice(challenge);
+  }
+
+  async clearDesktopCredential(): Promise<DesktopConnectionStatus> {
+    return this.api.clearDesktopCredential();
+  }
+
+  async connectLocalMount(params: ConnectLocalMountParams): Promise<LocalMountConnection> {
+    return this.api.connectLocalMount(params);
+  }
+
+  async getDesktopConnectionStatus(): Promise<DesktopConnectionStatus> {
+    return this.api.getDesktopConnectionStatus();
+  }
+
+  async openLocalOriginal(deviceId: string, sourceArtifactId: string): Promise<void> {
+    return this.api.openLocalOriginal(deviceId, sourceArtifactId);
   }
 
   async openTrackedArtifact(localMountHandle: string, relativePath: string): Promise<void> {

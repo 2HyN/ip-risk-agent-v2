@@ -303,7 +303,11 @@ GOOGLE_DRIVE_CLIENT_SECRET
 GOOGLE_DRIVE_REDIRECT_URI
 GOOGLE_DRIVE_WEBHOOK_BASE_URL
 DRIVE_WATCH_CHANNEL_TOKEN
+GOOGLE_PICKER_API_KEY
+GOOGLE_CLOUD_PROJECT_NUMBER
 ```
+
+Google Picker는 browser API key와 Cloud project number를 함께 요구한다. 두 값을 별도 all-or-none public runtime configuration group으로 검증한다. `GOOGLE_PICKER_API_KEY`는 브라우저에 전달되는 식별값이므로 secret으로 취급하지 않되, GCP에서 허용 origin과 Google Picker API로 반드시 제한한다. OAuth access/refresh token과 Drive client secret은 이 경로로 노출하지 않는다.
 
 ### 10.4 GitHub App
 
@@ -322,7 +326,10 @@ Production은 Secret Manager reference ID를 사용한다. local test에서 dire
 ```text
 LOCAL_STAGING_BUCKET
 IPRISK_SERVER_BASE_URL
+IPRISK_DESKTOP_RENDERER_URL
 ```
+
+`IPRISK_DESKTOP_RENDERER_URL`은 local 개발에서 허용된 Vite loopback URL을 지정한다. Production은 별도 임의 renderer origin을 사용하지 않고 `IPRISK_SERVER_BASE_URL/app`의 same-origin Product UI를 사용한다.
 
 ### 10.6 Cloud Tasks
 
@@ -431,4 +438,3 @@ dependency 버전 자체는 확정했다. 다음 항목은 이후 단계에서 �
 - [Gemini deprecation schedule](https://ai.google.dev/gemini-api/docs/deprecations)
 - [React package metadata](https://www.npmjs.com/package/react)
 - [Vitest package metadata](https://www.npmjs.com/package/vitest)
-

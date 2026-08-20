@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 
 import { ALLOWED_RENDERER_CHANNELS, FORBIDDEN_RENDERER_CHANNELS } from "./api.js";
 
-test("allowed list matches Agent2 Spec 34 exactly", () => {
+test("allowed list contains only the Phase 5 product capabilities", () => {
   assert.deepEqual(
     [...ALLOWED_RENDERER_CHANNELS].sort(),
     [
       "chooseTrackedDirectory",
       "connectLocalMount",
+      "clearDesktopCredential",
+      "enrollDesktopDevice",
       "getDesktopConnectionStatus",
+      "openLocalOriginal",
       "openTrackedArtifact",
       "showTrackedArtifactInFolder",
     ].sort()

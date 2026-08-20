@@ -35,12 +35,22 @@ export function ControlPlaneApp({
   integration = {},
   router = "browser",
 }: ControlPlaneAppProps) {
-  const Router = router === "hash" ? HashRouter : BrowserRouter;
   return (
     <SessionProvider apiBaseUrl={apiBaseUrl}>
-      <IntegrationContext.Provider value={integration}>
-        <Router>
-          <Routes>
+      <ControlPlaneRoutes integration={integration} router={router} />
+    </SessionProvider>
+  );
+}
+
+export function ControlPlaneRoutes({
+  integration = {},
+  router = "browser",
+}: Pick<ControlPlaneAppProps, "integration" | "router">) {
+  const Router = router === "hash" ? HashRouter : BrowserRouter;
+  return (
+    <IntegrationContext.Provider value={integration}>
+      <Router>
+        <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<AuthGuard />}>
               <Route element={<AppShell />}>
@@ -69,9 +79,8 @@ export function ControlPlaneApp({
               </Route>
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Router>
-      </IntegrationContext.Provider>
-    </SessionProvider>
+        </Routes>
+      </Router>
+    </IntegrationContext.Provider>
   );
 }

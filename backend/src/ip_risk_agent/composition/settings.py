@@ -43,6 +43,8 @@ class Settings:
     drive_redirect_uri: str | None = None
     drive_webhook_base_url: str | None = None
     drive_watch_channel_token: str | None = field(default=None, repr=False)
+    google_picker_api_key: str | None = field(default=None, repr=False)
+    google_cloud_project_number: str | None = None
     github_app_id: str | None = None
     github_app_slug: str | None = None
     github_private_key_secret_id: str | None = None
@@ -100,6 +102,8 @@ class Settings:
             drive_redirect_uri=value("GOOGLE_DRIVE_REDIRECT_URI"),
             drive_webhook_base_url=value("GOOGLE_DRIVE_WEBHOOK_BASE_URL"),
             drive_watch_channel_token=value("DRIVE_WATCH_CHANNEL_TOKEN"),
+            google_picker_api_key=value("GOOGLE_PICKER_API_KEY"),
+            google_cloud_project_number=value("GOOGLE_CLOUD_PROJECT_NUMBER"),
             github_app_id=value("GITHUB_APP_ID"),
             github_app_slug=value("GITHUB_APP_SLUG"),
             github_private_key_secret_id=value("GITHUB_APP_PRIVATE_KEY_SECRET_ID"),
@@ -149,6 +153,7 @@ class Settings:
             self.github_webhook_secret_id,
             self.github_app_callback_url,
         )
+        picker = (self.google_picker_api_key, self.google_cloud_project_number)
         tasks = (
             self.cloud_tasks_location,
             self.cloud_tasks_queue,
@@ -159,6 +164,7 @@ class Settings:
         _all_or_none("Google login", login)
         _all_or_none("Google Drive", drive)
         _all_or_none("GitHub App", github)
+        _all_or_none("Google Picker", picker)
         _all_or_none("Cloud Tasks", tasks)
         _all_or_none("RAG", rag)
 
@@ -181,6 +187,7 @@ class Settings:
                 "FIRESTORE_DATABASE": self.firestore_database,
                 "Google login group": login[0] if all(login) else None,
                 "Google Drive group": drive[0] if all(drive) else None,
+                "Google Picker group": picker[0] if all(picker) else None,
                 "GitHub App group": github[0] if all(github) else None,
                 "LOCAL_STAGING_BUCKET": self.local_staging_bucket,
                 "Cloud Tasks group": tasks[0] if all(tasks) else None,
@@ -205,6 +212,13 @@ class Settings:
     @property
     def github_enabled(self) -> bool:
         return self.github_app_id is not None
+
+    @property
+    def drive_picker_enabled(self) -> bool:
+        return (
+            self.google_picker_api_key is not None
+            and self.google_cloud_project_number is not None
+        )
 
     @property
     def rag_enabled(self) -> bool:

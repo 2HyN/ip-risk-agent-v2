@@ -26,7 +26,11 @@ from ip_risk_agent.api.notifications import NotificationRouterDependencies
 from ip_risk_agent.api.risks import RiskRouterDependencies
 from ip_risk_agent.api.security import SecurityRouterDependencies
 from ip_risk_agent.api.workspaces import WorkspaceRouterDependencies
-from ip_risk_agent.application.auth import AuthenticationService
+from ip_risk_agent.application.auth import (
+    AuthenticatedSession,
+    AuthenticationError,
+    AuthenticationService,
+)
 from ip_risk_agent.application.history import HistoryQueryService
 from ip_risk_agent.application.notifications import NotificationService
 from ip_risk_agent.application.observability import StructuredLogger
@@ -41,6 +45,11 @@ from ip_risk_agent.application.security_policy import WorkspaceSecurityService
 from ip_risk_agent.application.workspace_admin import WorkspaceAdministrationService
 
 from .health import HealthRegistry, ReadinessCheck
+from .device_auth import (
+    DesktopDeviceAuthService,
+    InMemoryDeviceAuthStore,
+    create_device_enrollment_router,
+)
 from .analyzer_completeness import CompleteIntelligenceFacade
 from .originals import OriginalSourceService, create_original_source_router
 from .pipeline import AnalysisPipeline
@@ -66,6 +75,7 @@ class ContainerOverrides:
     task_authenticator: TaskAuthenticator | None = None
     observer: StructuredLogger | None = None
     close_callbacks: tuple[Any, ...] = ()
+    device_auth_service: DesktopDeviceAuthService | None = None
 
 
 @dataclass(slots=True)
@@ -83,6 +93,7 @@ class RuntimeContainer:
     pipeline: AnalysisPipeline | None
     task_authenticator: TaskAuthenticator
     health: HealthRegistry
+    device_auth_service: DesktopDeviceAuthService | None = None
     close_callbacks: tuple[Any, ...] = ()
 
     async def close(self) -> None:
@@ -114,6 +125,27 @@ def build_container(
         raise SettingsError("production container cannot use in-memory adapters")
     observer = overrides.observer or StructuredLogger()
     authentication = AuthenticationService(unit_of_work_factory=store, clock=utc_now)
+
+    async def session_is_current(user_id: str, session_version: int) -> bool:
+        try:
+            await authentication.resolve_session(
+                AuthenticatedSession(user_id, session_version)
+            )
+        except AuthenticationError:
+            return False
+        return True
+
+    device_auth_service = overrides.device_auth_service
+    if settings.role is AppRole.API and device_auth_service is None:
+        if settings.profile is RuntimeProfile.PRODUCTION:
+            raise SettingsError(
+                "production API requires a durable desktop device auth service"
+            )
+        device_auth_service = DesktopDeviceAuthService(
+            store=InMemoryDeviceAuthStore(),
+            session_version_validator=session_is_current,
+            clock=utc_now,
+        )
     facade = ControlPlaneFacade(
         unit_of_work_factory=store,
         task_enqueuer=queue,
@@ -164,6 +196,16 @@ def build_container(
             service=OriginalSourceService(control_facade=facade, adapters=adapters),
             principal_resolver=current,
         )
+        assert device_auth_service is not None
+        extra_api_routers = (
+            create_device_enrollment_router(
+                devices=device_auth_service,
+                principal_resolver=current,
+            ),
+            *overrides.extra_api_routers,
+        )
+    else:
+        extra_api_routers = overrides.extra_api_routers
 
     checks = [
         ReadinessCheck(
@@ -233,11 +275,12 @@ def build_container(
         adapters=adapters,
         control_api=control_api,
         source_routers=overrides.source_routers,
-        extra_api_routers=overrides.extra_api_routers,
+        extra_api_routers=extra_api_routers,
         original_router=original_router,
         pipeline=pipeline,
         task_authenticator=task_authenticator,
         health=HealthRegistry(tuple(checks)),
+        device_auth_service=device_auth_service,
         close_callbacks=overrides.close_callbacks,
     )
 

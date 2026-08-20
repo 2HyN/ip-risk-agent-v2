@@ -10,6 +10,7 @@ from .device_auth import (
 )
 from .source_auth import SessionSourceAuthorizer, SourceResourceScope
 from .source_registration import SourceRegistrationService
+from .source_completion import ProductSourceCompletionRedirect
 from .pipeline import AnalysisPipeline, PipelineDisposition, RetryablePipelineError
 from .providers import SourceAdapterRegistry, SourceRouterBundle
 from .settings import AppRole, RuntimeProfile, Settings, SettingsError
@@ -29,6 +30,7 @@ __all__ = [
     "RuntimeProfile",
     "SessionSourceAuthorizer",
     "SourceRegistrationService",
+    "ProductSourceCompletionRedirect",
     "SourceResourceScope",
     "SourceAdapterRegistry",
     "SourceRouterBundle",

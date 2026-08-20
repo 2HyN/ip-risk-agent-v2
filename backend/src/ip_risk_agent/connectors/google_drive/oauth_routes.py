@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from typing import Protocol
+from typing import Callable, Protocol
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from iprisk_contracts.common import SourceType
@@ -54,6 +55,7 @@ def create_drive_oauth_router(
     credential_vault: SourceCredentialVault,
     connection_creation_callback: DriveConnectionCreationCallback,
     authz_dependency: AuthzDependency = deny_all_authz,
+    completion_redirect: Callable[..., str] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -72,7 +74,7 @@ def create_drive_oauth_router(
     @router.get(
         "/api/v1/source-connections/google-drive/callback", response_model=DriveConnectionCallbackResponse
     )
-    async def callback(request: Request, code: str, state: str) -> DriveConnectionCallbackResponse:
+    async def callback(request: Request, code: str, state: str) -> Response:
         context = await state_store.consume(state)
         if context is None:
             raise HTTPException(status_code=400, detail="invalid or expired oauth state")
@@ -109,8 +111,18 @@ def create_drive_oauth_router(
             credential_ref=credential_ref,
         )
 
-        return DriveConnectionCallbackResponse(
+        result = DriveConnectionCallbackResponse(
             connection_id=connection_id, provider_email=provider_email, status="connected"
         )
+        if completion_redirect is not None:
+            return RedirectResponse(
+                completion_redirect(
+                    source_type=SourceType.GOOGLE_DRIVE,
+                    risk_workspace_id=context["risk_workspace_id"],
+                    connection_id=connection_id,
+                ),
+                status_code=303,
+            )
+        return JSONResponse(result.model_dump())
 
     return router

@@ -11,7 +11,8 @@
 
 import { useState } from "react";
 
-import type { ConnectionApiClient } from "./api/connectionClient.js";
+import { Button } from "../shared/ui/index.js";
+import type { SourceApiClient } from "./api/connectionClient.js";
 
 export type SourceProviderType = "GOOGLE_DRIVE" | "GITHUB" | "LOCAL";
 
@@ -19,7 +20,8 @@ export interface AddSourceChooserProps {
   onSelect: (type: SourceProviderType) => void;
   isDesktop: boolean;
   riskWorkspaceId: string;
-  connectionApiClient: ConnectionApiClient;
+  connectionApiClient: SourceApiClient;
+  navigateExternal?: (url: string) => void;
 }
 
 export function AddSourceChooser({
@@ -27,6 +29,7 @@ export function AddSourceChooser({
   isDesktop,
   riskWorkspaceId,
   connectionApiClient,
+  navigateExternal = (url) => window.location.assign(url),
 }: AddSourceChooserProps) {
   const [error, setError] = useState<string | null>(null);
 
@@ -35,7 +38,7 @@ export function AddSourceChooser({
     setError(null);
     try {
       const { authorizeUrl } = await connectionApiClient.startDriveConnection(riskWorkspaceId);
-      window.location.href = authorizeUrl;
+      navigateExternal(authorizeUrl);
     } catch {
       setError("Google Drive 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
@@ -46,25 +49,25 @@ export function AddSourceChooser({
     setError(null);
     try {
       const { authorizeUrl } = await connectionApiClient.startGithubConnection(riskWorkspaceId);
-      window.location.href = authorizeUrl;
+      navigateExternal(authorizeUrl);
     } catch {
       setError("GitHub 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
   };
 
   return (
-    <div>
+    <div className="source-provider-grid">
       <h2>Add Source</h2>
-      <button type="button" onClick={() => void handleDriveClick()}>
+      <Button type="button" variant="secondary" onClick={() => void handleDriveClick()}>
         Google Drive
-      </button>
-      <button type="button" onClick={() => void handleGithubClick()}>
+      </Button>
+      <Button type="button" variant="secondary" onClick={() => void handleGithubClick()}>
         GitHub Repository
-      </button>
-      <button type="button" onClick={() => onSelect("LOCAL")} disabled={!isDesktop}>
+      </Button>
+      <Button type="button" variant="secondary" onClick={() => onSelect("LOCAL")} disabled={!isDesktop}>
         Local Folder{isDesktop ? "" : " (Desktop only)"}
-      </button>
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      </Button>
+      {error && <p className="source-error" role="alert">{error}</p>}
     </div>
   );
 }

@@ -28,6 +28,14 @@ def test_settings_reject_partial_groups_and_short_api_session_secret() -> None:
                 "CLOUD_TASKS_QUEUE": "analysis",
             }
         )
+    with pytest.raises(SettingsError, match="Google Picker.*all set"):
+        Settings.from_env(
+            {
+                "APP_ENV": "test",
+                "APP_ROLE": "worker",
+                "GOOGLE_PICKER_API_KEY": "browser-key-without-project-number",
+            }
+        )
 
 
 def test_local_worker_allows_absent_external_groups_but_production_never_falls_back() -> None:
@@ -57,6 +65,8 @@ def test_local_worker_allows_absent_external_groups_but_production_never_falls_b
         drive_redirect_uri="https://api.example.com/drive/callback",
         drive_webhook_base_url="https://api.example.com/webhooks/google-drive",
         drive_watch_channel_token="channel-token",
+        google_picker_api_key="restricted-browser-key",
+        google_cloud_project_number="123456789012",
         github_app_id="app-1",
         github_app_slug="ip-risk-agent",
         github_private_key_secret_id="github-key",

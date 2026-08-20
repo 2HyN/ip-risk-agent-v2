@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Callable, Protocol
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
+from iprisk_contracts import SourceType
 from pydantic import BaseModel
 
 from ..common.authz import AuthzDependency, deny_all_authz
@@ -41,6 +43,7 @@ def create_github_install_router(
     state_store: OAuthStateStore,
     connection_creation_callback: GitHubConnectionCreationCallback,
     authz_dependency: AuthzDependency = deny_all_authz,
+    completion_redirect: Callable[..., str] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -60,7 +63,7 @@ def create_github_install_router(
     @router.get(
         "/api/v1/source-connections/github/install/callback", response_model=GitHubInstallCallbackResponse
     )
-    async def callback(request: Request, installation_id: str, state: str) -> GitHubInstallCallbackResponse:
+    async def callback(request: Request, installation_id: str, state: str) -> Response:
         context = await state_store.consume(state)
         if context is None:
             raise HTTPException(status_code=400, detail="invalid or expired oauth state")
@@ -71,8 +74,18 @@ def create_github_install_router(
             installation_id=installation_id,
         )
 
-        return GitHubInstallCallbackResponse(
+        result = GitHubInstallCallbackResponse(
             connection_id=connection_id, installation_id=installation_id, status="connected"
         )
+        if completion_redirect is not None:
+            return RedirectResponse(
+                completion_redirect(
+                    source_type=SourceType.GITHUB,
+                    risk_workspace_id=context["risk_workspace_id"],
+                    connection_id=connection_id,
+                ),
+                status_code=303,
+            )
+        return JSONResponse(result.model_dump())
 
     return router

@@ -70,6 +70,11 @@ export class ControlApi {
     this.client.request<Page<Mount>>(
       `/api/v1/workspaces/${id}/mounts${queryString({ cursor })}`,
     );
+  disableMount = (id: string, mountId: string) =>
+    this.client.request<Mount>(
+      `/api/v1/workspaces/${id}/mounts/${mountId}/disable`,
+      { method: "POST" },
+    );
   risks = (
     id: string,
     filters: Record<string, string>,

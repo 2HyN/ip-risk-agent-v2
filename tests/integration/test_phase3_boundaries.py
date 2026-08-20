@@ -336,7 +336,12 @@ def test_device_enrollment_is_one_time_hashed_bound_and_revocable() -> None:
             )
         assert error.value.status_code == 403
 
-        await service.revoke("device-1")
+        with pytest.raises(HTTPException) as error:
+            await service.revoke_owned(
+                device_id="device-1", owner_user_id="different-owner"
+            )
+        assert error.value.status_code == 404
+        await service.revoke_owned(device_id="device-1", owner_user_id="owner-1")
         assert store.devices["device-1"].status is DeviceStatus.REVOKED
         with pytest.raises(HTTPException) as error:
             await service.authenticate(

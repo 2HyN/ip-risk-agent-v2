@@ -15,20 +15,49 @@ export interface HttpClient {
   postJson(path: string, body: unknown): Promise<unknown>;
 }
 
+export interface DeviceCredentialProvider {
+  getCredential(): Promise<string | null>;
+}
+
 export class FetchHttpClient implements HttpClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly credentials: DeviceCredentialProvider,
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly delay: (milliseconds: number) => Promise<void> = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  ) {}
 
   async postJson(path: string, body: unknown): Promise<unknown> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`request to ${path} failed with status ${response.status}: ${text}`);
+    const credential = await this.credentials.getCredential();
+    if (credential === null) throw new Error("desktop enrollment is required");
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let response: Response;
+      try {
+        response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Authorization: `Bearer ${credential}`,
+          },
+          body: JSON.stringify(body),
+        });
+      } catch (reason) {
+        if (attempt === 2) throw reason;
+        await this.delay(100 * 2 ** attempt);
+        continue;
+      }
+      if (response.ok) return response.json();
+      if (response.status !== 429 && response.status < 500) {
+        throw new Error(`request to ${path} failed with status ${response.status}`);
+      }
+      if (attempt === 2) {
+        throw new Error(`request to ${path} failed after retries with status ${response.status}`);
+      }
+      await this.delay(100 * 2 ** attempt);
     }
-    return response.json();
+    throw new Error(`request to ${path} failed`);
   }
 }
 

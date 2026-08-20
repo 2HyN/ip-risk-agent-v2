@@ -2,7 +2,7 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain, P0 경계와 Phase 4 API/Worker composition이 합쳐져 있다. Runtime profile별 설정 검증, Control/Source API 조립, ID-only analysis worker pipeline, provider registry, Open Original과 health/lifespan 경계는 integration test로 고정됐다. 다만 Web/Electron 제품 wiring과 production용 Firestore·Cloud Tasks·Secret Manager·GCS adapter는 후속 Phase 소유이므로 아직 완성된 배포 애플리케이션은 아니다.
+현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain, P0 경계, API/Worker composition과 Phase 5 Web/Electron 제품 흐름이 합쳐져 있다. Product UI는 현재 workspace에서 Google Drive·GitHub·Local source 연결과 상태 관리, Open Original을 수행하고, Electron은 one-time enrollment, OS 암호화 credential, bearer background event와 watcher 복구를 제공한다. Production용 Firestore·Cloud Tasks·Secret Manager·GCS adapter와 정적 frontend 배포 조립은 Phase 6 소유이므로 아직 완성된 배포 애플리케이션은 아니다.
 
 ## 통합 상태
 
@@ -14,7 +14,7 @@ IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 �
 | Source frontend test의 Vitest 통합 | 완료 |
 | P0 경계 보강 | 완료 |
 | API/Worker composition과 local integration E2E | 완료 |
-| Web/Electron 제품 wiring | 예정 |
+| Web/Electron 제품 wiring | 완료 |
 | GCP 내부 구성과 외부 배포 | 예정 |
 
 세부 상태와 검증 증거는 `INTEGRATION_V2_PROGRESS_LOG.md`에 기록한다. 이 로그는 통합 작업용 비규범 문서이며, 설계와 의존성 결정은 `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 `INTEGRATION_V2_EXECUTION_PLAN.md`가 우선한다.
@@ -28,11 +28,11 @@ backend/src/ip_risk_agent/
   application/                    canonical application service
   core/                           domain model과 policy
   persistence/                    in-memory/Firestore persistence
-  composition/                    설정/container, API/Worker와 Plane 사이 경계
+  composition/                    설정/container, API/Worker, browser runtime과 Plane 사이 경계
   connectors/                     Drive, GitHub, Local source adapters
   intelligence/                   Patent, License, Gemini, RAG
-frontend/                         React/Vite Product UI와 Source UI 모듈
-apps/desktop/                     Electron main/preload, Local watcher와 registry
+frontend/                         React/Vite Product UI, SourcePanel과 provider completion flow
+apps/desktop/                     보안 Electron shell, enrollment, Local watcher와 registry
 rag-corpus/                       reference-only RAG corpus와 provenance
 tests/                            contracts/control/connectors/intelligence/integration/e2e
 scripts/                          contract generation과 resolution 검증
@@ -119,15 +119,15 @@ Copy-Item .env.example .env
 | Runtime | `APP_ENV`, `APP_ROLE`, `LOG_LEVEL` |
 | Shared/GCP | `GCP_PROJECT_ID`, `FIRESTORE_DATABASE`, `APP_PUBLIC_BASE_URL`, `SESSION_SECRET`, `FIRESTORE_EMULATOR_HOST` |
 | Google login | `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`, `GOOGLE_LOGIN_REDIRECT_URI` |
-| Google Drive | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI`, `GOOGLE_DRIVE_WEBHOOK_BASE_URL`, `DRIVE_WATCH_CHANNEL_TOKEN` |
+| Google Drive | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI`, `GOOGLE_DRIVE_WEBHOOK_BASE_URL`, `DRIVE_WATCH_CHANNEL_TOKEN`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER` |
 | GitHub App | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CALLBACK_URL`, `GITHUB_APP_PRIVATE_KEY_SECRET_ID`, `GITHUB_WEBHOOK_SECRET_ID` |
-| Local Desktop | `LOCAL_STAGING_BUCKET`, `IPRISK_SERVER_BASE_URL` |
+| Local Desktop | `LOCAL_STAGING_BUCKET`, `IPRISK_SERVER_BASE_URL`, `IPRISK_DESKTOP_RENDERER_URL` |
 | Cloud Tasks | `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT` |
 | Intelligence | `GEMINI_MODEL_ID`, `GEMINI_API_KEY`, `VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG`, `KIPRIS_API_KEY_SECRET_ID`, `KIPRIS_ACCESS_KEY`, `RAG_REGION`, `RAG_CORPUS_ID`, `RAG_CORPUS_VERSION`, `PACKAGE_METADATA_BASE_URL` |
 
-`GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. `FIRESTORE_EMULATOR_HOST`는 test 전용이며 production에서 설정하지 않는다. Cloud Tasks 네 변수는 하나의 configuration group으로 취급하고 일부만 설정된 상태에서 in-memory fallback하지 않는다.
+`GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. `FIRESTORE_EMULATOR_HOST`는 test 전용이며 production에서 설정하지 않는다. Cloud Tasks 네 변수는 하나의 configuration group으로 취급하고 일부만 설정된 상태에서 in-memory fallback하지 않는다. Google Picker는 browser API key와 Cloud project number를 함께 설정해야 하며, production 시작 시 두 값이 모두 필요하다.
 
-Production secret은 Secret Manager reference로 해석해야 한다. `.env.example`에 비밀 값이나 예시 private key를 추가하지 않는다.
+Production secret은 Secret Manager reference로 해석해야 한다. `.env.example`에 비밀 값이나 예시 private key를 추가하지 않는다. Google Picker browser key는 secret이 아니지만 허용 origin과 Picker API로 제한해야 하며, project number와 함께 설정하거나 둘 다 비워야 한다.
 
 ## Contract 생성과 검증
 
@@ -184,16 +184,20 @@ Frontend 개발 서버는 다음과 같이 실행할 수 있다.
 pnpm --filter @iprisk/frontend dev
 ```
 
-Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. Phase 4는 backend composition까지의 범위이며 SourcePanel, OAuth 완료 화면, Electron enrollment/local flow의 제품 연결은 Phase 5에서 수행한다.
+Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. 로그인 후 Source 화면은 현재 workspace ID를 사용해 OAuth/install을 시작하고, callback 뒤 Drive Picker 또는 GitHub repository/branch 선택을 mount 생성까지 이어간다. Google Picker가 필요하면 `GOOGLE_PICKER_API_KEY`와 `GOOGLE_CLOUD_PROJECT_NUMBER`를 API 환경에 함께 설정한다. 실제 provider route/store와 production static hosting binding은 Phase 6 composition에서 주입한다.
 
-Desktop package 검증:
+Desktop 개발 실행과 검증:
 
 ```powershell
+$env:APP_ENV = "local"
+$env:IPRISK_SERVER_BASE_URL = "http://127.0.0.1:8000"
+$env:IPRISK_DESKTOP_RENDERER_URL = "http://127.0.0.1:5173"
 pnpm --filter @iprisk/desktop build
+pnpm --filter @iprisk/desktop start
 pnpm --filter @iprisk/desktop test
 ```
 
-Electron Product renderer, device enrollment credential과 production server wiring은 후속 Web/Electron 통합 범위다.
+개발 renderer는 loopback HTTP만 허용한다. Production Electron은 `IPRISK_SERVER_BASE_URL/app`의 same-origin HTTPS Product UI만 로드하며, `contextIsolation: true`, `nodeIntegration: false`, sandboxed CommonJS preload와 navigation allowlist를 사용한다. Local 절대 경로와 OS 암호화 device credential은 main process 밖으로 노출하지 않는다. Desktop event는 bearer 인증, transient retry와 실행 중 ordered offline queue를 사용하고 앱 재시작 시 ACTIVE watcher를 복구한다.
 
 ## 보안 불변조건
 

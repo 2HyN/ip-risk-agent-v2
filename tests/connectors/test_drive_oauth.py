@@ -14,6 +14,7 @@ from ip_risk_agent.connectors.common.credential_vault import CredentialRef, InMe
 from ip_risk_agent.connectors.common.authz import allow_all_authz
 from ip_risk_agent.connectors.common.oauth_state import InMemoryOAuthStateStore
 from ip_risk_agent.connectors.google_drive.oauth_routes import create_drive_oauth_router
+from ip_risk_agent.composition.source_completion import ProductSourceCompletionRedirect
 
 
 def _fake_id_token(sub: str, email: str) -> str:
@@ -57,7 +58,7 @@ class FakeConnectionCreationCallback:
         return "conn-1"
 
 
-def _build_client(oauth_client=None):
+def _build_client(oauth_client=None, completion_redirect=None):
     state_store = InMemoryOAuthStateStore()
     vault = InMemoryCredentialVault()
     callback = FakeConnectionCreationCallback()
@@ -69,6 +70,7 @@ def _build_client(oauth_client=None):
         credential_vault=vault,
         connection_creation_callback=callback,
         authz_dependency=allow_all_authz,
+        completion_redirect=completion_redirect,
     )
     app = FastAPI()
     app.include_router(router)
@@ -107,6 +109,31 @@ def test_callback_with_valid_state_exchanges_code_and_creates_connection():
     assert len(callback.calls) == 1
     assert callback.calls[0]["risk_workspace_id"] == "rw1"
     assert callback.calls[0]["provider_subject"] == "google-subject-1"
+
+
+def test_callback_can_redirect_to_product_mount_completion_without_secrets():
+    client, _, _, _ = _build_client(
+        completion_redirect=ProductSourceCompletionRedirect("https://app.example.com")
+    )
+    state = client.post(
+        "/api/v1/source-connections/google-drive/start",
+        json={"risk_workspace_id": "rw1"},
+    ).json()["state"]
+
+    response = client.get(
+        "/api/v1/source-connections/google-drive/callback",
+        params={"code": "auth-code-1", "state": state},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location == (
+        "https://app.example.com/w/rw1/sources?"
+        "provider=GOOGLE_DRIVE&connection_id=conn-1&status=connected"
+    )
+    assert "research%40company.com" not in location
+    assert "auth-code" not in location
 
 
 def test_callback_with_invalid_state_returns_400():

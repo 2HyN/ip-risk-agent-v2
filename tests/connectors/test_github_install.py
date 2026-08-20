@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from ip_risk_agent.connectors.common.oauth_state import InMemoryOAuthStateStore
 from ip_risk_agent.connectors.common.authz import allow_all_authz
 from ip_risk_agent.connectors.github.install_routes import create_github_install_router
+from ip_risk_agent.composition.source_completion import ProductSourceCompletionRedirect
 
 
 class FakeConnectionCreationCallback:
@@ -21,7 +22,7 @@ class FakeConnectionCreationCallback:
         return "conn-1"
 
 
-def _build_client():
+def _build_client(completion_redirect=None):
     state_store = InMemoryOAuthStateStore()
     callback = FakeConnectionCreationCallback()
     router = create_github_install_router(
@@ -29,6 +30,7 @@ def _build_client():
         state_store=state_store,
         connection_creation_callback=callback,
         authz_dependency=allow_all_authz,
+        completion_redirect=completion_redirect,
     )
     app = FastAPI()
     app.include_router(router)
@@ -67,6 +69,29 @@ def test_callback_with_valid_state_creates_connection():
     assert body["connection_id"] == "conn-1"
     assert body["installation_id"] == "12345"
     assert callback.calls == [{"risk_workspace_id": "rw1", "installation_id": "12345"}]
+
+
+def test_callback_redirect_contains_only_product_completion_identifiers():
+    client, _, _ = _build_client(
+        completion_redirect=ProductSourceCompletionRedirect("https://app.example.com")
+    )
+    state = client.post(
+        "/api/v1/source-connections/github/install/start",
+        json={"risk_workspace_id": "rw1"},
+    ).json()["state"]
+
+    response = client.get(
+        "/api/v1/source-connections/github/install/callback",
+        params={"installation_id": "12345", "state": state},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == (
+        "https://app.example.com/w/rw1/sources?"
+        "provider=GITHUB&connection_id=conn-1&status=connected"
+    )
+    assert "12345" not in response.headers["location"]
 
 
 def test_callback_with_invalid_state_returns_400():
