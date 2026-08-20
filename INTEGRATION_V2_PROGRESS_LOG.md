@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 1 — 계획 확정 및 agent 문서 통합**
+> 현재 단계: **통합 Phase 1 완료 — Phase 2 진입 대기**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -93,7 +93,7 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 
 | Phase | 목표 | 핵심 산출물 | 종료 gate | 상태 |
 |---|---|---|---|---|
-| 1 | 계획 확정과 agent 문서 통합 | 전체 phase 계획, Agent 1/2/3 단일 문서, 삭제 보류 목록 | source 문서 coverage와 보존 확인 | 진행 중 |
+| 1 | 계획 확정과 agent 문서 통합 | 전체 phase 계획, Agent 1/2/3 단일 문서, 삭제 보류 목록 | source 문서 coverage와 보존 확인 | 완료 (`31e3fc4`) |
 | 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 대기 |
 | 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 대기 |
 | 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 대기 |
@@ -185,7 +185,7 @@ agent-deliverables/agent-3-dependencies.md
 - [x] Agent 3 단일 문서 작성
 - [x] source 문서별 정보 coverage 확인
 - [x] 기존 agent 문서가 삭제되지 않았는지 확인
-- [ ] Phase 1 변경 commit 및 종료 gate 판정
+- [x] Phase 1 변경 commit 및 종료 gate 판정
 
 ### Phase 1 검증 기록
 
@@ -194,3 +194,5 @@ agent-deliverables/agent-3-dependencies.md
 - 삭제 예정 원본 8개와 보호 대상 명세·청사진·통합 기준 문서가 모두 남아 있음을 확인했다.
 - 변경 범위는 이 진행 로그와 신규 agent 통합 문서 3개뿐이며 runtime code와 dependency file은 변경하지 않았다.
 - 이 phase는 문서 정리만 수행하므로 runtime test는 실행하지 않는다. Phase 2부터 각 phase gate에 맞는 검증을 기록한다.
+- Phase 1 산출물 commit: `31e3fc4e2490b963208a230a4e40b718ec86ec2c` (`docs: consolidate agent integration references`)
+- 종료 gate: **통과**. Phase 2 dependency/toolchain 수렴 작업을 시작할 수 있다.
