@@ -11,6 +11,5 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["main/**/*.ts", "preload/**/*.ts", "watcher/**/*.ts", "local-registry/**/*.ts", "security/**/*.ts"]
+  "include": ["main/**/*.ts", "preload/**/*.ts", "preload/**/*.mts", "watcher/**/*.ts", "local-registry/**/*.ts", "security/**/*.ts", "core/**/*.ts"]
 }
-
