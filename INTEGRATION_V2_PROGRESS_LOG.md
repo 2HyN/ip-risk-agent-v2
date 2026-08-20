@@ -29,10 +29,14 @@
 
 ### 1. `platform-control`
 
-- 상태: 대기
-- merge commit: 미정
-- conflict: 미정
-- 해결/검증: 미정
+- 상태: 완료
+- merge commit: `f253312ea52519922edef9e8c8da3bdca0fcc5db`
+- conflict: 없음
+- 해결/검증:
+  - `ort` strategy로 `--no-ff` merge 완료
+  - Control canonical domain, application, persistence, API, Product UI와 test가 추가됨
+  - merge 직후 worktree에 미해결 파일 없음
+  - dependency/toolchain 정리 및 전체 test는 이번 단계 범위 밖이므로 실행하지 않음
 
 ### 2. `source-integration-desktop`
 
@@ -57,4 +61,3 @@
 - [ ] `shared/contracts/**`에 의도하지 않은 변경 없음
 - [ ] 다른 네 worktree clean 유지
 - [ ] 전체 통합 개발 및 dependency 재생성은 시작하지 않음
-
