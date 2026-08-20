@@ -24,6 +24,7 @@ from iprisk_contracts.common import (
     SourceType,
     TextSegment,
 )
+from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
@@ -191,3 +192,8 @@ class GitHubAdapter:
             provider_url=provider_url,
             metadata_safe={},
         )
+
+    async def reconcile(self, mount: MountRef, cursor: str | None) -> ReconcileResult:
+        # Agent 2 Spec 43번: GitHub는 webhook이 주 경로다. reconcile은
+        # 최소한 안전한 no-op/capability 표현만 만족하면 된다.
+        return ReconcileResult(changes=[], next_cursor=cursor, has_more=False)

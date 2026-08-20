@@ -167,3 +167,14 @@ def test_health_offline_when_installation_not_registered():
         assert health.status.value == "OFFLINE"
 
     asyncio.run(scenario())
+
+
+def test_reconcile_is_safe_no_op():
+    async def scenario():
+        adapter = await _build_adapter(FakeGitHubProvider())
+        result = await adapter.reconcile(_mount(), cursor="whatever")
+        assert result.changes == []
+        assert result.has_more is False
+        assert result.next_cursor == "whatever"
+
+    asyncio.run(scenario())
