@@ -44,7 +44,7 @@ test("CREATE event uploads content then reports the event with the staging objec
 
     assert.equal(http.calls.length, 2);
     assert.equal(http.calls[0]?.path, "/desktop/staging");
-    assert.deepEqual(http.calls[0]?.body, { content: "print(1)" });
+    assert.deepEqual(http.calls[0]?.body, { mount_id: "mount-1", content: "print(1)" });
     assert.equal(http.calls[1]?.path, "/desktop/events");
     const eventBody = http.calls[1]?.body as Record<string, unknown>;
     assert.equal(eventBody["change_type"], "CREATE");

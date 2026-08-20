@@ -65,6 +65,7 @@ export class DesktopEventReporter {
     }
 
     const stagingResponse = (await this.http.postJson("/desktop/staging", {
+      mount_id: this.config.mountId,
       content,
     })) as StagingUploadResponse;
 

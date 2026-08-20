@@ -1,14 +1,9 @@
-"""Local Desktop 이벤트 수신 라우터. Agent 2 Spec 37/38번(/desktop/**)를
-구현한다. device/mount 등록 라우트는 Control의 canonical Mount 생성
-콜백이 필요해서 이번 범위에서는 제외한다.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, Protocol
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from iprisk_contracts.common import ChangeType, SourceArtifactRef, SourceType
@@ -20,7 +15,24 @@ from .identity import encode_local_artifact_id
 from .staging_store import LocalStagingStore
 
 
+class AuthzDependency(Protocol):
+    """Agent 2 Spec §3/§37: VWS membership/role 판단은 Agent 1이 제공하는
+    authz_dependency를 주입받아 쓴다 — Agent 2가 직접 Membership DB를
+    읽지 않는다. 이 Protocol은 우리가 필요로 하는 최소 형태만 정의한다:
+    mount_id에 대해 이 요청이 허용되면 조용히 반환, 아니면 스스로
+    HTTPException(401/403)을 던진다."""
+
+    async def __call__(self, request: Request, mount_id: str) -> None: ...
+
+
+async def allow_all_authz(request: Request, mount_id: str) -> None:
+    """개발/테스트 전용 기본값 — 아무 것도 검사하지 않는다.
+    프로덕션 배포 전 반드시 Agent 1의 실제 authz_dependency로 교체해야 한다."""
+    return None
+
+
 class StagingUploadRequest(BaseModel):
+    mount_id: str
     content: str
 
 
@@ -49,16 +61,21 @@ def create_local_desktop_router(
     *,
     staging_store: LocalStagingStore,
     change_sink: SourceChangeSink,
+    authz_dependency: AuthzDependency = allow_all_authz,
 ) -> APIRouter:
     router = APIRouter()
 
     @router.post("/desktop/staging", response_model=StagingUploadResponse)
-    async def handle_staging_upload(request: StagingUploadRequest) -> StagingUploadResponse:
-        ref = await staging_store.put(request.content, {})
+    async def handle_staging_upload(request: Request, body: StagingUploadRequest) -> StagingUploadResponse:
+        await authz_dependency(request, body.mount_id)
+
+        ref = await staging_store.put(body.content, {})
         return StagingUploadResponse(object_name=ref.object_name)
 
     @router.post("/desktop/events", response_model=DesktopEventResponse)
-    async def handle_desktop_event(event: DesktopEventRequest) -> DesktopEventResponse:
+    async def handle_desktop_event(request: Request, event: DesktopEventRequest) -> DesktopEventResponse:
+        await authz_dependency(request, event.mount_id)
+
         if event.change_type != "DELETE" and not event.staging_object_name:
             raise HTTPException(
                 status_code=400, detail="staging_object_name is required for non-DELETE events"

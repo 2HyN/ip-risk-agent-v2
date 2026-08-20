@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from ip_risk_agent.connectors.common.change_sink import InMemorySourceChangeSink
@@ -14,10 +14,13 @@ from ip_risk_agent.connectors.local.routes import create_local_desktop_router
 from ip_risk_agent.connectors.local.staging_store import InMemoryLocalStagingStore
 
 
-def _build_client():
+def _build_client(authz_dependency=None):
     staging_store = InMemoryLocalStagingStore()
     sink = InMemorySourceChangeSink()
-    router = create_local_desktop_router(staging_store=staging_store, change_sink=sink)
+    kwargs = {"staging_store": staging_store, "change_sink": sink}
+    if authz_dependency is not None:
+        kwargs["authz_dependency"] = authz_dependency
+    router = create_local_desktop_router(**kwargs)
     app = FastAPI()
     app.include_router(router)
     client = TestClient(app)
@@ -29,7 +32,7 @@ def test_staging_upload_returns_object_name_and_stores_content():
 
     client, staging_store, _ = _build_client()
 
-    response = client.post("/desktop/staging", json={"content": "print(1)"})
+    response = client.post("/desktop/staging", json={"mount_id": "mount-1", "content": "print(1)"})
 
     assert response.status_code == 200
     object_name = response.json()["object_name"]
@@ -43,12 +46,10 @@ def test_staging_upload_returns_object_name_and_stores_content():
 
 
 def test_event_with_staging_creates_change():
-    import asyncio as _asyncio
-
     async def scenario():
         client, staging_store, sink = _build_client()
 
-        upload_resp = client.post("/desktop/staging", json={"content": "print(1)"})
+        upload_resp = client.post("/desktop/staging", json={"mount_id": "mount-1", "content": "print(1)"})
         object_name = upload_resp.json()["object_name"]
 
         event_resp = client.post(
@@ -71,7 +72,7 @@ def test_event_with_staging_creates_change():
         assert change.artifact.display_name == "main.py"
         assert change.safe_metadata["staging_object_name"] == object_name
 
-    _asyncio.run(scenario())
+    asyncio.run(scenario())
 
 
 def test_delete_event_does_not_require_staging_object():
@@ -132,7 +133,7 @@ def test_event_fingerprint_is_deterministic_for_same_input():
 def test_move_event_creates_previous_artifact():
     client, _, sink = _build_client()
 
-    upload_resp = client.post("/desktop/staging", json={"content": "print(\'moved\')"})
+    upload_resp = client.post("/desktop/staging", json={"mount_id": "mount-1", "content": "print('moved')"})
     object_name = upload_resp.json()["object_name"]
 
     response = client.post(
@@ -160,7 +161,7 @@ def test_move_event_creates_previous_artifact():
 def test_move_event_without_previous_path_returns_400():
     client, _, sink = _build_client()
 
-    upload_resp = client.post("/desktop/staging", json={"content": "print(1)"})
+    upload_resp = client.post("/desktop/staging", json={"mount_id": "mount-1", "content": "print(1)"})
     object_name = upload_resp.json()["object_name"]
 
     response = client.post(
@@ -178,3 +179,73 @@ def test_move_event_without_previous_path_returns_400():
 
     assert response.status_code == 400
     assert sink.received == []
+
+
+def test_default_authz_allows_all_requests():
+    client, _, sink = _build_client()
+
+    response = client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-1",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/gone.py",
+            "change_type": "DELETE",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(sink.received) == 1
+
+
+def test_custom_authz_dependency_can_reject_requests():
+    calls: list[tuple[str, str]] = []
+
+    async def deny_mount_2(request: Request, mount_id: str) -> None:
+        calls.append((request.url.path, mount_id))
+        if mount_id == "mount-2":
+            raise HTTPException(status_code=403, detail="not authorized for this mount")
+
+    client, _, sink = _build_client(authz_dependency=deny_mount_2)
+
+    allowed = client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-1",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/gone.py",
+            "change_type": "DELETE",
+        },
+    )
+    denied = client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-2",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/gone.py",
+            "change_type": "DELETE",
+        },
+    )
+
+    assert allowed.status_code == 200
+    assert denied.status_code == 403
+    assert len(sink.received) == 1
+    assert ("/desktop/events", "mount-1") in calls
+    assert ("/desktop/events", "mount-2") in calls
+
+
+def test_custom_authz_dependency_applies_to_staging_too():
+    async def deny_all(request: Request, mount_id: str) -> None:
+        raise HTTPException(status_code=403, detail="denied")
+
+    client, _, _ = _build_client(authz_dependency=deny_all)
+
+    response = client.post("/desktop/staging", json={"mount_id": "mount-1", "content": "print(1)"})
+
+    assert response.status_code == 403
