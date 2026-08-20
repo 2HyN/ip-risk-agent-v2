@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 5 완료 — Phase 6 진입 대기**
+> 현재 단계: **통합 Phase 7 완료 — Phase 8 진입 가능**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -97,9 +97,9 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 | 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 완료 (`83c901f`) |
 | 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 완료 (`dfa1193`) |
 | 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 완료 (`bbbcd2b`) |
-| 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 완료 (본 commit) |
-| 6 | GCP 내부 구현 | Firestore operational stores, Secret Manager/GCS/Tasks adapters, indexes, Docker/Cloud Run/Scheduler/RAG tooling | emulator 및 staging-ready dry run | 대기 |
-| 7 | 전체 검증과 release freeze | 전체 회귀, 보안/실패/복구 test, live-test runbook, blocker 0건 | 통합 완료 승인 | 대기 |
+| 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 완료 (`e89c6e0`) |
+| 6 | GCP 내부 구현 | Firestore operational stores, Secret Manager/GCS/Tasks adapters, indexes, Docker/Cloud Run/Scheduler/RAG tooling | emulator 및 staging-ready dry run | 완료 (`41cdc42`) |
+| 7 | 전체 검증과 release freeze | 전체 회귀, 보안/실패/복구 test, live-test runbook, blocker 0건 | 통합 완료 승인 | 완료 (본 commit) |
 | 8 | 문서 정리와 배포 후보 고정 | 구 agent 문서 삭제, README/운영 문서 최종화, release candidate commit | 삭제 후 전체 검증 재통과 | 대기 |
 | 9 | GCP 외부 구성·배포·실환경 검증 | console/IAM/resource 구성, 배포, live provider/E2E 증거 | production readiness 승인 | 대기 |
 
@@ -593,3 +593,70 @@ build는 해당 runtime이 있는 외부/CI 환경에서 같은 commit을 대상
 종료 gate: **repository-internal 범위 통과**. Firestore emulator와 Docker runtime이 없는
 현재 host의 두 실환경 검증은 명시적으로 보류되었으며, GCP 외부 resource/IAM/live
 provider 작업 전에 CI 또는 배포 host에서 재확인한다. 다른 worktree는 수정하지 않았다.
+
+## Phase 7 — 전체 검증과 release freeze
+
+### 시작 상태와 범위
+
+- 시작 HEAD: `41cdc42e84de5bd27d1185a824a563ea6f071473`
+- 목표: merge/dependency/local integration/GCP 내부 gate를 한 번에 재검증하고,
+  Phase 9 live 작업을 재현 가능한 runbook으로 고정하며 release blocker를 0건으로 만든다.
+- 변경 범위: 검증 증거와 staging/live verification runbook. runtime/dependency/contract는
+  freeze하며 기능 변경을 추가하지 않는다.
+
+### 검증과 감사 결과
+
+1. **보안·실패·복구 집중 검증**
+   - SourceChange idempotency/concurrency, Security Gate, session/CSRF/connection scope,
+     pending connection TTL/idempotency, one-time device enrollment/revoke, worker
+     retry/reclaim/analyzer mismatch, Open Original host/device boundary, GCP identity와
+     Scheduler batch를 묶어 `55 passed`를 확인했다.
+   - 첫 focused command는 존재하지 않는 `tests/control/test_analysis_jobs.py`를
+     포함해 collection 전에 실패했다. 실제 소유 파일이
+     `test_analysis_result_reconciliation.py` 및 integration pipeline test임을 확인하고
+     잘못된 경로를 제거한 동일 범위 재실행에서 `55 passed`로 교정했다.
+
+2. **전체 release regression**
+   - Python compile/pip check와 전체 non-live suite `597 passed, 1 skipped,
+     10 deselected`를 재확인했다.
+   - TypeScript typecheck/build/resolution, Frontend `30 passed`, Desktop
+     `70 passed, 2 skipped`, frozen pnpm install을 재확인했다.
+   - contract 재생성 후 `shared/contracts/**` diff, Python/Node manifest/lock diff가 없다.
+
+3. **repository/deploy integrity**
+   - 세 feature merge commit이 현재 HEAD의 ancestor이며 conflict marker가 없다.
+   - deploy static validator와 RAG dry-run이 각각 통과했다.
+   - credential-shaped literal scan의 유일한 private-key marker는 redaction unit test의
+     의도된 synthetic fixture이며 실제 credential이 아님을 확인했다.
+   - main과 세 feature worktree는 per-command safe-directory 설정으로 재확인했으며 clean이다.
+
+4. **staging/live runbook 고정**
+   - `docs/STAGING_VERIFICATION_RUNBOOK.md`에 진입 조건, resource 생성 순서,
+     explicit live opt-in, provider별 positive/negative case, managed resource 확인,
+     evidence 금지값, alert/rollback drill과 Go/No-Go 기록 형식을 확정했다.
+   - 실제 project/resource/credential을 요구하는 항목은 Phase 9 전에는 실행하지 않는다.
+
+### 알려진 환경 제약
+
+- `FIRESTORE_EMULATOR_HOST`가 없어 emulator test 1건은 skip이다.
+- 실제 provider credential이 필요한 10건은 `-m "not live"`에서 의도적으로 제외했다.
+- Windows Developer Mode/admin이 없어 Desktop symlink escape 2건은 skip이다.
+- Docker CLI가 없어 image build는 Phase 6과 동일하게 미실행이며 Cloud Build 입력의
+  static validation만 완료했다.
+
+위 네 항목은 숨겨진 release blocker가 아니라 runbook에 명시된 Phase 9/배포-host
+검증 입력이다. repository 내부에서 해결 가능한 실패 또는 미분류 blocker는 0건이다.
+
+### Phase 7 gate
+
+- [x] merge ancestry/conflict marker/다른 worktree 상태 확인
+- [x] security/failure/retry/recovery focused suite 통과
+- [x] 전체 Python/Web/Desktop non-live regression 통과
+- [x] Frozen Contract와 dependency manifest/lock 무변경
+- [x] GCP deploy/RAG dry-run 재통과
+- [x] staging/live/negative/rollback runbook 확정
+- [x] repository-internal blocker 0건과 외부 제약 명시
+
+종료 gate: **통과**. runtime과 dependency를 release freeze했으며, Phase 8에서 계획된
+agent 원본 8개만 삭제하고 참조를 통합 문서/README/운영 문서로 수렴한 뒤 같은 전체
+regression을 다시 실행한다.
