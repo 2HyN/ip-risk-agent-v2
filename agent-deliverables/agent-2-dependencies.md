@@ -47,3 +47,12 @@ pytest tests/connectors/ -v
 
 dsdr-re/AI_develop_5(개인 저장소)에서 이미 httpx 기반 GitHub 클라이언트를
 운영 검증한 이력 있음 — 그 코드의 패턴을 참고.
+
+## Phase B 라우터 — Runtime dependencies
+
+| Package | Version | 용도 | 검증 결과 |
+|---|---|---|---|
+| fastapi | ==0.121.2 | source-owned isolated router (Agent2 Spec §37) | 로컬 설치 후 TestClient로 5개 라우트 테스트 통과 |
+
+Master Spec에 이미 "Backend: FastAPI"로 기술 스택이 확정돼 있었으나
+root pyproject.toml에는 아직 없어서 여기서 명시적으로 요청.
