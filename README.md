@@ -2,7 +2,7 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`는 Phase 8 release candidate다. 세 Plane, 고정 dependency/toolchain, P0 경계, API/Worker composition, Web/Electron 제품 흐름과 GCP 내부 배포 기반이 통합되어 전체 non-live regression을 통과했다. Firestore operational store, Secret Manager/GCS/Cloud Tasks/OIDC adapter, same-origin 정적 hosting, non-root image와 Cloud Build/Run/Tasks/Scheduler/TTL 입력물은 저장소 안에서 검증된다. 실제 GCP resource/IAM/credential 생성과 provider live 검증은 아직 수행하지 않았다.
+현재 `integration-v2`는 Phase 8 release candidate를 기준으로 Phase 9에 진입했다. 세 Plane, 고정 dependency/toolchain, P0 경계, API/Worker composition, Web/Electron 제품 흐름과 GCP 내부 배포 기반이 통합되어 전체 non-live regression을 통과했다. Firestore operational store, Secret Manager/GCS/Cloud Tasks/OIDC adapter, same-origin 정적 hosting, non-root image와 Cloud Build/Run/Tasks/Scheduler/TTL 입력물은 저장소 안에서 검증된다. 실제 GCP resource/IAM/credential 생성과 provider live 검증은 외부 project·권한·credential 입력을 기다리고 있다.
 
 ## 통합 상태
 
@@ -18,7 +18,7 @@ IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 �
 | GCP 내부 adapter와 배포 입력물 | 완료 |
 | 전체 release regression과 staging runbook | 완료 |
 | 구 Agent 원본 제거와 release candidate 고정 | 완료 |
-| GCP 외부 resource/IAM/live 배포 | 예정 |
+| GCP 외부 resource/IAM/live 배포 | Phase 9 착수, 외부 입력 대기 |
 
 세부 상태와 검증 증거는 `INTEGRATION_V2_PROGRESS_LOG.md`에 기록한다. 이 로그는 통합 작업용 비규범 문서이며, 설계와 의존성 결정은 `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 `INTEGRATION_V2_EXECUTION_PLAN.md`가 우선한다.
 

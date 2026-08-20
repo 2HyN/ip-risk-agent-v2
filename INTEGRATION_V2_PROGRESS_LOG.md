@@ -804,3 +804,22 @@ provider 10건이며, Desktop skip 2건은 Windows symlink 권한 제약이다.
 
 현재 gate: **진행 중 — 외부 입력 대기**. repository 안에서 수행 가능한 Phase 9 착수
 문서화까지 완료했으며, 외부 환경이 준비되면 체크리스트 §2부터 증거를 누적한다.
+
+## 번외 정리 — 초기 환경 문서 제거
+
+- 대상: `ENVIRONMENT_SETUP.md`
+- 판단: 삭제. 환경 설정의 유지 기준은 root `README.md`, `.env.example`,
+  `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 실제 manifest/lock이다.
+- 근거: 해당 문서는 통합 초기 skeleton을 설명하여 Python 3.12.13, 미구현
+  API/Worker/Plane, 병렬 Agent ownership, 누락·폐기된 환경 변수 등 현재 상태와 충돌했다.
+- coverage: 최신 CPython 3.14.7/Node/pnpm 설치, lock 기반 설치, 전체 검증 명령,
+  environment group, API/Worker와 Web/Electron 로컬 실행, 보안 불변조건은 이미
+  `README.md`에 유지된다. exact dependency 결정은 dependency baseline과 manifests가
+  소유한다.
+- 참조 확인: runtime, build/test script, README와 운영 안내에는 활성 참조가 없어 삭제 후
+  실행·안내 경로의 dangling link가 없다. dependency baseline의 두 언급은 최초 분석
+  대상과 Python 3.12 오류를 남긴 역사적 근거이므로 그대로 보존했다.
+- 부수 정리: `README.md`의 통합 상태를 Phase 8 RC 기반 Phase 9 착수·외부 입력 대기로
+  갱신했다. runtime, dependency, Frozen Contract와 배포 파일은 변경하지 않았다.
+- 검증: `git diff --check`와 runtime/build/test/README/운영 경로의 활성 참조 scan이
+  통과했다. 문서 삭제와 상태 문구만 변경했으므로 runtime regression은 재실행하지 않았다.
