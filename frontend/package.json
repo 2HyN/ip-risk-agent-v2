@@ -4,14 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && vite build",
+    "test": "node --test \"dist/sources/platform/*.test.js\"",
     "verify:resolution": "node ../scripts/verify_typescript_resolution.mjs"
   },
   "dependencies": {
-    "@iprisk/contracts": "workspace:*"
+    "@iprisk/contracts": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.0.5",
+    "typescript": "5.9.3",
+    "vite": "^8.2.1"
   }
 }
