@@ -75,7 +75,7 @@ python scripts/generate_firestore_indexes.py --check  # 최신인지 확인 (CI 
 배포:
 
 ```bash
-gcloud firestore indexes composite create --file=deploy/firestore/firestore.indexes.json
+bash deploy/firestore/create-indexes.sh
 ```
 
 ---

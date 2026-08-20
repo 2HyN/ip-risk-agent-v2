@@ -61,15 +61,18 @@ curl -s https://<API-URL>/health | jq
 
 - Firestore **Native 모드** 데이터베이스 생성 (서울)
 
-**gcloud** — 인덱스 파일은 코드에서 이미 생성되어 있다.
+**gcloud** — 인덱스 생성 스크립트는 코드에서 이미 만들어져 있다.
 
 ```bash
-gcloud firestore indexes composite create \
-  --file=deploy/firestore/firestore.indexes.json
+bash deploy/firestore/create-indexes.sh
 ```
 
 > 인덱스 8개는 `scripts/generate_firestore_indexes.py` 가 코드의
 > `REQUIRED_COMPOSITE_INDEXES` 에서 만든다. **손으로 고치지 않는다.**
+>
+> gcloud 는 인덱스를 하나씩 개별 플래그로 받는다. `firestore.indexes.json` 은
+> Firebase CLI 형식이라 gcloud 에 그대로 넘길 수 없다. 둘 다 같은 manifest 에서
+> 생성한다. 이미 있는 인덱스는 `ALREADY_EXISTS` 로 실패하는데 정상이다.
 > 코드가 바뀌면 스크립트를 다시 돌린다.
 
 ✅ 배포 후 `/health` 의 `control_backend` 가 `"firestore"`.
