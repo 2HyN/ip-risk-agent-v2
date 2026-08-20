@@ -18,17 +18,60 @@ from .staging_store import LocalStagingStore
 class AuthzDependency(Protocol):
     """Agent 2 Spec §3/§37: VWS membership/role 판단은 Agent 1이 제공하는
     authz_dependency를 주입받아 쓴다 — Agent 2가 직접 Membership DB를
-    읽지 않는다. 이 Protocol은 우리가 필요로 하는 최소 형태만 정의한다:
-    mount_id에 대해 이 요청이 허용되면 조용히 반환, 아니면 스스로
-    HTTPException(401/403)을 던진다."""
+    읽지 않는다. resource_id는 라우트마다 의미가 다르다:
+    - /desktop/events, /desktop/staging: mount_id (이미 존재하는 mount)
+    - /desktop/mounts/register: risk_workspace_id (이 VWS에 mount를 만들
+      권한이 있는지)
+    - /desktop/devices/register: 없음(빈 문자열) — device 등록은 VWS
+      scope가 아니라 "유효한 app 세션인지"만 필요하다.
+    허용되면 조용히 반환, 아니면 스스로 HTTPException(401/403)을 던진다."""
 
-    async def __call__(self, request: Request, mount_id: str) -> None: ...
+    async def __call__(self, request: Request, resource_id: str) -> None: ...
 
 
-async def allow_all_authz(request: Request, mount_id: str) -> None:
+async def allow_all_authz(request: Request, resource_id: str) -> None:
     """개발/테스트 전용 기본값 — 아무 것도 검사하지 않는다.
     프로덕션 배포 전 반드시 Agent 1의 실제 authz_dependency로 교체해야 한다."""
     return None
+
+
+class DeviceRegistrationRequest(BaseModel):
+    device_id: str
+    device_label: str
+
+
+class DeviceRegistrationResponse(BaseModel):
+    status: str
+
+
+class DeviceRegistrationCallback(Protocol):
+    """Agent 2 Spec §36: device_id를 app_user에 연결하는 건 Control의
+    canonical 저장소 몫이다. request를 그대로 넘겨서, 실제 구현이
+    세션/토큰에서 app_user를 추출해 연결할 수 있게 한다."""
+
+    async def register_device(self, request: Request, device_id: str, device_label: str) -> None: ...
+
+
+class MountRegistrationRequest(BaseModel):
+    risk_workspace_id: str
+    device_id: str
+    include_patterns: list[str] = []
+    exclude_patterns: list[str] = []
+    # canonical_root_path는 의도적으로 여기 없다 (Agent2 Spec §25: 절대
+    # Cloud Contract로 canonical_root_path를 내보내지 않는다).
+
+
+class MountRegistrationResponse(BaseModel):
+    server_mount_id: str
+    source_workspace_id: str
+
+
+class MountCreationCallback(Protocol):
+    """Agent 2 Spec §24: 실제 SourceWorkspace/Mount canonical 생성은
+    Control 몫이다. 우리는 로컬에서 이미 결정한 정보(device_id, 패턴)를
+    넘기고 server_mount_id/source_workspace_id를 돌려받기만 한다."""
+
+    async def create_local_mount(self, request: Request, body: MountRegistrationRequest) -> MountRegistrationResponse: ...
 
 
 class StagingUploadRequest(BaseModel):
@@ -61,9 +104,26 @@ def create_local_desktop_router(
     *,
     staging_store: LocalStagingStore,
     change_sink: SourceChangeSink,
+    device_registration_callback: DeviceRegistrationCallback,
+    mount_creation_callback: MountCreationCallback,
     authz_dependency: AuthzDependency = allow_all_authz,
 ) -> APIRouter:
     router = APIRouter()
+
+    @router.post("/desktop/devices/register", response_model=DeviceRegistrationResponse)
+    async def handle_device_register(
+        request: Request, body: DeviceRegistrationRequest
+    ) -> DeviceRegistrationResponse:
+        await authz_dependency(request, "")
+        await device_registration_callback.register_device(request, body.device_id, body.device_label)
+        return DeviceRegistrationResponse(status="ok")
+
+    @router.post("/desktop/mounts/register", response_model=MountRegistrationResponse)
+    async def handle_mount_register(
+        request: Request, body: MountRegistrationRequest
+    ) -> MountRegistrationResponse:
+        await authz_dependency(request, body.risk_workspace_id)
+        return await mount_creation_callback.create_local_mount(request, body)
 
     @router.post("/desktop/staging", response_model=StagingUploadResponse)
     async def handle_staging_upload(request: Request, body: StagingUploadRequest) -> StagingUploadResponse:
