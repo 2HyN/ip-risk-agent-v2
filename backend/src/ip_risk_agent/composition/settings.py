@@ -145,33 +145,39 @@ class Settings:
             self.google_login_client_secret,
             self.google_login_redirect_uri,
         )
-        drive = (
-            self.drive_client_id,
-            self.drive_client_secret,
+        drive_credentials = (self.drive_client_id, self.drive_client_secret)
+        drive_api = (
             self.drive_redirect_uri,
             self.drive_webhook_base_url,
             self.drive_watch_channel_token,
         )
-        github = (
+        github_credentials = (
             self.github_app_id,
-            self.github_app_slug,
             self.github_private_key_secret_id,
+        )
+        github_api = (
+            self.github_app_slug,
             self.github_webhook_secret_id,
             self.github_app_callback_url,
         )
         picker = (self.google_picker_api_key, self.google_cloud_project_number)
-        tasks = (
-            self.cloud_tasks_location,
-            self.cloud_tasks_queue,
+        task_target = (
             self.analysis_worker_url,
             self.cloud_tasks_service_account,
         )
+        task_publisher = (
+            self.cloud_tasks_location,
+            self.cloud_tasks_queue,
+        )
         rag = (self.rag_region, self.rag_corpus_id, self.rag_corpus_version)
         _all_or_none("Google login", login)
-        _all_or_none("Google Drive", drive)
-        _all_or_none("GitHub App", github)
+        _all_or_none("Google Drive credentials", drive_credentials)
+        _all_or_none("Google Drive API", drive_api)
+        _all_or_none("GitHub App credentials", github_credentials)
+        _all_or_none("GitHub App API", github_api)
         _all_or_none("Google Picker", picker)
-        _all_or_none("Cloud Tasks", tasks)
+        _all_or_none("Cloud Tasks target", task_target)
+        _all_or_none("Cloud Tasks publisher", task_publisher)
         _all_or_none("RAG", rag)
 
         for name, url in (
@@ -188,24 +194,51 @@ class Settings:
         if self.profile is RuntimeProfile.PRODUCTION:
             if urlsplit(self.public_base_url).scheme != "https":
                 raise SettingsError("production APP_PUBLIC_BASE_URL must use HTTPS")
-            required = {
+            common_required = {
                 "GCP_PROJECT_ID": self.gcp_project_id,
                 "GCP_REGION": self.gcp_region,
                 "FIRESTORE_DATABASE": self.firestore_database,
-                "Google login group": login[0] if all(login) else None,
-                "Google Drive group": drive[0] if all(drive) else None,
-                "Google Picker group": picker[0] if all(picker) else None,
-                "GitHub App group": github[0] if all(github) else None,
                 "LOCAL_STAGING_BUCKET": self.local_staging_bucket,
-                "Cloud Tasks group": tasks[0] if all(tasks) else None,
-                "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": self.vertex_config,
-                "KIPRIS_API_KEY_SECRET_ID": self.kipris_api_key_secret_id,
-                "PACKAGE_METADATA_BASE_URL": self.package_metadata_base_url,
             }
             if self.role is AppRole.API:
-                required["FRONTEND_DIST_DIR"] = self.frontend_dist_dir
-                required["SCHEDULER_SERVICE_ACCOUNT"] = self.scheduler_service_account
-            missing = sorted(name for name, item in required.items() if item is None)
+                role_required = {
+                    "Google login group": login[0] if all(login) else None,
+                    "Google Drive credentials": (
+                        drive_credentials[0] if all(drive_credentials) else None
+                    ),
+                    "Google Drive API group": drive_api[0] if all(drive_api) else None,
+                    "Google Picker group": picker[0] if all(picker) else None,
+                    "GitHub App credentials": (
+                        github_credentials[0] if all(github_credentials) else None
+                    ),
+                    "GitHub App API group": github_api[0] if all(github_api) else None,
+                    "Cloud Tasks target": task_target[0] if all(task_target) else None,
+                    "Cloud Tasks publisher": (
+                        task_publisher[0] if all(task_publisher) else None
+                    ),
+                    "FRONTEND_DIST_DIR": self.frontend_dist_dir,
+                    "SCHEDULER_SERVICE_ACCOUNT": self.scheduler_service_account,
+                }
+            elif self.role is AppRole.WORKER:
+                role_required = {
+                    "Google Drive credentials": (
+                        drive_credentials[0] if all(drive_credentials) else None
+                    ),
+                    "GitHub App credentials": (
+                        github_credentials[0] if all(github_credentials) else None
+                    ),
+                    "Cloud Tasks target": task_target[0] if all(task_target) else None,
+                    "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": self.vertex_config,
+                    "KIPRIS_API_KEY_SECRET_ID": self.kipris_api_key_secret_id,
+                    "PACKAGE_METADATA_BASE_URL": self.package_metadata_base_url,
+                }
+            else:
+                role_required = {}
+            missing = sorted(
+                name
+                for name, item in {**common_required, **role_required}.items()
+                if item is None
+            )
             if missing:
                 raise SettingsError(
                     "production configuration is incomplete: " + ", ".join(missing)

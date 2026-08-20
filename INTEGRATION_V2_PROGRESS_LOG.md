@@ -823,3 +823,85 @@ provider 10건이며, Desktop skip 2건은 Windows symlink 권한 제약이다.
   갱신했다. runtime, dependency, Frozen Contract와 배포 파일은 변경하지 않았다.
 - 검증: `git diff --check`와 runtime/build/test/README/운영 경로의 활성 참조 scan이
   통과했다. 문서 삭제와 상태 문구만 변경했으므로 runtime regression은 재실행하지 않았다.
+
+## Phase 9 repository blocker 해결 — production composition root
+
+### 시작 상태와 원인
+
+- 시작 HEAD: `a125f429f9150d44a4966d25c7f55d860d3f042d`
+- `main.py`와 `worker.py`가 production에서도 `build_container(settings)`를 직접 호출해
+  `build_google_cloud_foundation()`의 Firestore/Cloud Tasks/Secret Manager/GCS adapter가
+  container에 전달되지 않았다.
+- `build_container()`는 모든 production role에 Firestore와 outbound Cloud Tasks를 함께
+  요구했으므로 Worker도 사용하지 않는 queue client/location/name을 필요로 했다.
+- `Settings.validate()`는 Worker에 Google Login/Picker/API callback/Scheduler까지 요구한
+  반면 `deploy/cloud-run-services.yaml`은 API가 실제로 요구하는 Source/OAuth 변수를
+  다수 누락하여 runtime과 deploy 계약이 서로 달랐다.
+- foundation만 단순 주입해도 production guard가 요구하는 전체 Source adapter/router와
+  Worker Intelligence/OIDC가 없으므로 실제 entrypoint startup은 계속 실패하는 상태였다.
+
+### 변경과 수렴
+
+1. production entrypoint가 Google Cloud foundation을 만들고 role-aware runtime composer를
+   `build_container()`에 전달하도록 연결했다. local/test 경로는 기존 in-memory 기본값을
+   그대로 사용한다.
+2. API composition은 Firestore canonical/operational store, Cloud Tasks publisher,
+   Secret Manager credential vault/static secret reader, GCS staging, durable device auth,
+   Drive/GitHub/Local adapters와 web/webhook/desktop routers를 조립한다.
+3. Worker composition은 같은 durable store/vault/staging과 전체 Source adapters,
+   Vertex Gemini/KIPRIS/package metadata 및 선택 RAG Intelligence facade, exact Worker URL과
+   Tasks caller email을 검사하는 Google OIDC authenticator를 조립한다.
+4. Worker outbound enqueue를 제거했다. Worker 내부 facade에는 호출 시 fail-closed하는
+   role-local enqueuer를 두고 readiness에는 `task_queue=not_applicable`을 기록한다. 실제
+   queue 생성/enqueue 권한과 client는 API만 소유한다.
+5. GitHub private key, webhook secret과 KIPRIS key는 secret ID만 settings에 두고 attached
+   service identity를 사용하는 Secret Manager client로 startup에 읽는다. 서비스 계정
+   key file 경로는 추가하지 않았다.
+6. operational Firestore에 bounded nested-field lookup을 추가하고 GitHub tracking
+   `record.owner + record.repo` composite index를 deploy JSON에 추가했다.
+7. Settings와 Cloud Run manifest를 API/Worker 공통, API 전용, Worker 전용, Worker 선택
+   RAG group으로 일치시켰으며 deploy validator가 exact environment set과 새 index를
+   회귀 검증한다.
+
+### role별 production 필수 환경
+
+- 공통: `APP_ENV`, `APP_ROLE`, `APP_PUBLIC_BASE_URL`, `GCP_PROJECT_ID`, `GCP_REGION`,
+  `FIRESTORE_DATABASE`, `LOCAL_STAGING_BUCKET`, Drive client ID/secret, GitHub App ID와
+  private-key secret ID.
+- API: session/frontend, Google Login, Drive callback/webhook/channel, Picker, GitHub
+  slug/webhook/callback, Tasks location/queue/Worker URL/caller SA, Scheduler caller SA.
+- Worker: Worker URL/caller SA, Vertex location, KIPRIS secret ID, package metadata base URL.
+  RAG region/corpus ID/version은 all-or-none 선택 group이다.
+
+### 검증
+
+| 검증 | 결과 |
+|---|---|
+| production composition/settings/deploy focused | 통과 |
+| production composition/settings/GCP adapter focused | `16 passed` |
+| 전체 non-live Python suite | `577 passed, 1 skipped, 10 deselected` |
+| Python compile / pip check | 통과 |
+| TypeScript typecheck/build/resolution | 통과 |
+| Frontend Vitest | `9 files, 30 passed` |
+| Desktop Node test | `72 tests, 70 passed, 2 skipped` |
+| deploy validator / RAG dry-run | 통과 / 3 documents, external write 없음 |
+| Frozen Contract / dependency manifest | 변경 없음 |
+
+전체 marker를 포함한 실행도 수행했으며, 저장소 내부 검증은 `577 passed`였다. 외부 네트워크가
+차단된 현재 실행 환경에서 deps.dev/PyPI/NPM에 직접 연결하는 live provider test 4개가
+`ConnectError`로 실패했고 credential이 필요한 live test 6개와 Firestore emulator test
+1개는 skip됐다. 이는 production composition 회귀 실패가 아니며 staging에서는 외부 연결과
+credential을 준비한 뒤 live marker를 별도 재실행한다.
+
+### 남은 blocker
+
+- **repository**: `SchedulerOperations`의 Drive watch renewal/reconciliation,
+  expired-state cleanup, source health refresh 구현과 API router wiring은 아직 없다.
+  해결 전 `deploy/scheduler-jobs.yaml` job을 enabled 상태로 배포하지 않는다.
+- **external**: 실제 GCP project/IAM/Secret version/index/bucket/queue/image와 provider
+  credential이 없어 ADC 권한 및 live E2E는 아직 실행하지 않았다.
+- Firestore emulator와 Docker/Cloud Build image 검증은 해당 runtime이 있는 배포 환경에서
+  같은 blocker-fix commit을 대상으로 수행한다.
+
+현재 Phase 9 gate는 계속 **진행 중**이다. API/Worker production startup composition
+blocker는 해결됐지만 Scheduler repository blocker와 기존 외부 입력 gate가 남아 있다.

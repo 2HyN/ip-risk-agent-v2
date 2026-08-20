@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 실행 체크리스트**
 > 작성일: 2026-08-21
-> 대상 Release Candidate: `e05ad90583f0c3c35363fd02dcb64c399c522afc`
+> 대상 Release Candidate: Phase 9 production composition blocker 해결 commit을 배포 직전 기록
 
 이 문서는 GCP Console, Google Cloud Shell, Google OAuth Console, GitHub 설정 화면처럼
 저장소 밖에서 수행하는 Phase 9 작업을 단계별로 안내하고 실행 증거를 임시로 기록한다.
@@ -43,7 +43,7 @@ secret **값은 절대 적지 않고** 이름과 version 번호만 기록한다.
 | Vertex RAG 지원 region | |
 | Firestore database ID | |
 | Artifact Registry repository | `ip-risk-agent` 또는 확정값: |
-| RC SHA | `e05ad90583f0c3c35363fd02dcb64c399c522afc` |
+| RC SHA | production composition blocker 해결 commit SHA: |
 | image URI@digest | |
 | API / Worker service account | |
 | Tasks / Scheduler caller service account | |
@@ -250,8 +250,9 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
 4. `deploy/cloud-run-services.yaml`의 Worker CPU/memory/concurrency/min/max와 command를
    그대로 반영한다.
 5. `APP_ENV=production`, `APP_ROLE=worker`와 `deploy/cloud-run-services.yaml`의 common,
-   worker required environment를 설정한다. `.env.example`의 production group은
-   all-or-none이므로 누락 없이 주입하되 실제 secret은 Secret Manager mapping을 쓴다.
+   worker required environment만 설정한다. Worker에는 Google Login/Picker/Scheduler,
+   Drive callback/webhook/channel 또는 queue location/name을 주입하지 않는다. RAG 세 값은
+   함께 설정하거나 모두 생략하고 실제 secret은 Secret Manager ID/mapping을 쓴다.
 6. `ANALYSIS_WORKER_URL`은 task endpoint가 아니라 Worker **base URL**로 둔다. app이
    `/internal/tasks/analyze-change`를 붙인다.
 7. 첫 revision은 traffic 100%를 주기 전 readiness와 로그 redaction을 확인한다.
@@ -279,11 +280,18 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
 
 ## 11. API 배포와 Scheduler
 
+> 현재 남은 repository blocker: production API startup composition은 연결됐지만
+> `SchedulerOperations`의 네 maintenance 동작과 router wiring은 아직 구현되지 않았다.
+> 이 blocker가 별도 commit으로 해결되고 관련 test가 통과하기 전에는 아래 Scheduler
+> job을 생성하거나 enabled 상태로 두지 않는다. API/Worker smoke와 Tasks 검증은 먼저
+> 진행할 수 있다.
+
 1. `ip-risk-agent-api`를 같은 image digest, `iprisk-api` service account로 배포한다.
 2. ingress는 All, authentication은 Allow unauthenticated로 두되 제품 route는 application
    session/CSRF 정책으로 보호한다.
-3. `APP_ENV=production`, `APP_ROLE=api`, `FRONTEND_DIST_DIR=/app/frontend/dist`와 required
-   environment를 설정한다. `APP_PUBLIC_BASE_URL`은 최종 HTTPS API origin이다.
+3. `APP_ENV=production`, `APP_ROLE=api`, `FRONTEND_DIST_DIR=/app/frontend/dist`와 manifest의
+   common/API required environment를 설정한다. API에는 Intelligence/RAG 변수를 주입하지
+   않는다. `APP_PUBLIC_BASE_URL`은 최종 HTTPS API origin이다.
 4. `/health/live`, `/health/ready`, `/app` static asset 제공을 확인한다.
 5. `iprisk-scheduler`에 API service의 Cloud Run Invoker만 부여한다.
 6. **Cloud Scheduler → Create job**에서 `deploy/scheduler-jobs.yaml`의 네 job을 만든다.

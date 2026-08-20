@@ -117,22 +117,20 @@ workspace는 `@iprisk/contracts`, `@iprisk/frontend`, `@iprisk/desktop`으로 �
 Copy-Item .env.example .env
 ```
 
-변수 그룹은 다음과 같다.
+Production Cloud Run 변수 계약은 role별로 나뉜다.
 
-| Group | Variables |
+| Role | 필수 변수 |
 |---|---|
-| Runtime | `APP_ENV`, `APP_ROLE`, `LOG_LEVEL` |
-| Shared/GCP | `GCP_PROJECT_ID`, `GCP_REGION`, `FIRESTORE_DATABASE`, `APP_PUBLIC_BASE_URL`, `SESSION_SECRET`, `FRONTEND_DIST_DIR`, `FIRESTORE_EMULATOR_HOST` |
-| Google login | `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`, `GOOGLE_LOGIN_REDIRECT_URI` |
-| Google Drive | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI`, `GOOGLE_DRIVE_WEBHOOK_BASE_URL`, `DRIVE_WATCH_CHANNEL_TOKEN`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER` |
-| GitHub App | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CALLBACK_URL`, `GITHUB_APP_PRIVATE_KEY_SECRET_ID`, `GITHUB_WEBHOOK_SECRET_ID` |
-| Local Desktop | `LOCAL_STAGING_BUCKET`, `IPRISK_SERVER_BASE_URL`, `IPRISK_DESKTOP_RENDERER_URL` |
-| Cloud Tasks/Scheduler | `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT`, `SCHEDULER_SERVICE_ACCOUNT` |
-| Intelligence | `GEMINI_MODEL_ID`, `GEMINI_API_KEY`, `VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG`, `KIPRIS_API_KEY_SECRET_ID`, `KIPRIS_ACCESS_KEY`, `RAG_REGION`, `RAG_CORPUS_ID`, `RAG_CORPUS_VERSION`, `PACKAGE_METADATA_BASE_URL` |
+| API/Worker 공통 | `APP_ENV`, `APP_ROLE`, `APP_PUBLIC_BASE_URL`, `GCP_PROJECT_ID`, `GCP_REGION`, `FIRESTORE_DATABASE`, `LOCAL_STAGING_BUCKET`, `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_SECRET_ID` |
+| API | `SESSION_SECRET`, `FRONTEND_DIST_DIR`, Google login 3개, Drive redirect/webhook/channel 3개, Picker 2개, GitHub slug/webhook/callback 3개, `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT`, `SCHEDULER_SERVICE_ACCOUNT` |
+| Worker | `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT`, `VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG`, `KIPRIS_API_KEY_SECRET_ID`, `PACKAGE_METADATA_BASE_URL` |
+| Worker 선택 RAG group | `RAG_REGION`, `RAG_CORPUS_ID`, `RAG_CORPUS_VERSION` 전체 또는 모두 생략 |
+| local/Desktop | `IPRISK_SERVER_BASE_URL`, `IPRISK_DESKTOP_RENDERER_URL`; 필요 시 provider group |
+| test only | `FIRESTORE_EMULATOR_HOST` |
 
-`GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. `FIRESTORE_EMULATOR_HOST`는 test 전용이며 production에서 설정하지 않는다. Cloud Tasks 네 변수는 하나의 configuration group으로 취급하고 일부만 설정된 상태에서 in-memory fallback하지 않는다. Google Picker는 browser API key와 Cloud project number를 함께 설정해야 하며, production 시작 시 두 값이 모두 필요하다.
+`GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. `FIRESTORE_EMULATOR_HOST`는 test 전용이며 production에서 설정하지 않는다. API는 Cloud Tasks queue publisher 설정을 사용하고 Worker는 `ANALYSIS_WORKER_URL`과 caller service account로 inbound OIDC만 검증한다. Worker는 queue location/name 또는 Scheduler/Google Login/Picker 설정을 요구하지 않는다. Google Picker는 browser API key와 Cloud project number를 함께 설정해야 하며 API production 시작 시 두 값이 모두 필요하다.
 
-Production secret은 Secret Manager reference로 해석해야 한다. `.env.example`에 비밀 값이나 예시 private key를 추가하지 않는다. Google Picker browser key는 secret이 아니지만 허용 origin과 Picker API로 제한해야 하며, project number와 함께 설정하거나 둘 다 비워야 한다.
+Production secret은 Secret Manager reference 또는 Cloud Run Secret Manager mapping으로 해석해야 한다. GitHub App private key와 KIPRIS key는 secret ID만 환경에 두고 composition root가 attached service identity로 latest enabled version을 읽는다. 서비스 계정 key file은 사용하지 않는다. `.env.example`에 비밀 값이나 예시 private key를 추가하지 않는다. Google Picker browser key는 secret이 아니지만 허용 origin과 Picker API로 제한해야 하며, project number와 함께 설정하거나 둘 다 비워야 한다.
 
 ## Contract 생성과 검증
 
@@ -184,7 +182,7 @@ uvicorn ip_risk_agent.main:create_app --factory --host 127.0.0.1 --port 8000
 
 `/health/live`는 프로세스 생존, `/health/ready`는 현재 role의 필수 구성 상태를 나타낸다. API는 Control route, 등록된 Source route와 `POST /api/v1/workspaces/{vws_id}/artifacts/{artifact_id}/open-original`을 한 application에 조립한다.
 
-Worker entrypoint는 `ip_risk_agent.worker:create_app`이며 외부 제품 API를 노출하지 않고 `POST /internal/tasks/analyze-change`와 health route만 제공한다. Task body는 `change_event_id` 하나만 허용한다. 실제 로컬 분석에는 source adapter, intelligence facade와 task authenticator를 composition override로 명시적으로 주입해야 하며, 기본 구성 누락은 readiness 실패로 드러난다. Production은 durable store/queue, 전체 source adapter, analyzer와 workload identity가 없으면 시작 단계에서 실패하고 in-memory 구현으로 자동 대체하지 않는다.
+Worker entrypoint는 `ip_risk_agent.worker:create_app`이며 외부 제품 API를 노출하지 않고 `POST /internal/tasks/analyze-change`와 health route만 제공한다. Task body는 `change_event_id` 하나만 허용한다. 실제 로컬 분석에는 source adapter, intelligence facade와 task authenticator를 composition override로 명시적으로 주입해야 하며, 기본 구성 누락은 readiness 실패로 드러난다. Production entrypoint는 Google Cloud foundation과 role별 runtime composer를 자동 연결한다. API만 outbound Cloud Tasks enqueuer를 소유하고 Worker는 OIDC-authenticated task를 수신하며, 둘 다 Firestore/Secret Manager/GCS와 전체 source adapter가 없으면 시작 단계에서 실패하고 in-memory 구현으로 자동 대체하지 않는다.
 
 Frontend 개발 서버는 다음과 같이 실행할 수 있다.
 

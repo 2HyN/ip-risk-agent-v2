@@ -17,18 +17,38 @@ API는 image 안의 `frontend/dist`를 `/app`과 Product route에 same-origin으
 Worker task body는 `change_event_id` 하나만 허용한다. queue task name은 이 ID의
 SHA-256으로 결정되어 동일 event의 짧은 시간 중복 enqueue를 흡수한다.
 
+두 production entrypoint는 `build_google_cloud_foundation()`을 먼저 호출한 뒤 role별
+runtime composer를 `build_container()`에 전달한다. API는 outbound Cloud Tasks와 모든
+Source router를, Worker는 inbound Tasks OIDC와 Source adapters/Intelligence pipeline을
+조립한다. local/test entrypoint는 기존 in-memory 기본값을 유지한다.
+
 ## 2. service identity와 최소 권한 matrix
 
 | identity | project/resource 권한 |
 |---|---|
 | API SA | Firestore read/write, Source credential Secret version access/add, staging bucket object create/read/delete, Cloud Tasks enqueue, task caller SA act-as |
-| Worker SA | Firestore read/write, Source/provider Secret access, staging bucket object read/delete, Vertex AI/RAG invoke |
+| Worker SA | Firestore read/write, Source/provider Secret access, staging bucket object read/delete, Vertex AI/RAG invoke; Cloud Tasks queue 관리 권한 없음 |
 | Cloud Tasks caller SA | Worker Cloud Run Invoker만 |
 | Scheduler caller SA | API Cloud Run Invoker만 |
 | Deploy SA | Artifact Registry write, Cloud Build build, 두 Cloud Run service 갱신, 제한된 service-account act-as, index/queue/scheduler 배포 |
 
 서비스 identity는 서로 재사용하지 않는다. API/Worker에는 credential JSON을 넣지
 않고 attached service account의 Application Default Credentials를 사용한다.
+
+## 2.1 role별 environment 계약
+
+- 공통: project/region/database/public base, staging bucket, Drive client ID/secret,
+  GitHub App ID/private-key secret ID.
+- API 전용: session/frontend, Google login, Drive callback/webhook/channel, Picker,
+  GitHub slug/webhook/callback, Tasks location/queue/Worker target/caller, Scheduler caller.
+- Worker 전용: Worker target/caller(OIDC audience/email), Vertex location, KIPRIS secret ID,
+  package metadata base URL. RAG 세 값은 all-or-none 선택 group이다.
+
+`deploy/cloud-run-services.yaml`과 `Settings.validate()`가 이 구분을 동일하게 검증한다.
+GitHub private key와 KIPRIS key는 Secret Manager ID로 전달하고 attached identity로 읽는다.
+
+현재 `SchedulerOperations`의 네 maintenance 구현과 API router wiring은 별도 후속 blocker다.
+해당 구현 전에는 `deploy/scheduler-jobs.yaml`의 job을 enabled 상태로 배포하지 않는다.
 
 ## 3. durable resource contract
 

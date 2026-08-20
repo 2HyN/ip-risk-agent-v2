@@ -1,0 +1,342 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from fastapi import APIRouter
+from iprisk_contracts import AnalysisType, SourceType
+
+import ip_risk_agent.composition.production as production
+import ip_risk_agent.main as api_entrypoint
+import ip_risk_agent.worker as worker_entrypoint
+from ip_risk_agent.composition.container import (
+    ContainerOverrides,
+    RuntimeComposition,
+    build_container,
+)
+from ip_risk_agent.composition.providers import SourceRouterBundle
+from ip_risk_agent.composition.settings import AppRole, Settings
+from ip_risk_agent.gcp.foundation import (
+    GoogleCloudClients,
+    GoogleCloudFoundation,
+    build_google_cloud_foundation,
+)
+from ip_risk_agent.gcp.identity import GoogleOidcTaskAuthenticator
+
+
+class FakeSecretReader:
+    def access(self, secret_id: str) -> str:
+        return {
+            "github-private-key": "test-private-key",
+            "github-webhook": "test-webhook-secret",
+            "kipris-key": "test-kipris-key",
+        }[secret_id]
+
+
+class FakeAdapter:
+    def __init__(self, source_type: SourceType) -> None:
+        self.source_type = source_type
+
+
+class FakeIntelligence:
+    active_analysis_types = (AnalysisType.PATENT, AnalysisType.LICENSE)
+
+    async def analyze(self, _artifact):
+        return []
+
+
+class FakeTaskAuthenticator:
+    async def __call__(self, _request) -> None:
+        return None
+
+
+class FakeModelClient:
+    model_id = "fake-vertex-model"
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
+
+    async def generate(self, _prompt, _output_model):
+        raise AssertionError("startup must not call Gemini")
+
+
+def _settings(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist") -> Settings:
+    common = {
+        "APP_ENV": "production",
+        "APP_ROLE": role.value,
+        "APP_PUBLIC_BASE_URL": "https://api.example.com",
+        "GCP_PROJECT_ID": "project-1",
+        "GCP_REGION": "asia-northeast3",
+        "FIRESTORE_DATABASE": "(default)",
+        "LOCAL_STAGING_BUCKET": "staging-bucket",
+        "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
+        "GOOGLE_DRIVE_CLIENT_SECRET": "drive-secret",
+        "GITHUB_APP_ID": "app-1",
+        "GITHUB_APP_PRIVATE_KEY_SECRET_ID": "github-private-key",
+        "ANALYSIS_WORKER_URL": "https://worker.example.com",
+        "CLOUD_TASKS_SERVICE_ACCOUNT": "tasks@example.iam.gserviceaccount.com",
+    }
+    if role is AppRole.API:
+        common.update(
+            {
+                "SESSION_SECRET": "s" * 32,
+                "FRONTEND_DIST_DIR": frontend_dist_dir,
+                "GOOGLE_LOGIN_CLIENT_ID": "login-client",
+                "GOOGLE_LOGIN_CLIENT_SECRET": "login-secret",
+                "GOOGLE_LOGIN_REDIRECT_URI": "https://api.example.com/api/v1/auth/google/callback",
+                "GOOGLE_DRIVE_REDIRECT_URI": "https://api.example.com/api/v1/source-connections/google-drive/callback",
+                "GOOGLE_DRIVE_WEBHOOK_BASE_URL": "https://api.example.com/webhooks/google-drive",
+                "DRIVE_WATCH_CHANNEL_TOKEN": "channel-token",
+                "GOOGLE_PICKER_API_KEY": "picker-key",
+                "GOOGLE_CLOUD_PROJECT_NUMBER": "123456789012",
+                "GITHUB_APP_SLUG": "ip-risk-agent",
+                "GITHUB_WEBHOOK_SECRET_ID": "github-webhook",
+                "GITHUB_APP_CALLBACK_URL": "https://api.example.com/api/v1/source-connections/github/install/callback",
+                "CLOUD_TASKS_LOCATION": "asia-northeast3",
+                "CLOUD_TASKS_QUEUE": "analysis-changes",
+                "SCHEDULER_SERVICE_ACCOUNT": "scheduler@example.iam.gserviceaccount.com",
+            }
+        )
+    else:
+        common.update(
+            {
+                "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": "asia-northeast3",
+                "KIPRIS_API_KEY_SECRET_ID": "kipris-key",
+                "PACKAGE_METADATA_BASE_URL": "https://api.deps.dev/v3",
+            }
+        )
+    return Settings.from_env(common)
+
+
+def _foundation(role: AppRole) -> GoogleCloudFoundation:
+    return GoogleCloudFoundation(
+        clients=SimpleNamespace(
+            firestore=object(),
+            secret_manager=object(),
+            cloud_tasks=object() if role is AppRole.API else None,
+            storage=object(),
+            runtime_secrets=FakeSecretReader(),
+        ),
+        unit_of_work_factory=object(),
+        operational_backend=object(),
+        task_enqueuer=object() if role is AppRole.API else None,
+        credential_vault=object(),
+        staging_store=object(),
+        device_auth_store=object(),
+    )
+
+
+def test_real_production_composer_builds_role_specific_complete_containers(monkeypatch) -> None:
+    api_settings = _settings(AppRole.API)
+    api_foundation = _foundation(AppRole.API)
+    api = build_container(
+        api_settings,
+        overrides=api_foundation.container_overrides(
+            runtime_composer=production.build_google_cloud_runtime_composer(api_foundation)
+        ),
+    )
+    assert set(api.adapters.source_types) == set(SourceType)
+    assert api.pipeline is None
+    assert {check.name: check.detail_safe for check in api.health.checks}[
+        "task_queue"
+    ] == "configured"
+    assert api.source_routers.web and api.source_routers.webhooks
+    assert api.source_routers.desktop
+
+    monkeypatch.setattr(production, "GoogleGenAIClient", FakeModelClient)
+    worker_settings = _settings(AppRole.WORKER)
+    worker_foundation = _foundation(AppRole.WORKER)
+    worker = build_container(
+        worker_settings,
+        overrides=worker_foundation.container_overrides(
+            runtime_composer=production.build_google_cloud_runtime_composer(
+                worker_foundation
+            )
+        ),
+    )
+    assert set(worker.adapters.source_types) == set(SourceType)
+    assert worker.pipeline is not None
+    assert {check.name: check.detail_safe for check in worker.health.checks}[
+        "task_queue"
+    ] == "not_applicable"
+    assert isinstance(worker.task_authenticator, GoogleOidcTaskAuthenticator)
+    assert worker_foundation.task_enqueuer is None
+
+
+def test_google_cloud_foundation_creates_cloud_tasks_only_for_api() -> None:
+    storage = SimpleNamespace(bucket=lambda _name: object())
+    api = build_google_cloud_foundation(
+        _settings(AppRole.API),
+        clients=GoogleCloudClients(
+            firestore=object(),
+            secret_manager=object(),
+            cloud_tasks=SimpleNamespace(
+                queue_path=lambda project, location, queue: (
+                    f"projects/{project}/locations/{location}/queues/{queue}"
+                )
+            ),
+            storage=storage,
+            runtime_secrets=FakeSecretReader(),
+        ),
+    )
+    assert api.task_enqueuer is not None
+
+    worker = build_google_cloud_foundation(
+        _settings(AppRole.WORKER),
+        clients=GoogleCloudClients(
+            firestore=object(),
+            secret_manager=object(),
+            cloud_tasks=None,
+            storage=storage,
+            runtime_secrets=FakeSecretReader(),
+        ),
+    )
+    assert worker.task_enqueuer is None
+
+
+def test_production_entrypoints_use_foundation_and_runtime_composer(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    (tmp_path / "index.html").write_text("<main>production</main>", encoding="utf-8")
+    (tmp_path / "assets").mkdir()
+    calls: list[tuple[str, AppRole]] = []
+
+    class EntrypointFoundation:
+        def __init__(self, role: AppRole) -> None:
+            self.role = role
+
+        def container_overrides(self, *, runtime_composer):
+            calls.append(("overrides", self.role))
+            return ContainerOverrides(
+                unit_of_work_factory=object(),
+                task_enqueuer=object() if self.role is AppRole.API else None,
+                device_auth_store=object(),
+                runtime_composer=runtime_composer,
+            )
+
+    def fake_foundation(settings):
+        calls.append(("foundation", settings.role))
+        return EntrypointFoundation(settings.role)
+
+    def fake_composer(foundation):
+        calls.append(("composer", foundation.role))
+
+        def compose(_context):
+            adapters = tuple(FakeAdapter(source_type) for source_type in SourceType)
+            if foundation.role is AppRole.API:
+                return RuntimeComposition(
+                    source_adapters=adapters,
+                    source_routers=SourceRouterBundle(
+                        web=(APIRouter(),),
+                        webhooks=(APIRouter(),),
+                        desktop=(APIRouter(),),
+                    ),
+                )
+            return RuntimeComposition(
+                source_adapters=adapters,
+                intelligence=FakeIntelligence(),
+                task_authenticator=FakeTaskAuthenticator(),
+            )
+
+        return compose
+
+    for module in (api_entrypoint, worker_entrypoint):
+        monkeypatch.setattr(module, "build_google_cloud_foundation", fake_foundation)
+        monkeypatch.setattr(module, "build_google_cloud_runtime_composer", fake_composer)
+
+    api_values = _environment(AppRole.API, frontend_dist_dir=str(tmp_path))
+    with monkeypatch.context() as scoped:
+        for key, value in api_values.items():
+            scoped.setenv(key, value)
+        api_app = api_entrypoint.create_app()
+        assert "/health/ready" in api_app.openapi()["paths"]
+
+    with monkeypatch.context() as scoped:
+        for key, value in _environment(AppRole.WORKER).items():
+            scoped.setenv(key, value)
+        worker_app = worker_entrypoint.create_app()
+        assert "/internal/tasks/analyze-change" in worker_app.openapi()["paths"]
+
+    assert calls == [
+        ("foundation", AppRole.API),
+        ("composer", AppRole.API),
+        ("overrides", AppRole.API),
+        ("foundation", AppRole.WORKER),
+        ("composer", AppRole.WORKER),
+        ("overrides", AppRole.WORKER),
+    ]
+
+
+def test_local_entrypoints_keep_in_memory_path(monkeypatch) -> None:
+    def unexpected_foundation(_settings):
+        raise AssertionError("local entrypoint must not create Google Cloud clients")
+
+    monkeypatch.setattr(
+        api_entrypoint,
+        "build_google_cloud_foundation",
+        unexpected_foundation,
+    )
+    monkeypatch.setattr(
+        worker_entrypoint,
+        "build_google_cloud_foundation",
+        unexpected_foundation,
+    )
+    with monkeypatch.context() as scoped:
+        scoped.setenv("APP_ENV", "local")
+        scoped.setenv("APP_ROLE", "api")
+        scoped.setenv("SESSION_SECRET", "l" * 32)
+        scoped.setenv("APP_PUBLIC_BASE_URL", "http://127.0.0.1:8000")
+        assert "/health/ready" in api_entrypoint.create_app().openapi()["paths"]
+    with monkeypatch.context() as scoped:
+        scoped.setenv("APP_ENV", "local")
+        scoped.setenv("APP_ROLE", "worker")
+        scoped.setenv("APP_PUBLIC_BASE_URL", "http://127.0.0.1:8000")
+        assert (
+            "/internal/tasks/analyze-change"
+            in worker_entrypoint.create_app().openapi()["paths"]
+        )
+
+
+def _environment(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist") -> dict[str, str]:
+    settings = _settings(role, frontend_dist_dir=frontend_dist_dir)
+    values = {
+        "APP_ENV": settings.profile.value,
+        "APP_ROLE": settings.role.value,
+        "APP_PUBLIC_BASE_URL": settings.public_base_url,
+        "GCP_PROJECT_ID": settings.gcp_project_id or "",
+        "GCP_REGION": settings.gcp_region or "",
+        "FIRESTORE_DATABASE": settings.firestore_database or "",
+        "LOCAL_STAGING_BUCKET": settings.local_staging_bucket or "",
+        "GOOGLE_DRIVE_CLIENT_ID": settings.drive_client_id or "",
+        "GOOGLE_DRIVE_CLIENT_SECRET": settings.drive_client_secret or "",
+        "GITHUB_APP_ID": settings.github_app_id or "",
+        "GITHUB_APP_PRIVATE_KEY_SECRET_ID": settings.github_private_key_secret_id or "",
+        "ANALYSIS_WORKER_URL": settings.analysis_worker_url or "",
+        "CLOUD_TASKS_SERVICE_ACCOUNT": settings.cloud_tasks_service_account or "",
+    }
+    role_values = {
+        field: value
+        for field, value in {
+            "SESSION_SECRET": settings.session_secret,
+            "FRONTEND_DIST_DIR": settings.frontend_dist_dir,
+            "GOOGLE_LOGIN_CLIENT_ID": settings.google_login_client_id,
+            "GOOGLE_LOGIN_CLIENT_SECRET": settings.google_login_client_secret,
+            "GOOGLE_LOGIN_REDIRECT_URI": settings.google_login_redirect_uri,
+            "GOOGLE_DRIVE_REDIRECT_URI": settings.drive_redirect_uri,
+            "GOOGLE_DRIVE_WEBHOOK_BASE_URL": settings.drive_webhook_base_url,
+            "DRIVE_WATCH_CHANNEL_TOKEN": settings.drive_watch_channel_token,
+            "GOOGLE_PICKER_API_KEY": settings.google_picker_api_key,
+            "GOOGLE_CLOUD_PROJECT_NUMBER": settings.google_cloud_project_number,
+            "GITHUB_APP_SLUG": settings.github_app_slug,
+            "GITHUB_WEBHOOK_SECRET_ID": settings.github_webhook_secret_id,
+            "GITHUB_APP_CALLBACK_URL": settings.github_app_callback_url,
+            "CLOUD_TASKS_LOCATION": settings.cloud_tasks_location,
+            "CLOUD_TASKS_QUEUE": settings.cloud_tasks_queue,
+            "SCHEDULER_SERVICE_ACCOUNT": settings.scheduler_service_account,
+            "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": settings.vertex_config,
+            "KIPRIS_API_KEY_SECRET_ID": settings.kipris_api_key_secret_id,
+            "PACKAGE_METADATA_BASE_URL": settings.package_metadata_base_url,
+        }.items()
+        if value is not None
+    }
+    return {**values, **role_values}

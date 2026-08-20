@@ -20,7 +20,7 @@ def test_settings_reject_partial_groups_and_short_api_session_secret() -> None:
                 "SESSION_SECRET": "short",
             }
         )
-    with pytest.raises(SettingsError, match="Cloud Tasks.*all set"):
+    with pytest.raises(SettingsError, match="Cloud Tasks publisher.*all set"):
         Settings.from_env(
             {
                 "APP_ENV": "test",
@@ -82,5 +82,61 @@ def test_local_worker_allows_absent_external_groups_but_production_never_falls_b
         kipris_api_key_secret_id="kipris-key",
         package_metadata_base_url="https://packages.example.com",
     )
-    with pytest.raises(SettingsError, match="explicit Firestore and Cloud Tasks"):
+    with pytest.raises(SettingsError, match="explicit Firestore adapter"):
         build_container(production)
+
+
+def test_production_settings_are_role_scoped() -> None:
+    common = {
+        "APP_ENV": "production",
+        "APP_PUBLIC_BASE_URL": "https://api.example.com",
+        "GCP_PROJECT_ID": "project-1",
+        "GCP_REGION": "asia-northeast3",
+        "FIRESTORE_DATABASE": "(default)",
+        "LOCAL_STAGING_BUCKET": "staging-bucket",
+        "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
+        "GOOGLE_DRIVE_CLIENT_SECRET": "drive-secret",
+        "GITHUB_APP_ID": "app-1",
+        "GITHUB_APP_PRIVATE_KEY_SECRET_ID": "github-key",
+        "ANALYSIS_WORKER_URL": "https://worker.example.com",
+        "CLOUD_TASKS_SERVICE_ACCOUNT": "tasks@example.iam.gserviceaccount.com",
+    }
+    worker = Settings.from_env(
+        {
+            **common,
+            "APP_ROLE": "worker",
+            "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": "asia-northeast3",
+            "KIPRIS_API_KEY_SECRET_ID": "kipris-key",
+            "PACKAGE_METADATA_BASE_URL": "https://api.deps.dev/v3",
+        }
+    )
+    assert worker.role is AppRole.WORKER
+    assert worker.cloud_tasks_location is None
+    assert worker.google_login_client_id is None
+    assert worker.scheduler_service_account is None
+
+    api = Settings.from_env(
+        {
+            **common,
+            "APP_ROLE": "api",
+            "SESSION_SECRET": "s" * 32,
+            "FRONTEND_DIST_DIR": "/app/frontend/dist",
+            "GOOGLE_LOGIN_CLIENT_ID": "login-client",
+            "GOOGLE_LOGIN_CLIENT_SECRET": "login-secret",
+            "GOOGLE_LOGIN_REDIRECT_URI": "https://api.example.com/api/v1/auth/google/callback",
+            "GOOGLE_DRIVE_REDIRECT_URI": "https://api.example.com/api/v1/source-connections/google-drive/callback",
+            "GOOGLE_DRIVE_WEBHOOK_BASE_URL": "https://api.example.com/webhooks/google-drive",
+            "DRIVE_WATCH_CHANNEL_TOKEN": "channel-token",
+            "GOOGLE_PICKER_API_KEY": "picker-key",
+            "GOOGLE_CLOUD_PROJECT_NUMBER": "123456789012",
+            "GITHUB_APP_SLUG": "ip-risk-agent",
+            "GITHUB_WEBHOOK_SECRET_ID": "github-webhook",
+            "GITHUB_APP_CALLBACK_URL": "https://api.example.com/api/v1/source-connections/github/install/callback",
+            "CLOUD_TASKS_LOCATION": "asia-northeast3",
+            "CLOUD_TASKS_QUEUE": "analysis-changes",
+            "SCHEDULER_SERVICE_ACCOUNT": "scheduler@example.iam.gserviceaccount.com",
+        }
+    )
+    assert api.role is AppRole.API
+    assert api.vertex_config is None
+    assert api.kipris_api_key_secret_id is None

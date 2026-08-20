@@ -4,6 +4,7 @@ from .cloud_tasks import CloudTasksEnqueuer
 from .foundation import (
     GoogleCloudClients,
     GoogleCloudFoundation,
+    SecretManagerRuntimeSecretReader,
     build_google_cloud_foundation,
 )
 from .identity import GoogleOidcTaskAuthenticator
@@ -29,5 +30,6 @@ __all__ = [
     "GoogleCloudFoundation",
     "GoogleOperationalFirestoreBackend",
     "SecretManagerCredentialVault",
+    "SecretManagerRuntimeSecretReader",
     "build_google_cloud_foundation",
 ]

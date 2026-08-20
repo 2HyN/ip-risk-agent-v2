@@ -26,6 +26,7 @@ from ip_risk_agent.connectors.common.credential_vault import (
     CredentialScope,
 )
 from ip_risk_agent.connectors.common.runtime_store import DriveRuntime
+from ip_risk_agent.connectors.github.tracking_scope import GitHubTrackingScope
 from ip_risk_agent.connectors.local.staging_store import StagingRef
 from ip_risk_agent.gcp import (
     CloudStorageLocalStagingStore,
@@ -37,6 +38,7 @@ from ip_risk_agent.gcp import (
     GoogleCloudFoundation,
     GoogleOidcTaskAuthenticator,
     SecretManagerCredentialVault,
+    SecretManagerRuntimeSecretReader,
 )
 
 
@@ -56,9 +58,19 @@ class MemoryOperationalBackend:
 
     async def query_one(self, collection, field, value):
         for (candidate, _), document in self.documents.items():
-            if candidate == collection and document.get(field) == value:
+            if candidate == collection and _nested(document, field) == value:
                 return dict(document)
         return None
+
+    async def query_many(self, collection, filters, *, limit):
+        matches = []
+        for (candidate, _), document in self.documents.items():
+            if candidate == collection and all(
+                _nested(document, field) == value
+                for field, value in filters.items()
+            ):
+                matches.append(dict(document))
+        return tuple(matches[:limit])
 
     async def consume_unexpired(self, collection, document_id, now):
         document = self.documents.get((collection, document_id))
@@ -74,6 +86,15 @@ class MemoryOperationalBackend:
 
 def run(awaitable):
     return asyncio.run(awaitable)
+
+
+def _nested(document: dict, field: str):
+    value = document
+    for component in field.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(component)
+    return value
 
 
 def test_google_cloud_foundation_exposes_durable_container_overrides() -> None:
@@ -140,6 +161,30 @@ def test_firestore_operational_state_roundtrips_without_raw_lookup_keys() -> Non
         binding = SourceMountBinding("pending-1", "connection-1", "source-1", "mount-1", "reg-1")
         await pending_store.save_binding(binding)
         assert await pending_store.get_binding_for_mount("mount-1") == binding
+
+    run(scenario())
+
+
+def test_firestore_runtime_store_supports_bounded_operational_lookup() -> None:
+    async def scenario() -> None:
+        backend = MemoryOperationalBackend()
+        store = FirestoreRuntimeStore(
+            backend,
+            collection="source_operational_github_tracking",
+            model=GitHubTrackingScope,
+        )
+        scope = GitHubTrackingScope(
+            mount_id="mount-1",
+            owner="owner",
+            repo="repo",
+            default_branch="main",
+            tracked_branch="main",
+        )
+        await store.save(scope.mount_id, scope)
+        assert await store.find_one("mount_id", "mount-1") == scope
+        assert await store.find_many({"owner": "owner", "repo": "repo"}) == (
+            scope,
+        )
 
     run(scenario())
 
@@ -230,6 +275,15 @@ class FakeSecretClient:
         self.disabled.append(name)
 
 
+class FakeRuntimeSecretClient:
+    def __init__(self) -> None:
+        self.names: list[str] = []
+
+    def access_secret_version(self, *, name):
+        self.names.append(name)
+        return SimpleNamespace(payload=SimpleNamespace(data=b"runtime-secret"))
+
+
 def test_secret_manager_vault_uses_opaque_project_scoped_reference() -> None:
     async def scenario() -> None:
         client = FakeSecretClient()
@@ -248,6 +302,17 @@ def test_secret_manager_vault_uses_opaque_project_scoped_reference() -> None:
         assert client.disabled == [f"{ref.key_id}/versions/latest"]
 
     run(scenario())
+
+
+def test_runtime_secret_reader_uses_project_scoped_latest_version() -> None:
+    client = FakeRuntimeSecretClient()
+    reader = SecretManagerRuntimeSecretReader(client=client, project_id="project-1")
+    assert reader.access("github-private-key") == "runtime-secret"
+    assert client.names == [
+        "projects/project-1/secrets/github-private-key/versions/latest"
+    ]
+    with pytest.raises(ValueError, match="secret ID"):
+        reader.access("../outside-project")
 
 
 class FakeBlob:

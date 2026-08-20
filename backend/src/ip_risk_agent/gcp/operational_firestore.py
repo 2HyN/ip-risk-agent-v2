@@ -54,6 +54,13 @@ class OperationalFirestoreBackend(Protocol):
     async def put(self, collection: str, document_id: str, data: dict) -> None: ...
     async def delete(self, collection: str, document_id: str) -> None: ...
     async def query_one(self, collection: str, field: str, value: object) -> dict | None: ...
+    async def query_many(
+        self,
+        collection: str,
+        filters: Mapping[str, object],
+        *,
+        limit: int,
+    ) -> tuple[dict, ...]: ...
     async def consume_unexpired(
         self, collection: str, document_id: str, now: datetime
     ) -> dict | None: ...
@@ -82,6 +89,25 @@ class GoogleOperationalFirestoreBackend:
         async for snapshot in query.stream():
             return _document(snapshot)
         return None
+
+    async def query_many(
+        self,
+        collection: str,
+        filters: Mapping[str, object],
+        *,
+        limit: int,
+    ) -> tuple[dict, ...]:
+        if limit < 1 or limit > 500:
+            raise ValueError("operational query limit must be between 1 and 500")
+        query = self._client.collection(collection)
+        for field, value in filters.items():
+            query = query.where(filter=FieldFilter(field, "==", value))
+        results: list[dict] = []
+        async for snapshot in query.limit(limit).stream():
+            document = _document(snapshot)
+            if document is not None:
+                results.append(document)
+        return tuple(results)
 
     async def consume_unexpired(
         self, collection: str, document_id: str, now: datetime
@@ -183,6 +209,30 @@ class FirestoreRuntimeStore(Generic[RuntimeRecord]):
     async def delete(self, key: str) -> None:
         await self._backend.delete(self._collection, _key(key))
 
+    async def find_one(self, field: str, value: object) -> RuntimeRecord | None:
+        data = await self._backend.query_one(
+            self._collection,
+            f"record.{field}",
+            value,
+        )
+        return None if data is None else self._model.model_validate(data["record"])
+
+    async def find_many(
+        self,
+        filters: Mapping[str, object],
+        *,
+        limit: int = 100,
+    ) -> tuple[RuntimeRecord, ...]:
+        documents = await self._backend.query_many(
+            self._collection,
+            {f"record.{field}": value for field, value in filters.items()},
+            limit=limit,
+        )
+        return tuple(
+            self._model.model_validate(document["record"])
+            for document in documents
+        )
+
 
 class FirestorePendingConnectionStore:
     def __init__(self, backend: OperationalFirestoreBackend) -> None:
@@ -224,6 +274,17 @@ class FirestorePendingConnectionStore:
     async def get_binding_for_mount(self, mount_id: str) -> SourceMountBinding | None:
         return _binding(
             await self._backend.query_one(MOUNT_BINDINGS, "mount_id", mount_id)
+        )
+
+    async def get_binding_for_connection(
+        self, canonical_connection_id: str
+    ) -> SourceMountBinding | None:
+        return _binding(
+            await self._backend.query_one(
+                MOUNT_BINDINGS,
+                "canonical_connection_id",
+                canonical_connection_id,
+            )
         )
 
     async def save_binding(self, value: SourceMountBinding) -> None:

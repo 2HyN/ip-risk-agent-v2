@@ -59,6 +59,14 @@
         { "fieldPath": "record_kind", "order": "ASCENDING" },
         { "fieldPath": "risk_workspace_id", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "source_operational_github_tracking",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "record.owner", "order": "ASCENDING" },
+        { "fieldPath": "record.repo", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

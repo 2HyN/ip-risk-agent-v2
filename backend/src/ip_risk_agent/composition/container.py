@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -77,6 +78,27 @@ class ContainerOverrides:
     close_callbacks: tuple[Any, ...] = ()
     device_auth_service: DesktopDeviceAuthService | None = None
     device_auth_store: Any | None = None
+    runtime_composer: (
+        Callable[["RuntimeCompositionContext"], "RuntimeComposition"] | None
+    ) = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeCompositionContext:
+    settings: Settings
+    authentication: AuthenticationService
+    control_facade: ControlPlaneFacade
+    device_auth_service: DesktopDeviceAuthService | None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeComposition:
+    source_adapters: tuple[Any, ...] = ()
+    source_routers: SourceRouterBundle = field(default_factory=SourceRouterBundle)
+    extra_api_routers: tuple[Any, ...] = ()
+    intelligence: Any | None = None
+    task_authenticator: TaskAuthenticator | None = None
+    close_callbacks: tuple[Any, ...] = ()
 
 
 @dataclass(slots=True)
@@ -111,17 +133,37 @@ def build_container(
 ) -> RuntimeContainer:
     overrides = overrides or ContainerOverrides()
     settings.validate()
-    if settings.profile is RuntimeProfile.PRODUCTION and (
-        overrides.unit_of_work_factory is None or overrides.task_enqueuer is None
+    if (
+        settings.profile is RuntimeProfile.PRODUCTION
+        and overrides.unit_of_work_factory is None
+    ):
+        raise SettingsError("production container requires an explicit Firestore adapter")
+    if (
+        settings.profile is RuntimeProfile.PRODUCTION
+        and settings.role is AppRole.API
+        and overrides.task_enqueuer is None
     ):
         raise SettingsError(
-            "production container requires explicit Firestore and Cloud Tasks adapters"
+            "production API requires an explicit Cloud Tasks adapter"
         )
     store = overrides.unit_of_work_factory or InMemoryControlStore()
-    queue = overrides.task_enqueuer or InMemoryTaskEnqueuer()
-    if settings.profile is RuntimeProfile.PRODUCTION and (
-        isinstance(store, InMemoryControlStore)
-        or isinstance(queue, InMemoryTaskEnqueuer)
+    if overrides.task_enqueuer is not None:
+        queue = overrides.task_enqueuer
+    elif (
+        settings.profile is RuntimeProfile.PRODUCTION
+        and settings.role is AppRole.WORKER
+    ):
+        queue = _WorkerTaskEnqueuer()
+    else:
+        queue = InMemoryTaskEnqueuer()
+    if settings.profile is RuntimeProfile.PRODUCTION and isinstance(
+        store, InMemoryControlStore
+    ):
+        raise SettingsError("production container cannot use an in-memory canonical store")
+    if (
+        settings.profile is RuntimeProfile.PRODUCTION
+        and settings.role is AppRole.API
+        and isinstance(queue, InMemoryTaskEnqueuer)
     ):
         raise SettingsError("production container cannot use in-memory adapters")
     observer = overrides.observer or StructuredLogger()
@@ -160,10 +202,34 @@ def build_container(
         ),
         observer=observer,
     )
-    adapters = SourceAdapterRegistry(overrides.source_adapters)
-    task_authenticator = overrides.task_authenticator or DenyTaskAuthenticator()
+    composed = (
+        RuntimeComposition()
+        if overrides.runtime_composer is None
+        else overrides.runtime_composer(
+            RuntimeCompositionContext(
+                settings=settings,
+                authentication=authentication,
+                control_facade=facade,
+                device_auth_service=device_auth_service,
+            )
+        )
+    )
+    source_adapters = overrides.source_adapters or composed.source_adapters
+    source_routers = (
+        overrides.source_routers
+        if overrides.source_routers.all
+        else composed.source_routers
+    )
+    extra_api_routers = (*composed.extra_api_routers, *overrides.extra_api_routers)
+    close_callbacks = (*overrides.close_callbacks, *composed.close_callbacks)
+    adapters = SourceAdapterRegistry(source_adapters)
+    task_authenticator = (
+        overrides.task_authenticator
+        or composed.task_authenticator
+        or DenyTaskAuthenticator()
+    )
 
-    intelligence = overrides.intelligence
+    intelligence = overrides.intelligence or composed.intelligence
     if intelligence is not None and not isinstance(
         intelligence, CompleteIntelligenceFacade
     ):
@@ -201,15 +267,15 @@ def build_container(
             principal_resolver=current,
         )
         assert device_auth_service is not None
-        extra_api_routers = (
+        api_extra_routers = (
             create_device_enrollment_router(
                 devices=device_auth_service,
                 principal_resolver=current,
             ),
-            *overrides.extra_api_routers,
+            *extra_api_routers,
         )
     else:
-        extra_api_routers = overrides.extra_api_routers
+        api_extra_routers = extra_api_routers
 
     checks = [
         ReadinessCheck(
@@ -220,7 +286,15 @@ def build_container(
         ReadinessCheck(
             "task_queue",
             True,
-            "in_memory" if isinstance(queue, InMemoryTaskEnqueuer) else "configured",
+            (
+                "not_applicable"
+                if isinstance(queue, _WorkerTaskEnqueuer)
+                else (
+                    "in_memory"
+                    if isinstance(queue, InMemoryTaskEnqueuer)
+                    else "configured"
+                )
+            ),
         ),
     ]
     if settings.role is AppRole.WORKER:
@@ -262,9 +336,9 @@ def build_container(
                     "and non-static task identity"
                 )
     elif settings.profile is RuntimeProfile.PRODUCTION and (
-        not overrides.source_routers.web
-        or not overrides.source_routers.webhooks
-        or not overrides.source_routers.desktop
+        not source_routers.web
+        or not source_routers.webhooks
+        or not source_routers.desktop
         or set(adapters.source_types) != set(SourceType)
     ):
         raise SettingsError(
@@ -278,15 +352,22 @@ def build_container(
         control_facade=facade,
         adapters=adapters,
         control_api=control_api,
-        source_routers=overrides.source_routers,
-        extra_api_routers=extra_api_routers,
+        source_routers=source_routers,
+        extra_api_routers=api_extra_routers,
         original_router=original_router,
         pipeline=pipeline,
         task_authenticator=task_authenticator,
         health=HealthRegistry(tuple(checks)),
         device_auth_service=device_auth_service,
-        close_callbacks=overrides.close_callbacks,
+        close_callbacks=close_callbacks,
     )
+
+
+class _WorkerTaskEnqueuer:
+    """Worker-only facade dependency; outbound enqueue belongs to the API role."""
+
+    async def enqueue_change(self, _change_event_id: str) -> None:
+        raise RuntimeError("analysis task enqueue is unavailable in the worker role")
 
 
 def _control_api(
