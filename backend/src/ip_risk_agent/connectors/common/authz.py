@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 
 class AuthzDependency(Protocol):
@@ -21,3 +21,14 @@ async def allow_all_authz(request: Request, resource_id: str) -> None:
     """개발/테스트 전용 기본값 — 아무 것도 검사하지 않는다.
     프로덕션 배포 전 반드시 Agent 1의 실제 authz_dependency로 교체해야 한다."""
     return None
+
+
+async def deny_all_authz(request: Request, resource_id: str) -> None:
+    """Fail-closed router default used until composition injects scoped authz."""
+    raise HTTPException(
+        status_code=401,
+        detail="source authorization is not configured",
+    )
+
+
+__all__ = ["AuthzDependency", "allow_all_authz", "deny_all_authz"]

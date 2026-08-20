@@ -29,6 +29,7 @@ from iprisk_contracts import (
     TextSegment,
 )
 from ip_risk_agent.application.process_change import InMemoryTaskEnqueuer
+from ip_risk_agent.application.analysis_jobs.service import AnalysisJobOrchestrationError
 from ip_risk_agent.application.public_facade import (
     ControlPlaneFacade,
     ControlPlaneFacadeConfig,
@@ -219,6 +220,55 @@ def test_public_authorization_actions_match_canonical_actions() -> None:
     assert {action.value for action in PublicVwsAction} == {
         action.value for action in VwsAction
     }
+
+
+def test_claim_preserves_source_change_and_reclaims_without_reenqueue() -> None:
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        change = make_change(source)
+        registered = await facade.register_source_change(change)
+        assert len(queue.attempts) == 1
+
+        clock.current = NOW + timedelta(seconds=2)
+        first = await facade.claim_analysis(registered.change_event_id)
+        assert first is not None
+        assert first.source_change == change
+        assert first.attempt == 1
+        assert first.lease_expires_at == clock.current + timedelta(minutes=5)
+        assert await facade.claim_analysis(registered.change_event_id) is None
+
+        clock.current = first.lease_expires_at
+        reclaimed = await facade.claim_analysis(registered.change_event_id)
+        assert reclaimed is not None and reclaimed.attempt == 2
+        assert reclaimed.source_change == change
+        assert len(queue.attempts) == 1
+
+        with pytest.raises(AnalysisJobOrchestrationError, match="does not own"):
+            await facade.fail_analysis(
+                registered.change_event_id,
+                failure_safe="stale failure",
+                attempt=1,
+            )
+        await facade.fail_analysis(
+            registered.change_event_id,
+            failure_safe="retryable provider failure",
+            attempt=2,
+        )
+        with pytest.raises(AnalysisJobOrchestrationError, match="explicit retry"):
+            await facade.claim_analysis(registered.change_event_id)
+        retried = await facade.claim_analysis(
+            registered.change_event_id,
+            allow_retry=True,
+        )
+        assert retried is not None and retried.attempt == 3
+        assert len(queue.attempts) == 1
+
+    run(scenario())
 
 
 def test_facade_runs_source_change_gate_result_and_risk_pipeline() -> None:

@@ -6,6 +6,7 @@ from .transitions import (
     claim_change_event,
     complete_change_event,
     fail_change_event,
+    reclaim_change_event,
     requeue_change_event,
 )
 
@@ -16,6 +17,7 @@ __all__ = [
     "claim_change_event",
     "complete_change_event",
     "fail_change_event",
+    "reclaim_change_event",
     "requeue_change_event",
     "InMemoryTaskEnqueuer",
     "TaskEnqueueError",

@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Mapping
 
-from iprisk_contracts import ChangeType, SourceType
+from iprisk_contracts import ChangeType, SourceChange, SourceType
 
 from ip_risk_agent.core.common import (
     DomainInvariantError,
@@ -47,9 +47,11 @@ class ChangeEvent:
     attempts: int
     created_at: datetime
     updated_at: datetime
+    source_change: SourceChange
     artifact_id: str | None = None
     provider_event_id: str | None = None
     last_error_safe: str | None = None
+    lease_expires_at: datetime | None = None
     safe_metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -80,29 +82,86 @@ class ChangeEvent:
         object.__setattr__(self, "observed_at", observed_at)
         object.__setattr__(self, "created_at", created_at)
         object.__setattr__(self, "updated_at", updated_at)
-        object.__setattr__(
-            self,
-            "safe_metadata",
-            freeze_safe_mapping(self.safe_metadata, "change_event.safe_metadata"),
+        if not isinstance(self.source_change, SourceChange):
+            raise DomainInvariantError("change_event.source_change must be SourceChange")
+        expected_source_identity = (
+            self.event_fingerprint,
+            self.risk_workspace_id,
+            self.mount_id,
+            self.source_workspace_id,
+            self.source_artifact_id,
+            self.source_type,
+            self.change_type,
+            self.revision,
+            self.previous_revision,
+            self.observed_at,
+            self.provider_event_id,
         )
+        actual_source_identity = (
+            self.source_change.event_fingerprint,
+            self.source_change.risk_workspace_id,
+            self.source_change.mount_id,
+            self.source_change.source_workspace_id,
+            self.source_change.artifact.source_artifact_id,
+            self.source_change.source_type,
+            self.source_change.change_type,
+            self.source_change.revision,
+            self.source_change.previous_revision,
+            self.source_change.observed_at,
+            self.source_change.provider_event_id,
+        )
+        if actual_source_identity != expected_source_identity:
+            raise DomainInvariantError(
+                "change_event.source_change must match canonical event identity"
+            )
+        safe_metadata = freeze_safe_mapping(
+            self.safe_metadata,
+            "change_event.safe_metadata",
+        )
+        source_safe_metadata = freeze_safe_mapping(
+            self.source_change.safe_metadata,
+            "change_event.source_change.safe_metadata",
+        )
+        if safe_metadata != source_safe_metadata:
+            raise DomainInvariantError(
+                "change_event.source_change metadata must match canonical event metadata"
+            )
+        object.__setattr__(self, "safe_metadata", safe_metadata)
         if self.last_error_safe is not None:
             object.__setattr__(
                 self,
                 "last_error_safe",
                 require_non_empty(self.last_error_safe, "change_event.last_error_safe"),
             )
+        lease_expires_at = None
+        if self.lease_expires_at is not None:
+            lease_expires_at = normalize_utc(
+                self.lease_expires_at,
+                "change_event.lease_expires_at",
+            )
+            object.__setattr__(self, "lease_expires_at", lease_expires_at)
         if self.status is ChangeEventStatus.PENDING:
-            if self.last_error_safe is not None:
-                raise DomainInvariantError("PENDING change event cannot have last_error_safe")
-        elif self.status is ChangeEventStatus.PROCESSING:
-            if self.attempts < 1 or self.last_error_safe is not None:
+            if self.last_error_safe is not None or lease_expires_at is not None:
                 raise DomainInvariantError(
-                    "PROCESSING change event requires an attempt and no last_error_safe"
+                    "PENDING change event cannot have failure or lease state"
+                )
+        elif self.status is ChangeEventStatus.PROCESSING:
+            if (
+                self.attempts < 1
+                or self.last_error_safe is not None
+                or lease_expires_at is None
+            ):
+                raise DomainInvariantError(
+                    "PROCESSING change event requires an attempt and lease"
                 )
         elif self.status is ChangeEventStatus.FAILED:
-            if self.attempts < 1 or self.last_error_safe is None:
+            if (
+                self.attempts < 1
+                or self.last_error_safe is None
+                or lease_expires_at is not None
+            ):
                 raise DomainInvariantError(
-                    "FAILED change event requires an attempt and last_error_safe"
+                    "FAILED change event requires an attempt, failure, and no lease"
                 )
-        elif self.last_error_safe is not None:
-            raise DomainInvariantError("DONE change event cannot have last_error_safe")
+        elif self.last_error_safe is not None or lease_expires_at is not None:
+            raise DomainInvariantError("DONE change event cannot have failure or lease state")

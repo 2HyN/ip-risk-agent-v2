@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 2 완료 — Phase 3 진입 대기**
+> 현재 단계: **통합 Phase 3 완료 — Phase 4 진입 대기**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -94,8 +94,8 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 | Phase | 목표 | 핵심 산출물 | 종료 gate | 상태 |
 |---|---|---|---|---|
 | 1 | 계획 확정과 agent 문서 통합 | 전체 phase 계획, Agent 1/2/3 단일 문서, 삭제 보류 목록 | source 문서 coverage와 보존 확인 | 완료 (`31e3fc4`) |
-| 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 완료 |
-| 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 대기 |
+| 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 완료 (`83c901f`) |
+| 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 완료 |
 | 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 대기 |
 | 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 대기 |
 | 6 | GCP 내부 구현 | Firestore operational stores, Secret Manager/GCS/Tasks adapters, indexes, Docker/Cloud Run/Scheduler/RAG tooling | emulator 및 staging-ready dry run | 대기 |
@@ -253,3 +253,79 @@ agent-deliverables/agent-3-dependencies.md
 - [x] README 및 environment template 수렴
 
 종료 gate: **통과**. Phase 3 P0 경계 보강을 시작할 수 있다. Phase 2 변경은 이 로그를 포함하는 단일 dependency/toolchain commit으로 기록한다.
+
+## Phase 3 — P0 통합 경계 보강
+
+### 시작 상태와 범위
+
+- 시작 HEAD: `83c901f48c90847500d0598bc2536fcd2d98808b`
+- 목표: `INTEGRATION_V2_EXECUTION_PLAN.md` §5의 P0-1부터 P0-6까지를 production composition 전에 코드 계약과 실패 경로로 고정한다.
+- 포함: canonical `SourceChange` claim, bounded lease와 attempt fencing, Source session/CSRF authz, pending connection과 canonical mount 수렴, desktop enrollment credential, analyzer/result 완전성.
+- 제외: 실제 API/Worker container 조립, Firestore operational store, Electron `safeStorage`/IPC, GCP adapter와 resource 구성. 이 항목들은 각각 Phase 4~6에서 현재 경계를 구현체에 연결한다.
+
+### 수렴 결과
+
+1. **Canonical worker input**
+   - `ChangeEvent`가 raw content 없는 frozen Contract v1 `SourceChange`를 canonical 실행 metadata로 보존한다.
+   - 중복 identity와 safe metadata 불일치를 domain invariant로 거부한다.
+   - Firestore mapper는 `source_change`를 필수 schema로 직렬화·역직렬화하며, 누락된 구 schema를 성공으로 추정하지 않는다.
+   - `AnalysisExecutionClaim`이 같은 canonical transaction에서 읽은 `source_change`, `attempt`, `lease_expires_at`을 반환한다.
+
+2. **Lease/retry/crash recovery**
+   - claim lease를 기본 300초, 허용 범위 1~3600초로 고정했다.
+   - 유효 lease 중복 delivery는 no-op, 만료된 `PROCESSING/RUNNING`과 명시적 retry delivery의 `FAILED/FAILED`는 재enqueue 없이 원자적으로 reclaim한다.
+   - reclaim마다 attempt와 job `started_at` fencing을 전진시키고 기존 outcome/failure를 제거한다.
+   - `fail_analysis()`에 attempt ownership 검사를 추가해 오래된 worker의 실패 기록을 거부한다.
+
+3. **Source web authz/CSRF**
+   - 모든 Drive/GitHub/Local router authz slot의 기본값을 `deny_all_authz`로 교체했다.
+   - connection/workspace/mount/device-registration scope를 factory parameter부터 분리해 한 resource ID의 의미를 추정하지 않게 했다.
+   - session version을 검증하는 principal resolver, mutation CSRF, pending connection owner 및 canonical mount resolve, Control facade action 판정을 결합하는 `SessionSourceAuthorizer`를 추가했다.
+   - OAuth/App callback GET은 one-time state 검증 후 callback service가 현재 principal을 다시 해석하며, webhook/internal identity는 browser authorizer와 섞지 않는다.
+
+4. **Pending connection에서 canonical mount로의 수렴**
+   - TTL/status/idempotency key를 가진 `PendingSourceConnection`, canonical binding 및 durable store protocol을 추가했다.
+   - OAuth/App callback은 high-entropy opaque pending ID만 만들고 placeholder mount를 생성하지 않는다.
+   - Drive file 또는 GitHub repository/branch가 실제 선택될 때 deterministic key로 `register_source_metadata()`를 한 번 호출한다.
+   - callback/mount retry, VWS/owner/type mismatch, expiry와 credential/installation lookup을 경계에서 처리한다.
+   - 현재 adapter는 local/test용 in-memory이며 Firestore 구현은 Phase 6 소유다.
+
+5. **Desktop device authentication**
+   - session+CSRF로 one-time enrollment challenge를 발급하고, 교환 시 opaque device credential을 한 번만 반환하는 service/router를 추가했다.
+   - challenge와 credential은 SHA-256 hash만 store에 남기며 challenge replay, expiry, revoke, session-version invalidation을 거부한다.
+   - background bearer 요청은 device↔VWS↔mount binding과 Control action을 재검증한다.
+   - Electron `safeStorage`, preload IPC와 기존 Local route의 최종 제품 wiring은 Phase 5에서 수행한다.
+
+6. **Analyzer/result 완전성**
+   - Control configured analyzer set과 active analyzer set이 startup 구성 시 정확히 같지 않으면 실패하는 wrapper를 추가했다.
+   - gated artifact 요청 집합과 반환 result 집합의 누락·중복·예상 밖 type을 거부한다.
+   - 모든 result의 job/artifact/revision identity가 gated artifact와 정확히 같은지 검증한다.
+
+### 검증 기록
+
+| 검증 | 결과 |
+|---|---|
+| Phase 3 경계 focused suite | `28 passed` |
+| Python `compileall` + `pip check` | 통과 |
+| contracts/control/connectors/intelligence/integration/e2e non-live 전체 suite | `574 passed, 1 skipped, 10 deselected` |
+| root TypeScript typecheck/build/resolution | 통과 |
+| Frontend Vitest | `6 files, 23 passed` |
+| Desktop Node test | `65 tests, 63 passed, 2 skipped` |
+| `pnpm install --frozen-lockfile` | 통과, lock 변경 없음 |
+| `git diff --check` | 통과 |
+| `shared/contracts/**` diff | 없음 |
+
+Python skip 1건은 Phase 2와 동일하게 `FIRESTORE_EMULATOR_HOST` 미설정이며, deselected 10건은 실제 provider credential이 필요한 `live` test다. Desktop skip 2건도 Phase 2와 동일한 Windows symlink 권한 제약이다. Phase 3은 Python backend와 integration test만 변경했고 dependency manifest/lock 및 Web/Desktop TypeScript source는 변경하지 않았다.
+
+### Phase 3 gate
+
+- [x] claim에서 canonical metadata-only `SourceChange` 복구
+- [x] bounded lease, duplicate no-op, expired/failed reclaim와 attempt fencing
+- [x] Source router fail-closed default와 session/CSRF scope adapter
+- [x] pending connection TTL/idempotency 및 실제 선택 시 canonical mount 생성
+- [x] one-time desktop enrollment, hash-only credential, revoke/session/mount binding
+- [x] analyzer 구성 집합과 result identity/집합 완전성 검사
+- [x] 경계별 negative integration test 및 전체 non-live 회귀 통과
+- [x] Frozen Contract와 dependency/lock 무변경
+
+종료 gate: **통과**. Phase 4에서는 이 phase의 public boundary만 사용해 settings/container, 통합 API와 analysis worker pipeline을 조립한다. In-memory operational store를 production fallback으로 사용하지 않으며, durable adapter는 Phase 6에서 제공한다.

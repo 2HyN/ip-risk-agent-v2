@@ -5,7 +5,14 @@ from datetime import datetime, timezone
 
 import pytest
 
-from iprisk_contracts import AnalysisType, ChangeType, ReviewPriority, SourceType
+from iprisk_contracts import (
+    AnalysisType,
+    ChangeType,
+    ReviewPriority,
+    SourceArtifactRef,
+    SourceChange,
+    SourceType,
+)
 from ip_risk_agent.application.process_change import ChangeEvent, ChangeEventStatus
 from ip_risk_agent.application.repositories import (
     ConcurrencyConflictError,
@@ -141,6 +148,23 @@ def make_change(event_id: str, fingerprint: str) -> ChangeEvent:
         attempts=0,
         created_at=NOW,
         updated_at=NOW,
+        source_change=SourceChange(
+            contract_version="1",
+            event_id=event_id,
+            event_fingerprint=fingerprint,
+            risk_workspace_id="vws-1",
+            mount_id="mount-1",
+            source_workspace_id="source-1",
+            source_type=SourceType.GITHUB,
+            artifact=SourceArtifactRef(
+                source_artifact_id="path:main.py",
+                display_name="main.py",
+            ),
+            change_type=ChangeType.UPDATE,
+            revision="revision-1",
+            observed_at=NOW,
+            safe_metadata={},
+        ),
     )
 
 

@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
+from ip_risk_agent.connectors.common.authz import allow_all_authz
 from ip_risk_agent.connectors.github.connection_lookup import InMemoryGitHubConnectionInstallationLookup
 from ip_risk_agent.connectors.github.models import GitHubRepository
 from ip_risk_agent.connectors.github.mounts_routes import (
@@ -78,6 +79,8 @@ def _build_client(provider: FakeGitHubProvider | None = None):
         connection_installation_lookup=lookup,
         tracking_scope_store=tracking_scope_store,
         mount_creation_callback=callback,
+        connection_authz_dependency=allow_all_authz,
+        workspace_authz_dependency=allow_all_authz,
     )
     app = FastAPI()
     app.include_router(router)

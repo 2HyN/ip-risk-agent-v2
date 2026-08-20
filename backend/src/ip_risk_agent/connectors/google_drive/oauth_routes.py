@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from iprisk_contracts.common import SourceType
 
-from ..common.authz import AuthzDependency, allow_all_authz
+from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.credential_vault import CredentialRef, CredentialScope, SourceCredentialVault
 from ..common.errors import SourceConnectorError
 from ..common.oauth_state import OAuthStateStore, generate_state
@@ -53,7 +53,7 @@ def create_drive_oauth_router(
     oauth_client: DriveOAuthClient,
     credential_vault: SourceCredentialVault,
     connection_creation_callback: DriveConnectionCreationCallback,
-    authz_dependency: AuthzDependency = allow_all_authz,
+    authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
     router = APIRouter()
 

@@ -20,6 +20,8 @@ from iprisk_contracts import (
     PatentCandidate,
     ProviderFailure,
     ReviewPriority,
+    SourceArtifactRef,
+    SourceChange,
     SourceType,
 )
 from ip_risk_agent.application.analysis_jobs import AnalysisJob, AnalysisJobStatus
@@ -130,7 +132,25 @@ async def add_running_job(
             attempts=1,
             created_at=NOW + timedelta(seconds=offset_seconds),
             updated_at=started_at,
+            source_change=SourceChange(
+                contract_version="1",
+                event_id=f"provider-event-{suffix}",
+                event_fingerprint=f"fingerprint-{suffix}",
+                risk_workspace_id="vws-1",
+                mount_id="mount-1",
+                source_workspace_id="source-1",
+                source_type=SourceType.GITHUB,
+                artifact=SourceArtifactRef(
+                    source_artifact_id="repo:path:src/main.py",
+                    display_name="main.py",
+                ),
+                change_type=ChangeType.UPDATE,
+                revision=revision,
+                observed_at=NOW + timedelta(seconds=offset_seconds),
+                safe_metadata={},
+            ),
             artifact_id="artifact-1",
+            lease_expires_at=started_at + timedelta(minutes=5),
         )
         job = AnalysisJob(
             id=f"job-{suffix}",
@@ -632,7 +652,15 @@ def test_inconsistent_change_event_revision_is_rejected_before_result_intake() -
             assert job is not None
             event = await uow.change_events.get(job.change_event_id)
             assert event is not None
-            await uow.change_events.save(replace(event, revision="revision-corrupt"))
+            await uow.change_events.save(
+                replace(
+                    event,
+                    revision="revision-corrupt",
+                    source_change=event.source_change.model_copy(
+                        update={"revision": "revision-corrupt"}
+                    ),
+                )
+            )
             await uow.commit()
 
         with pytest.raises(AnalysisResultIntakeError, match="context is inconsistent"):

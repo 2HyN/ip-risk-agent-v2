@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from iprisk_contracts.common import ChangeType, SourceArtifactRef, SourceType
 from iprisk_contracts.source_change import SourceChange
 
-from ..common.authz import AuthzDependency, allow_all_authz
+from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.change_sink import SourceChangeSink
 from ..common.fingerprint import local_change_fingerprint
 from .identity import encode_local_artifact_id
@@ -87,7 +87,9 @@ def create_local_desktop_router(
     change_sink: SourceChangeSink,
     device_registration_callback: DeviceRegistrationCallback,
     mount_creation_callback: MountCreationCallback,
-    authz_dependency: AuthzDependency = allow_all_authz,
+    device_registration_authz_dependency: AuthzDependency = deny_all_authz,
+    workspace_authz_dependency: AuthzDependency = deny_all_authz,
+    mount_authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -95,7 +97,7 @@ def create_local_desktop_router(
     async def handle_device_register(
         request: Request, body: DeviceRegistrationRequest
     ) -> DeviceRegistrationResponse:
-        await authz_dependency(request, "")
+        await device_registration_authz_dependency(request, "")
         await device_registration_callback.register_device(request, body.device_id, body.device_label)
         return DeviceRegistrationResponse(status="ok")
 
@@ -103,19 +105,19 @@ def create_local_desktop_router(
     async def handle_mount_register(
         request: Request, body: MountRegistrationRequest
     ) -> MountRegistrationResponse:
-        await authz_dependency(request, body.risk_workspace_id)
+        await workspace_authz_dependency(request, body.risk_workspace_id)
         return await mount_creation_callback.create_local_mount(request, body)
 
     @router.post("/desktop/staging", response_model=StagingUploadResponse)
     async def handle_staging_upload(request: Request, body: StagingUploadRequest) -> StagingUploadResponse:
-        await authz_dependency(request, body.mount_id)
+        await mount_authz_dependency(request, body.mount_id)
 
         ref = await staging_store.put(body.content, {})
         return StagingUploadResponse(object_name=ref.object_name)
 
     @router.post("/desktop/events", response_model=DesktopEventResponse)
     async def handle_desktop_event(request: Request, event: DesktopEventRequest) -> DesktopEventResponse:
-        await authz_dependency(request, event.mount_id)
+        await mount_authz_dependency(request, event.mount_id)
 
         if event.change_type != "DELETE" and not event.staging_object_name:
             raise HTTPException(

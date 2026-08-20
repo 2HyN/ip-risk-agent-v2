@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from iprisk_contracts import (
     AnalysisResult,
@@ -122,6 +122,7 @@ class ControlPlaneFacade:
             unit_of_work_factory=unit_of_work_factory,
             task_enqueuer=task_enqueuer,
             clock=clock,
+            lease_duration=timedelta(seconds=config.analysis_lease_seconds),
             concurrency_attempts=config.concurrency_attempts,
         )
         self._security_gate = SecurityGateService(
@@ -208,8 +209,10 @@ class ControlPlaneFacade:
     async def claim_analysis(
         self,
         change_event_id: str,
+        *,
+        allow_retry: bool = False,
     ) -> AnalysisExecutionClaim | None:
-        state = await self._jobs.claim(change_event_id)
+        state = await self._jobs.claim(change_event_id, allow_retry=allow_retry)
         if state is None:
             self._observer.event(
                 "analysis_claim_skipped",
@@ -226,6 +229,8 @@ class ControlPlaneFacade:
                 artifact_id=state.analysis_job.artifact_id,
             ),
         )
+        if state.change_event.lease_expires_at is None:
+            raise DomainInvariantError("claimed analysis is missing a bounded lease")
         return AnalysisExecutionClaim(
             change_event_id=state.change_event.id,
             analysis_job_id=state.analysis_job.id,
@@ -233,15 +238,24 @@ class ControlPlaneFacade:
             revision=state.analysis_job.revision,
             requested_analysis_types=state.analysis_job.requested_analysis_types,
             attempt=state.change_event.attempts,
+            lease_expires_at=state.change_event.lease_expires_at,
+            source_change=state.change_event.source_change,
         )
 
-    async def fail_analysis(self, change_event_id: str, *, failure_safe: str) -> None:
+    async def fail_analysis(
+        self,
+        change_event_id: str,
+        *,
+        failure_safe: str,
+        attempt: int | None = None,
+    ) -> None:
         await self._jobs.fail(
             change_event_id,
             failure_safe=sanitize_failure_message(
                 failure_safe,
                 self._retention_policy,
             ),
+            attempt=attempt,
         )
 
     async def retry_failed_analysis(self, change_event_id: str) -> None:

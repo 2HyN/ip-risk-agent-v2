@@ -521,12 +521,16 @@ class InMemoryAnalysisJobRepository(_Repository):
             raise UniqueConstraintViolation(
                 "analysis job requested types may only be narrowed"
             )
-        is_failed_requeue = (
-            previous.status is AnalysisJobStatus.FAILED
-            and job.status is AnalysisJobStatus.QUEUED
+        is_attempt_reset = (
+            previous.status in {AnalysisJobStatus.FAILED, AnalysisJobStatus.RUNNING}
+            and job.status in {AnalysisJobStatus.QUEUED, AnalysisJobStatus.RUNNING}
             and not job.analysis_outcomes
+            and (
+                job.status is AnalysisJobStatus.QUEUED
+                or job.started_at != previous.started_at
+            )
         )
-        if not is_failed_requeue and any(
+        if not is_attempt_reset and any(
             job.analysis_outcomes.get(analysis_type) != outcome
             for analysis_type, outcome in previous.analysis_outcomes.items()
         ):

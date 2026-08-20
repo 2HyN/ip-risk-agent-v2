@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ip_risk_agent.core.common import DomainInvariantError, normalize_utc, require_non_empty
 
@@ -58,8 +58,30 @@ def requeue_analysis_job(job: AnalysisJob) -> AnalysisJob:
     )
 
 
+def reclaim_analysis_job(job: AnalysisJob, *, occurred_at: datetime) -> AnalysisJob:
+    if job.status not in {AnalysisJobStatus.RUNNING, AnalysisJobStatus.FAILED}:
+        raise DomainInvariantError("only a RUNNING or FAILED analysis job may be reclaimed")
+    occurred_at = normalize_utc(occurred_at, "analysis_job_reclaim.occurred_at")
+    if job.started_at is not None and occurred_at < job.started_at:
+        raise DomainInvariantError("analysis job reclaim cannot predate the current attempt")
+    started_at = (
+        occurred_at
+        if job.started_at is None or occurred_at > job.started_at
+        else job.started_at + timedelta(microseconds=1)
+    )
+    return replace(
+        job,
+        status=AnalysisJobStatus.RUNNING,
+        started_at=started_at,
+        completed_at=None,
+        failure_safe=None,
+        analysis_outcomes={},
+    )
+
+
 __all__ = [
     "claim_analysis_job",
     "complete_analysis_job",
+    "reclaim_analysis_job",
     "requeue_analysis_job",
 ]

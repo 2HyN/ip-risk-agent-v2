@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from ip_risk_agent.connectors.common.credential_vault import CredentialRef, InMemoryCredentialVault
+from ip_risk_agent.connectors.common.authz import allow_all_authz
 from ip_risk_agent.connectors.common.oauth_state import InMemoryOAuthStateStore
 from ip_risk_agent.connectors.google_drive.oauth_routes import create_drive_oauth_router
 
@@ -67,6 +68,7 @@ def _build_client(oauth_client=None):
         oauth_client=oauth_client or FakeDriveOAuthClient(),
         credential_vault=vault,
         connection_creation_callback=callback,
+        authz_dependency=allow_all_authz,
     )
     app = FastAPI()
     app.include_router(router)

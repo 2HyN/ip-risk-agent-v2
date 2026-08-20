@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from ip_risk_agent.connectors.common.oauth_state import InMemoryOAuthStateStore
+from ip_risk_agent.connectors.common.authz import allow_all_authz
 from ip_risk_agent.connectors.github.install_routes import create_github_install_router
 
 
@@ -24,7 +25,10 @@ def _build_client():
     state_store = InMemoryOAuthStateStore()
     callback = FakeConnectionCreationCallback()
     router = create_github_install_router(
-        app_slug="ip-risk-agent", state_store=state_store, connection_creation_callback=callback
+        app_slug="ip-risk-agent",
+        state_store=state_store,
+        connection_creation_callback=callback,
+        authz_dependency=allow_all_authz,
     )
     app = FastAPI()
     app.include_router(router)

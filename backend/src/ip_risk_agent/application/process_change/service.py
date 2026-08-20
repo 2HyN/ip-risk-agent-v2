@@ -154,6 +154,7 @@ class SourceChangeIntakeService:
                 revision=change.revision,
                 previous_revision=change.previous_revision,
                 observed_at=change.observed_at,
+                source_change=change,
                 status=ChangeEventStatus.DONE if is_delete else ChangeEventStatus.PENDING,
                 attempts=0,
                 created_at=occurred_at,

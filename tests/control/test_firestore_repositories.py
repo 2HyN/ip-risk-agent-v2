@@ -506,6 +506,23 @@ def test_artifact_change_job_and_risk_history_commit_as_one_firestore_transactio
             0,
             NOW,
             NOW,
+            source_change=SourceChange(
+                contract_version="1",
+                event_id="provider-event-1",
+                event_fingerprint="fingerprint-1",
+                risk_workspace_id="vws-1",
+                mount_id="mount-1",
+                source_workspace_id="source-1",
+                source_type=SourceType.GITHUB,
+                artifact=SourceArtifactRef(
+                    source_artifact_id="path:main.py",
+                    display_name="main.py",
+                ),
+                change_type=ChangeType.UPDATE,
+                revision="revision-1",
+                observed_at=NOW,
+                safe_metadata={},
+            ),
             artifact_id="artifact-1",
         )
         job = AnalysisJob(

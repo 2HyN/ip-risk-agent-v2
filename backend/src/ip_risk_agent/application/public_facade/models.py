@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Mapping
 
@@ -13,6 +14,7 @@ from iprisk_contracts import (
     MountRef,
     SourceAccessReceipt,
     SourceArtifactRef,
+    SourceChange,
     SourceType,
 )
 
@@ -118,6 +120,7 @@ class ControlPlaneFacadeConfig:
     )
     retry_failed_events: bool = True
     concurrency_attempts: int = 3
+    analysis_lease_seconds: int = 300
     security_gate: SecurityGatePolicyConfig = field(
         default_factory=SecurityGatePolicyConfig
     )
@@ -133,6 +136,10 @@ class ControlPlaneFacadeConfig:
             raise DomainInvariantError("requested_analysis_types must not be empty")
         if self.concurrency_attempts < 1:
             raise DomainInvariantError("concurrency_attempts must be positive")
+        if not 1 <= self.analysis_lease_seconds <= 3_600:
+            raise DomainInvariantError(
+                "analysis_lease_seconds must be between 1 and 3600"
+            )
         self.security_gate._build("facade-config-validation")
         self.evidence_retention._build()
         object.__setattr__(self, "requested_analysis_types", requested)
@@ -267,6 +274,8 @@ class AnalysisExecutionClaim:
     revision: str
     requested_analysis_types: tuple[AnalysisType, ...]
     attempt: int
+    lease_expires_at: datetime
+    source_change: SourceChange
 
 
 @dataclass(frozen=True, slots=True)

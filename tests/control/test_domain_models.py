@@ -4,7 +4,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from iprisk_contracts import AnalysisType, ChangeType, SourceAccessType, SourceType
+from iprisk_contracts import (
+    AnalysisType,
+    ChangeType,
+    SourceAccessType,
+    SourceArtifactRef,
+    SourceChange,
+    SourceType,
+)
 from ip_risk_agent.application.analysis_jobs import AnalysisJob, AnalysisJobStatus
 from ip_risk_agent.application.process_change import ChangeEvent, ChangeEventStatus
 from ip_risk_agent.core.artifacts import Artifact, ArtifactStatus
@@ -135,6 +142,23 @@ def test_change_event_rejects_negative_attempts() -> None:
             attempts=-1,
             created_at=NOW,
             updated_at=NOW,
+            source_change=SourceChange(
+                contract_version="1",
+                event_id="event-1",
+                event_fingerprint="fingerprint",
+                risk_workspace_id="vws-1",
+                mount_id="mount-1",
+                source_workspace_id="source-workspace-1",
+                source_type=SourceType.GITHUB,
+                artifact=SourceArtifactRef(
+                    source_artifact_id="repo:path",
+                    display_name="file.py",
+                ),
+                change_type=ChangeType.UPDATE,
+                revision="abc",
+                observed_at=NOW,
+                safe_metadata={},
+            ),
         )
 
 

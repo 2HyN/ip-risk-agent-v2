@@ -14,6 +14,7 @@ from ip_risk_agent.connectors.common.credential_vault import (
     CredentialScope,
     InMemoryCredentialVault,
 )
+from ip_risk_agent.connectors.common.authz import allow_all_authz
 from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
 from ip_risk_agent.connectors.google_drive.connection_lookup import (
     InMemoryDriveConnectionCredentialLookup,
@@ -87,6 +88,8 @@ async def _setup(provider: FakeDriveProvider | None = None):
         connection_credential_lookup=lookup,
         tracking_scope_store=tracking_scope_store,
         mount_creation_callback=callback,
+        connection_authz_dependency=allow_all_authz,
+        workspace_authz_dependency=allow_all_authz,
     )
     app = FastAPI()
     app.include_router(router)

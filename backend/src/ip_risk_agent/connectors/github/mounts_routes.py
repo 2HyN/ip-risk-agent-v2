@@ -5,7 +5,7 @@ from typing import Protocol
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..common.authz import AuthzDependency, allow_all_authz
+from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.errors import NotFoundError
 from .connection_lookup import GitHubConnectionInstallationLookup
 from .models import GitHubProvider
@@ -64,7 +64,8 @@ def create_github_mounts_router(
     connection_installation_lookup: GitHubConnectionInstallationLookup,
     tracking_scope_store,
     mount_creation_callback: GitHubMountCreationCallback,
-    authz_dependency: AuthzDependency = allow_all_authz,
+    connection_authz_dependency: AuthzDependency = deny_all_authz,
+    workspace_authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -73,7 +74,7 @@ def create_github_mounts_router(
         response_model=GitHubRepositoriesListResponse,
     )
     async def list_repositories(connection_id: str, request: Request) -> GitHubRepositoriesListResponse:
-        await authz_dependency(request, connection_id)
+        await connection_authz_dependency(request, connection_id)
 
         try:
             installation_id = await connection_installation_lookup.resolve_installation_id(connection_id)
@@ -103,7 +104,8 @@ def create_github_mounts_router(
     async def create_mount(
         connection_id: str, request: Request, body: GitHubMountCreationRequest
     ) -> GitHubMountCreationResponse:
-        await authz_dependency(request, body.risk_workspace_id)
+        await connection_authz_dependency(request, connection_id)
+        await workspace_authz_dependency(request, body.risk_workspace_id)
 
         try:
             installation_id = await connection_installation_lookup.resolve_installation_id(connection_id)

@@ -2,7 +2,7 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`에는 Platform Control, Source Integration/Desktop, Risk Intelligence/RAG의 독립 구현과 단일 dependency/toolchain이 합쳐져 있다. Frozen Contract v1과 각 Plane의 unit suite는 같은 환경에서 통과하지만, API/Worker composition과 Plane 사이 production wiring은 후속 통합 단계에서 완성한다. 따라서 현재 상태를 완성된 배포 애플리케이션으로 간주하지 않는다.
+현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain과 production 조립 전에 필요한 P0 경계가 합쳐져 있다. Canonical worker input, lease/retry, Source authz/CSRF, pending connection, desktop device auth와 analyzer 완전성은 integration test로 고정됐지만, API/Worker composition과 실제 runtime adapter wiring은 후속 단계에서 완성한다. 따라서 현재 상태를 완성된 배포 애플리케이션으로 간주하지 않는다.
 
 ## 통합 상태
 
@@ -12,7 +12,7 @@ IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 �
 | Agent 인계 문서 통합 | 완료 |
 | Python/Node dependency 및 lock 수렴 | 완료 |
 | Source frontend test의 Vitest 통합 | 완료 |
-| P0 경계 보강 | 예정 |
+| P0 경계 보강 | 완료 |
 | API/Worker composition | 예정 |
 | Web/Electron 제품 wiring | 예정 |
 | GCP 내부 구성과 외부 배포 | 예정 |
@@ -28,6 +28,7 @@ backend/src/ip_risk_agent/
   application/                    canonical application service
   core/                           domain model과 policy
   persistence/                    in-memory/Firestore persistence
+  composition/                    Plane 사이 auth/registration/analysis 경계
   connectors/                     Drive, GitHub, Local source adapters
   intelligence/                   Patent, License, Gemini, RAG
 frontend/                         React/Vite Product UI와 Source UI 모듈
@@ -43,7 +44,7 @@ docs/                             Agent별 통합 참조 문서
 - Control Plane은 VWS, membership, SourceMetadata, canonical state, Risk, Review와 authorization을 소유한다.
 - Source Plane은 provider connection, mount, metadata/snapshot lookup과 content-free SourceChange 생산을 담당한다.
 - Intelligence Plane은 supplied snapshot을 분석하고 Patent/License/RAG evidence를 반환한다. canonical state를 직접 변경하지 않는다.
-- Integration layer는 설정, 인증 adapter, provider binding, API와 Worker 조립을 담당하며 후속 Phase에서 구현한다.
+- Integration layer는 현재 fail-closed 인증, pending binding, device credential과 analyzer 완전성 경계를 소유한다. 설정/container, API와 Worker runtime 조립은 다음 Phase에서 구현한다.
 
 `shared/contracts/**`는 frozen 영역이다. 변경이 필요하면 `contract-change-requests/` 절차를 사용하며 feature 또는 통합 편의를 위해 직접 수정하지 않는다.
 

@@ -5,7 +5,7 @@ from typing import Protocol
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..common.authz import AuthzDependency, allow_all_authz
+from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.oauth_state import OAuthStateStore, generate_state
 from .oauth import build_install_url
 
@@ -40,7 +40,7 @@ def create_github_install_router(
     app_slug: str,
     state_store: OAuthStateStore,
     connection_creation_callback: GitHubConnectionCreationCallback,
-    authz_dependency: AuthzDependency = allow_all_authz,
+    authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
     router = APIRouter()
 

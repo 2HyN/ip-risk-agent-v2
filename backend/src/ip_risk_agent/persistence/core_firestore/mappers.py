@@ -14,6 +14,7 @@ from iprisk_contracts import (
     ChangeType,
     ReviewPriority,
     SourceAccessType,
+    SourceChange,
     SourceType,
 )
 from ip_risk_agent.application.analysis_jobs.models import (
@@ -535,6 +536,7 @@ def change_event_to_document(value: ChangeEvent) -> Document:
         revision=value.revision,
         previous_revision=value.previous_revision,
         observed_at=value.observed_at,
+        source_change=value.source_change.model_dump(mode="python"),
         status=value.status,
         attempts=value.attempts,
         created_at=value.created_at,
@@ -542,6 +544,7 @@ def change_event_to_document(value: ChangeEvent) -> Document:
         artifact_id=value.artifact_id,
         provider_event_id=value.provider_event_id,
         last_error_safe=value.last_error_safe,
+        lease_expires_at=value.lease_expires_at,
         safe_metadata=value.safe_metadata,
     )
 
@@ -562,6 +565,7 @@ def change_event_from_document(document: Mapping[str, object]) -> ChangeEvent:
             "revision",
             "previous_revision",
             "observed_at",
+            "source_change",
             "status",
             "attempts",
             "created_at",
@@ -569,6 +573,7 @@ def change_event_from_document(document: Mapping[str, object]) -> ChangeEvent:
             "artifact_id",
             "provider_event_id",
             "last_error_safe",
+            "lease_expires_at",
             "safe_metadata",
         ),
     )
@@ -584,6 +589,7 @@ def change_event_from_document(document: Mapping[str, object]) -> ChangeEvent:
         revision=_optional_str(data["revision"]),
         previous_revision=_optional_str(data["previous_revision"]),
         observed_at=_datetime(data["observed_at"]),
+        source_change=SourceChange.model_validate(_mapping(data["source_change"])),
         status=ChangeEventStatus(data["status"]),
         attempts=_int(data["attempts"]),
         created_at=_datetime(data["created_at"]),
@@ -591,6 +597,7 @@ def change_event_from_document(document: Mapping[str, object]) -> ChangeEvent:
         artifact_id=_optional_str(data["artifact_id"]),
         provider_event_id=_optional_str(data["provider_event_id"]),
         last_error_safe=_optional_str(data["last_error_safe"]),
+        lease_expires_at=_optional_datetime(data["lease_expires_at"]),
         safe_metadata=_mapping(data["safe_metadata"]),
     )
 

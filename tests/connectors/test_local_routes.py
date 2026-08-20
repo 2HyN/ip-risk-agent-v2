@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from ip_risk_agent.connectors.common.change_sink import InMemorySourceChangeSink
+from ip_risk_agent.connectors.common.authz import allow_all_authz
 from ip_risk_agent.connectors.local.routes import (
     MountRegistrationResponse,
     create_local_desktop_router,
@@ -40,7 +41,7 @@ class FakeMountCreationCallback:
         return result
 
 
-def _build_client(authz_dependency=None):
+def _build_client(authz_dependency=allow_all_authz):
     staging_store = InMemoryLocalStagingStore()
     sink = InMemorySourceChangeSink()
     device_cb = FakeDeviceRegistrationCallback()
@@ -51,8 +52,9 @@ def _build_client(authz_dependency=None):
         "device_registration_callback": device_cb,
         "mount_creation_callback": mount_cb,
     }
-    if authz_dependency is not None:
-        kwargs["authz_dependency"] = authz_dependency
+    kwargs["device_registration_authz_dependency"] = authz_dependency
+    kwargs["workspace_authz_dependency"] = authz_dependency
+    kwargs["mount_authz_dependency"] = authz_dependency
     router = create_local_desktop_router(**kwargs)
     app = FastAPI()
     app.include_router(router)

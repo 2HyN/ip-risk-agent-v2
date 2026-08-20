@@ -10,15 +10,56 @@ from ip_risk_agent.core.common import DomainInvariantError, normalize_utc, requi
 from .models import ChangeEvent, ChangeEventStatus
 
 
-def claim_change_event(event: ChangeEvent, *, occurred_at: datetime) -> ChangeEvent:
+def claim_change_event(
+    event: ChangeEvent,
+    *,
+    occurred_at: datetime,
+    lease_expires_at: datetime,
+) -> ChangeEvent:
     if event.status is not ChangeEventStatus.PENDING:
         raise DomainInvariantError("only a PENDING change event may be claimed")
     occurred_at = normalize_utc(occurred_at, "change_event_claim.occurred_at")
+    lease_expires_at = normalize_utc(
+        lease_expires_at,
+        "change_event_claim.lease_expires_at",
+    )
+    if lease_expires_at <= occurred_at:
+        raise DomainInvariantError("change event lease must expire after claim time")
     return replace(
         event,
         status=ChangeEventStatus.PROCESSING,
         attempts=event.attempts + 1,
         updated_at=occurred_at,
+        lease_expires_at=lease_expires_at,
+    )
+
+
+def reclaim_change_event(
+    event: ChangeEvent,
+    *,
+    occurred_at: datetime,
+    lease_expires_at: datetime,
+) -> ChangeEvent:
+    if event.status not in {ChangeEventStatus.PROCESSING, ChangeEventStatus.FAILED}:
+        raise DomainInvariantError("only a PROCESSING or FAILED change event may be reclaimed")
+    occurred_at = normalize_utc(occurred_at, "change_event_reclaim.occurred_at")
+    lease_expires_at = normalize_utc(
+        lease_expires_at,
+        "change_event_reclaim.lease_expires_at",
+    )
+    if event.status is ChangeEventStatus.PROCESSING and (
+        event.lease_expires_at is None or event.lease_expires_at > occurred_at
+    ):
+        raise DomainInvariantError("an active change event lease cannot be reclaimed")
+    if lease_expires_at <= occurred_at:
+        raise DomainInvariantError("reclaimed change event lease must be bounded")
+    return replace(
+        event,
+        status=ChangeEventStatus.PROCESSING,
+        attempts=event.attempts + 1,
+        updated_at=occurred_at,
+        last_error_safe=None,
+        lease_expires_at=lease_expires_at,
     )
 
 
@@ -29,6 +70,7 @@ def complete_change_event(event: ChangeEvent, *, occurred_at: datetime) -> Chang
         event,
         status=ChangeEventStatus.DONE,
         updated_at=normalize_utc(occurred_at, "change_event_completion.occurred_at"),
+        lease_expires_at=None,
     )
 
 
@@ -45,6 +87,7 @@ def fail_change_event(
         status=ChangeEventStatus.FAILED,
         last_error_safe=require_non_empty(failure_safe, "change_event.failure_safe"),
         updated_at=normalize_utc(occurred_at, "change_event_failure.occurred_at"),
+        lease_expires_at=None,
     )
 
 
@@ -56,6 +99,7 @@ def requeue_change_event(event: ChangeEvent, *, occurred_at: datetime) -> Change
         status=ChangeEventStatus.PENDING,
         last_error_safe=None,
         updated_at=normalize_utc(occurred_at, "change_event_requeue.occurred_at"),
+        lease_expires_at=None,
     )
 
 
@@ -63,5 +107,6 @@ __all__ = [
     "claim_change_event",
     "complete_change_event",
     "fail_change_event",
+    "reclaim_change_event",
     "requeue_change_event",
 ]

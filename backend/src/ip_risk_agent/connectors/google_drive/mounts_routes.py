@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from iprisk_contracts.common import SafeMetadata
 
-from ..common.authz import AuthzDependency, allow_all_authz
+from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.credential_vault import SourceCredentialVault
 from ..common.errors import NotFoundError, SourceConnectorError
 from .connection_lookup import DriveConnectionCredentialLookup
@@ -55,7 +55,8 @@ def create_drive_mounts_router(
     connection_credential_lookup: DriveConnectionCredentialLookup,
     tracking_scope_store,
     mount_creation_callback: DriveMountCreationCallback,
-    authz_dependency: AuthzDependency = allow_all_authz,
+    connection_authz_dependency: AuthzDependency = deny_all_authz,
+    workspace_authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -64,7 +65,7 @@ def create_drive_mounts_router(
         response_model=PickerSessionResponse,
     )
     async def create_picker_session(connection_id: str, request: Request) -> PickerSessionResponse:
-        await authz_dependency(request, connection_id)
+        await connection_authz_dependency(request, connection_id)
 
         try:
             credential_ref = await connection_credential_lookup.resolve_credential_ref(connection_id)
@@ -93,7 +94,8 @@ def create_drive_mounts_router(
     async def create_mount(
         connection_id: str, request: Request, body: DriveMountCreationRequest
     ) -> DriveMountCreationResponse:
-        await authz_dependency(request, body.risk_workspace_id)
+        await connection_authz_dependency(request, connection_id)
+        await workspace_authz_dependency(request, body.risk_workspace_id)
 
         result = await mount_creation_callback.create_drive_mount(
             request,
