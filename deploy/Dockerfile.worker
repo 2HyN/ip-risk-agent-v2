@@ -1,8 +1,0 @@
-# 워커 이미지. 베이스는 API 와 동일하고 진입점만 다르다.
-# 별도 Dockerfile 로 두면 Cloud Run 서비스 정의가 단순해진다.
-FROM ip-risk-agent-base AS worker
-
-ENV PORT=8080
-EXPOSE 8080
-
-CMD ["sh", "-c", "uvicorn ip_risk_agent.worker:app --host 0.0.0.0 --port ${PORT}"]

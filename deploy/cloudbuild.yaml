@@ -1,0 +1,26 @@
+# Cloud Build — 로컬 Docker 없이 이미지를 만든다.
+#
+# Dockerfile 이 deploy/ 에 있고 빌드 컨텍스트는 저장소 루트다. 그래서 --tag 만
+# 쓰는 간단한 형태 대신 이 설정으로 -f 경로를 지정한다.
+#
+# 실행:
+#   gcloud builds submit --config deploy/cloudbuild.yaml \
+#     --substitutions=_IMAGE=<이미지 경로> .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - deploy/Dockerfile
+      - -t
+      - $_IMAGE
+      - .
+
+images:
+  - $_IMAGE
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+timeout: 1200s

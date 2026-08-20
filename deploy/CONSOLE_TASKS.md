@@ -39,7 +39,8 @@ curl -s https://<API-URL>/health | jq
 
 - 프로젝트 생성, 결제 계정 연결
 - API 활성화: Firestore, Cloud Run, Cloud Tasks, Secret Manager, Cloud Storage,
-  Cloud Scheduler, Artifact Registry, Vertex AI
+  Cloud Scheduler, Artifact Registry, Vertex AI, **Cloud Build**(로컬 Docker 없이
+  빌드할 때 필요)
 - 서비스 계정 4개 생성
 
 | 계정 | 필요한 역할 |
@@ -96,9 +97,23 @@ gcloud artifacts repositories create ip-risk-agent \
 URL 을 **미리 등록**해야 한다. 배포를 마지막에 하면 6·9·10 단계에서 막힌다.
 
 ```bash
-export PROJECT_ID=... REGION=asia-northeast3
+export PROJECT_ID=aj28-1 REGION=asia-northeast3
 ./deploy/deploy.sh
 ```
+
+빌드 방식은 자동으로 정해진다. 로컬 `docker` 가 있으면 로컬에서, 없으면
+**Cloud Build** 로 GCP 에서 빌드한다. `BUILD_WITH=cloudbuild` 또는
+`BUILD_WITH=docker` 로 강제할 수 있다.
+
+Cloud Build 를 쓰려면 API 를 켜 둬야 한다.
+
+```bash
+gcloud services enable cloudbuild.googleapis.com
+```
+
+> Cloud Build 는 빌드 컨텍스트를 통째로 업로드한다. 저장소 루트의
+> `.dockerignore` 가 `.venv` 와 `node_modules` 를 제외하므로 업로드가 작게
+> 유지된다. 이 파일이 없으면 스크립트가 중단한다.
 
 최소 환경변수만 넣고 배포한다 (`deploy/cloudrun/api.env.example` 참고).
 
