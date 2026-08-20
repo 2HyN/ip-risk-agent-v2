@@ -30,6 +30,11 @@ dependencies = [
 
   # Integration — ASGI runtime
   "uvicorn[standard]==0.52.4",
+
+  # Integration — GCP 자원 어댑터
+  "google-cloud-secret-manager==2.30.0",
+  "google-cloud-tasks==2.24.0",
+  "google-cloud-storage==3.13.1",
 ]
 
 [project.optional-dependencies]

@@ -7,19 +7,10 @@
 Master Spec 21 은 Control 과 분석 사이에 Cloud Tasks 를 둔다. 이 프로세스가
 그 큐의 소비자다.
 
----------------------------------------------------------------------------
-알려진 계약 공백 — Integration 이 임의로 메우지 않고 기록만 한다
----------------------------------------------------------------------------
-`TaskEnqueuer.enqueue_change(change_event_id: str)` 는 content-free ID 하나만
-넘긴다 (docs/IMPLEMENTATION_STATUS.md 1절). 그런데 파이프라인의 다음 단계인
-`SourceAdapter.fetch_snapshot(change)` 는 `SourceChange` 전체를 요구하고,
-`ControlPlaneFacade` 의 공개 메서드 중 `change_event_id` 로 `SourceChange` 를
-되짚는 것이 없다.
-
-따라서 ID 만으로 워커를 기동하려면 Control 이 조회 메서드를 하나 더 공개해야
-한다. 그때까지 이 워커는 `SourceChange` 본문을 직접 받는 경로만 제공한다.
-Master Spec 62 에 따라 contract-change request 대상으로 올려야 하는 항목이며,
-Integration 이 Control 내부를 우회 조회해 임시로 해결하지 않는다.
+큐는 content-free ``change_event_id`` 하나만 넘기는데 파이프라인의 다음 단계인
+``SourceAdapter.fetch_snapshot(change)`` 는 ``SourceChange`` 전체를 요구한다.
+그 간극은 Integration 소유 relay 저장소가 메운다. 왜 이 방식이 경계를 지키는지,
+더 깔끔한 대안이 무엇인지는 ``composition/gcp/relay.py`` 에 적어 두었다.
 """
 
 from __future__ import annotations
@@ -27,12 +18,21 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, status
 from iprisk_contracts import SourceChange
 from iprisk_contracts.common import SourceType
+from pydantic import BaseModel, ConfigDict
 
 from ip_risk_agent.composition import AnalysisPipeline, Container, build_container
 from ip_risk_agent.composition.pipeline import SourceAdapterLike
+
+
+class ChangeEventTask(BaseModel):
+    """Cloud Tasks 가 보내는 본문. content-free ID 하나뿐이다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    change_event_id: str
 
 
 def create_worker_app(
@@ -43,16 +43,18 @@ def create_worker_app(
 ) -> FastAPI:
     """분석 워커 애플리케이션.
 
-    `adapters` 는 provider 별 `SourceAdapter` 다. 실제 provider client 는
+    ``adapters`` 는 provider 별 ``SourceAdapter`` 다. 실제 provider client 는
     자격증명을 요구하므로 기본값은 비어 있다. 어댑터가 없는 source_type 의
     작업은 성공으로 위장하지 않고 실패로 남는다.
     """
     resolved = container or build_container(env if env is not None else os.environ)
+    resolved_adapters = dict(adapters or {})
     pipeline = AnalysisPipeline(
         resolved.facade,
-        adapters=adapters or {},
+        adapters=resolved_adapters,
         intelligence=resolved.intelligence,
     )
+    relay = resolved.source_ports.change_relay
 
     app = FastAPI(title="IP Risk Agent Worker", version="0.0.0")
     app.state.container = resolved
@@ -63,22 +65,16 @@ def create_worker_app(
         return {
             "status": "ok",
             "control_backend": resolved.backend,
+            "queue": resolved.queue_backend,
             "intelligence": (
                 "enabled" if resolved.intelligence_enabled else "disabled"
             ),
             "adapters": sorted(
-                source_type.value for source_type in (adapters or {})
+                source_type.value for source_type in resolved_adapters
             ),
         }
 
-    @app.post("/internal/analysis/run", tags=["internal"])
-    async def run_analysis(change: SourceChange) -> dict[str, object]:
-        """SourceChange 하나를 Risk 까지 밀어 넣는다.
-
-        내부 전용 경로다. 배포에서는 ingress 에서 차단하고 Cloud Tasks
-        서비스 계정만 호출할 수 있게 해야 한다 (Master Spec 40/48).
-        """
-        outcome = await pipeline.run(change)
+    def _result(outcome) -> dict[str, object]:
         return {
             "change_event_id": outcome.change_event_id,
             "claimed": outcome.claimed,
@@ -87,9 +83,34 @@ def create_worker_app(
             "skipped_reason": outcome.skipped_reason,
         }
 
+    @app.post("/internal/analysis/run", tags=["internal"])
+    async def run_analysis(change: SourceChange) -> dict[str, object]:
+        """``SourceChange`` 본문을 직접 받아 실행한다.
+
+        relay 가 없거나 큐를 쓰지 않는 구성에서 쓴다. 내부 전용 경로다.
+        """
+        return _result(await pipeline.run(change))
+
+    @app.post("/internal/analysis/dispatch", tags=["internal"])
+    async def dispatch_analysis(task: ChangeEventTask) -> dict[str, object]:
+        """Cloud Tasks 가 호출하는 경로. ID 로 ``SourceChange`` 를 되찾아 실행한다.
+
+        배포에서는 ingress 에서 차단하고 Cloud Tasks 서비스 계정만 호출할 수
+        있게 해야 한다 (Master Spec 40/48).
+        """
+        change = await relay.resolve(task.change_event_id)
+        if change is None:
+            # 없는 것을 성공으로 처리하면 변경이 조용히 사라진다. 큐가 재시도할
+            # 수 있도록 실패로 알린다.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="change event is not available for dispatch",
+            )
+        return _result(await pipeline.run(change))
+
     return app
 
 
 app: FastAPI = create_worker_app()
 
-__all__ = ["app", "create_worker_app"]
+__all__ = ["ChangeEventTask", "app", "create_worker_app"]

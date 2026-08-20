@@ -208,27 +208,39 @@ Control UI 는 `frontend/src/sources/**` 를 직접 import 하지 않고, Source
 
 ---
 
-## 6. 확장 지점 — GCP 연동 시 교체할 것
+## 6. GCP 연동 — 코드는 전부 준비됐다
 
-`container.py` 의 `SourcePorts` 한 곳에 모아뒀다. 이 필드만 실물로 바꾸면 된다.
+`container.py` 가 설정 유무로 in-memory 와 GCP 구현을 자동으로 가른다.
+**코드를 고칠 필요 없이 환경변수만 넣으면 전환된다.**
 
-| 포트 | 현재 | 교체 대상 |
-|---|---|---|
-| `unit_of_work_factory` | `InMemoryControlStore` | Firestore — **코드 분기는 이미 있다.** `GCP_PROJECT_ID` + `FIRESTORE_DATABASE` 설정 시 자동 전환 |
-| `task_enqueuer` | `InMemoryTaskEnqueuer` | Cloud Tasks |
-| `credential_vault` | `InMemoryCredentialVault` | Secret Manager |
-| `oauth_state_store` | `InMemoryOAuthStateStore` | Firestore (다중 인스턴스면 필수) |
-| `staging_store` | `InMemoryLocalStagingStore` | GCS 버킷 |
-| `change_sink` | ✅ `ControlSourceChangeSink` | 이미 실물 |
-| `connections` / `devices` | ✅ Integration 레지스트리 | Firestore 이관 검토 |
+| 포트 | 없을 때 | 있을 때 | 전환 조건 |
+|---|---|---|---|
+| `unit_of_work_factory` | `InMemoryControlStore` | `FirestoreControlUnitOfWorkFactory` | `GCP_PROJECT_ID` + `FIRESTORE_DATABASE` |
+| `credential_vault` | `InMemoryCredentialVault` | `SecretManagerCredentialVault` | 〃 |
+| `oauth_state_store` | `InMemoryOAuthStateStore` | `FirestoreOAuthStateStore` | 〃 |
+| `change_relay` | `InMemoryChangeRelayStore` | `FirestoreChangeRelayStore` | 〃 |
+| `bindings` | 없음 | `FirestoreMountBindingStore` | 〃 |
+| `task_enqueuer` | `InMemoryTaskEnqueuer` | `CloudTasksEnqueuer` | `CLOUD_TASKS_*` 4개 |
+| `staging_store` | `InMemoryLocalStagingStore` | `GcsLocalStagingStore` | `LOCAL_STAGING_BUCKET` |
+| Drive 라우터 3종 | 미마운트 | 마운트 | Drive 자격증명 + Firestore |
+| GitHub 라우터 3종 | 미마운트 | 마운트 | GitHub 자격증명 + private key + Firestore |
+| Intelligence | `disabled` | `enabled` | `GEMINI_MODEL_ID` |
 
-그 외 남은 것:
+구현은 `composition/gcp/` 에 있다. SDK import 를 전부 함수 안에서 지연 수행하므로
+자격증명 없는 환경에서도 모듈을 자유롭게 불러올 수 있다.
 
-- Drive/GitHub provider factory·webhook·mounts 라우터 (실제 API client 필요)
-- `deploy/` — Cloud Run × 2, Cloud Tasks, Cloud Scheduler, Secret Manager
-- Firestore composite index 8개 → `firestore.indexes.json` 변환
-- `tests/e2e`
-- Open Original resolver — `facade.get_original_source_request` 를 호출하는 구현
+`/health` 가 어떤 구현이 실제로 붙었는지 클래스 이름으로 그대로 보여준다.
+provider 라우터는 자격증명이 없으면 **아예 만들지 않고** 이유를 남긴다 —
+있는 척 열어두고 런타임에 실패하면 원인을 찾기 어렵다.
+
+### 남은 것은 콘솔 작업뿐
+
+자원 생성·앱 등록·키 발급은 사람이 콘솔에서 해야 한다.
+[deploy/CONSOLE_TASKS.md](../deploy/CONSOLE_TASKS.md) 에 14단계로 정리했다.
+
+예외 하나 — **RAG corpus 업로드는 콘솔/`gcloud` 로 해야 한다.**
+`CorpusUploader` 의 RAG Engine 구현이 없다. 매니페스트 검증·체크섬 대조·정규화
+까지는 코드가 하지만 실제 전송 경로가 없다.
 
 ### 서비스 계정 분리 (Master Spec 48)
 
@@ -241,23 +253,27 @@ Control UI 는 `frontend/src/sources/**` 를 직접 import 하지 않고, Source
 
 ---
 
-## 7. 🔴 알려진 계약 공백
+## 7. Cloud Tasks 경계 — 해결 방식과 남은 선택
 
-**Cloud Tasks 경로가 아직 성립하지 않는다.**
+큐는 content-free ``change_event_id`` 하나만 넘긴다. 그런데 다음 단계인
+``SourceAdapter.fetch_snapshot(change)`` 는 ``SourceChange`` 전체를 요구하고,
+`ControlPlaneFacade` 에 ID 로 그것을 되짚는 공개 메서드가 없다.
 
-`TaskEnqueuer.enqueue_change(change_event_id: str)` 는 content-free ID 하나만 넘긴다.
-그런데 다음 단계인 `SourceAdapter.fetch_snapshot(change)` 는 `SourceChange` 전체를
-요구하고, `ControlPlaneFacade` 의 공개 메서드 중 `change_event_id` 로 `SourceChange` 를
-되짚는 것이 없다.
+**해결** — Source 라우터가 넘긴 ``SourceChange`` 를 Control 에 등록하는 길목
+(sink)에서 Integration 이 자기 소유 collection 에 함께 적는다. 워커는 ID 로
+그것을 읽어 파이프라인을 잇는다 (`composition/gcp/relay.py`).
 
-따라서 ID 만으로 워커를 기동하려면 Control 이 조회 메서드를 하나 더 공개해야 한다.
-그때까지 워커는 `SourceChange` 본문을 직접 받는 경로(`POST /internal/analysis/run`)만
-제공한다.
+경계를 지키는 이유:
 
-**Control 내부를 우회 조회해 임시로 메우지 않았다.** Master Spec 62 에 따라
-contract-change request 대상으로 올려야 하는 항목이다.
+- Control 내부를 조회하지 않는다. 자기가 받은 값을 자기 collection 에 둘 뿐이다.
+- ``SourceChange`` 는 Frozen Contract 상 content-free 다 (Master Spec 10).
+  파일 내용·자격증명·로컬 절대경로가 애초에 담기지 않는다.
+- 정본이 아니다. 판단 근거는 여전히 Control 의 ChangeEvent 이고, relay 에 없으면
+  워커는 404 로 실패한다 — 성공으로 위장하지 않는다.
 
----
+**더 깔끔한 대안** — Control 이 조회 메서드를 하나 공개하면 이 모듈을 지울 수
+있다. Master Spec 62 의 contract-change request 대상이며, 팀이 그 방향을 택하면
+`relay.py` 를 제거하고 facade 호출로 바꾸면 된다.
 
 ## 8. 통합 검증
 

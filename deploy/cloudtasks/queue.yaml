@@ -1,0 +1,25 @@
+# Cloud Tasks 큐 설정.
+#
+# 재시도는 큐가 담당한다. 코드의 재시도(Gemini/KIPRIS 등)는 짧고 적게 두었으므로
+# 두 겹이 곱해지지 않는다.
+#
+# 적용:
+#   gcloud tasks queues create analysis-queue --location=$REGION
+#   gcloud tasks queues update analysis-queue --location=$REGION \
+#     --max-attempts=5 --max-concurrent-dispatches=10 \
+#     --max-dispatches-per-second=10 --min-backoff=10s --max-backoff=300s
+name: analysis-queue
+
+rateLimits:
+  # 워커 동시 실행 상한. 외부 provider 한도와 비용을 함께 통제한다.
+  maxConcurrentDispatches: 10
+  maxDispatchesPerSecond: 10
+
+retryConfig:
+  # 5회 후에도 실패하면 dead-letter 로 보낸다. 무한 재시도는 비용만 태운다.
+  maxAttempts: 5
+  minBackoff: 10s
+  maxBackoff: 300s
+  maxDoublings: 4
+  # 하루가 지난 작업은 재시도해도 의미가 없다.
+  maxRetryDuration: 86400s

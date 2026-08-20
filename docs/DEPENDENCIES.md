@@ -5,7 +5,7 @@
 통합 단계에서 충돌을 조율해 `pyproject.toml` 과 `pnpm-lock.yaml` 에 반영했다.
 
 **최종 검증 환경** — CPython 3.14.7 / Node.js 24.19.0 / pnpm 11.19.0 / TypeScript 5.9.3
-전이 의존성 포함 63개 패키지, `pip check` 통과.
+전이 의존성 포함 **70개 패키지**, `pip check` 통과.
 
 ---
 
@@ -43,6 +43,9 @@
 | `PyYAML` | `6.0.3` | Intelligence | RAG corpus 매니페스트 (`safe_load` 전용) |
 | `google-genai` | `2.17.0` | Intelligence | Gemini 구조화 출력 |
 | `uvicorn[standard]` | `0.52.4` | Integration | ASGI 런타임 |
+| `google-cloud-secret-manager` | `2.30.0` | Integration | provider 자격증명 보관 |
+| `google-cloud-tasks` | `2.24.0` | Integration | 분석 작업 큐 |
+| `google-cloud-storage` | `3.13.1` | Integration | 로컬 스냅샷 staging |
 
 전이 의존성 중 눈여겨볼 것: `starlette 1.6.0` (fastapi 가 선택), `grpcio 1.83.0`
 (CPython 3.14 Windows wheel `cp314` 확인), `cryptography 50.0.0`, `protobuf 7.35.1`.
@@ -61,7 +64,7 @@
 |---|---|
 | `google-cloud-aiplatform` | RAG Engine SDK. 설치 용량 100MB 초과인데 쓰는 기능은 `retrieveContexts` 하나뿐이다. `google-auth` 로 토큰만 얻고 REST 를 httpx 로 호출한다 |
 | `requests` | `httpx` 와 역할이 겹친다. 하나만 쓴다 |
-| `google-cloud-secret-manager` | `SourceCredentialVault` 실물 구현 시점에 추가한다 (현재 in-memory) |
+
 
 ---
 
@@ -160,12 +163,16 @@ Electron main 의 `process.env.IPRISK_SERVER_BASE_URL` 이다.
 | `SESSION_SECRET` | Control 세션·cursor 서명 (최소 32자) | 프로세스마다 임시 생성 — 재시작 시 세션 무효 |
 | `APP_PUBLIC_BASE_URL` | 로그인 후 이동, exact CORS origin, 쿠키 `https_only` 판정 | `http://127.0.0.1:8000` |
 | `GOOGLE_LOGIN_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` | Google OIDC | 로그인 경로가 502 로 fail closed |
-| `GCP_PROJECT_ID` + `FIRESTORE_DATABASE` | Firestore | in-memory 저장소로 하강 |
+| `GCP_PROJECT_ID` + `FIRESTORE_DATABASE` | Firestore 저장소·Secret Manager vault·OAuth state·change relay·provider binding | 전부 in-memory 로 하강 |
+| `CLOUD_TASKS_LOCATION` · `_QUEUE` · `ANALYSIS_WORKER_URL` · `CLOUD_TASKS_SERVICE_ACCOUNT` | Cloud Tasks. **넷을 모두 채워야 붙는다** | in-memory 큐 — 별도 워커가 작업을 받지 못한다 |
 | `FIRESTORE_EMULATOR_HOST` | emulator 테스트 전용 | 해당 테스트 1건 skip. **production 에 설정 금지** |
 | `GOOGLE_DRIVE_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` | Drive OAuth | Drive 라우터를 마운트하지 않음 |
 | `GOOGLE_DRIVE_WEBHOOK_BASE_URL`, `DRIVE_WATCH_CHANNEL_TOKEN` | Drive push notification | 〃 |
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG` | GitHub App 설치 흐름 | GitHub 라우터를 마운트하지 않음 |
-| `GITHUB_APP_PRIVATE_KEY_SECRET_ID`, `GITHUB_WEBHOOK_SECRET_ID`, `GITHUB_APP_CALLBACK_URL` | GitHub 인증·webhook | 〃 |
+| `GITHUB_APP_CALLBACK_URL` | GitHub 설치 콜백 | 〃 |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App 인증 (PEM 전문) | mounts 라우터 미마운트 |
+| `GITHUB_WEBHOOK_SECRET` | webhook HMAC 검증 | **webhook 라우터를 아예 붙이지 않는다** — 검증 없이 받으면 위조를 신뢰하게 된다 |
+| `GITHUB_APP_PRIVATE_KEY_SECRET_ID`, `GITHUB_WEBHOOK_SECRET_ID` | 위 두 값의 Secret Manager 참조 ID | — |
 | `LOCAL_STAGING_BUCKET` | 로컬 스냅샷 staging | in-memory staging |
 | `IPRISK_SERVER_BASE_URL` | Electron 이 서버를 찾는 주소 | 데스크톱이 서버에 붙지 못함 |
 | `GEMINI_MODEL_ID` | 모델 식별자. 결과의 `versions.model_id` 에 기록 | **분석 경로 전체 비활성화** |
@@ -175,6 +182,7 @@ Electron main 의 `process.env.IPRISK_SERVER_BASE_URL` 이다.
 | `KIPRIS_API_KEY_SECRET_ID` | Secret Manager 참조 ID. Integration 이 읽어 `KIPRIS_ACCESS_KEY` 로 주입 | — |
 | `RAG_REGION`, `RAG_CORPUS_ID` | RAG Engine | RAG 검색 비활성화 (정책 판정은 동작) |
 | `RAG_CORPUS_VERSION` | 결과에 기록 | `unversioned` |
+| `RAG_DISTANCE_THRESHOLD` | 관련도 거리 임계값. 이보다 먼 조각은 근거로 쓰지 않는다 | 기본 `0.6`. 끄려면 `none` 명시 |
 | `PACKAGE_METADATA_BASE_URL` | 패키지 메타데이터 기본 URL 재정의 | 기본값 사용 |
 
 > **`GEMINI_MODEL_ID` 값 미확정.** Master Spec 16/35 와 Blueprint 35 의 "Gemini 3.6 Flash"

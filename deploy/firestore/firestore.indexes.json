@@ -1,0 +1,129 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "memberships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "record_kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "risk_workspace_id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "memberships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "record_kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "user_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "memberships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "record_kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "email",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "workspace_mounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "record_kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "risk_workspace_id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "workspace_mounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "record_kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "risk_workspace_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "mounted_by_user_id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "risks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "record_kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "artifact_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "analysis_type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lifecycle_state",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "risks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "record_kind",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "risk_workspace_id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "change_events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "risk_workspace_id",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

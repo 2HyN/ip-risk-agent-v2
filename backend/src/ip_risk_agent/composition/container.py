@@ -50,6 +50,14 @@ from ip_risk_agent.connectors.common.credential_vault import InMemoryCredentialV
 from ip_risk_agent.connectors.common.oauth_state import InMemoryOAuthStateStore
 from ip_risk_agent.connectors.local.staging_store import InMemoryLocalStagingStore
 
+from .gcp.relay import ChangeRelayStore, InMemoryChangeRelayStore
+from .providers import (
+    DriveProviderBundle,
+    GitHubProviderBundle,
+    build_drive_bundle,
+    build_github_bundle,
+)
+
 from .runtime import id_factory, utc_clock
 from .sinks import ControlSourceChangeSink
 from .settings import Settings
@@ -97,6 +105,7 @@ class SourcePorts:
     credential_vault: Any
     oauth_state_store: Any
     staging_store: Any
+    change_relay: ChangeRelayStore
     connections: ConnectionRegistry
     devices: DeviceRegistry
 
@@ -112,6 +121,9 @@ class Container:
     source_ports: SourcePorts
     source_registration: SourceRegistrationService
     intelligence: Any | None = field(default=None)
+    drive: DriveProviderBundle | None = field(default=None)
+    github: GitHubProviderBundle | None = field(default=None)
+    bindings: Any | None = field(default=None)
 
     @property
     def backend(self) -> str:
@@ -120,6 +132,11 @@ class Container:
     @property
     def intelligence_enabled(self) -> bool:
         return self.intelligence is not None
+
+    @property
+    def queue_backend(self) -> str:
+        """어떤 큐가 실제로 붙었는지. in-memory 면 워커가 작업을 못 받는다."""
+        return "cloud-tasks" if self.settings.queue.configured else "in-memory"
 
 
 def _build_unit_of_work_factory(settings: Settings) -> Any:
@@ -179,6 +196,87 @@ def _build_intelligence(settings: Settings) -> Any | None:
     return create_facade_from_env(env, retriever=retriever)
 
 
+def _build_credential_vault(settings: Settings) -> Any:
+    """Secret Manager 가 가능하면 그것을, 아니면 in-memory 를 쓴다."""
+    project_id = settings.control.gcp_project_id
+    if settings.control.backend == "firestore" and project_id:
+        from .gcp.secrets import SecretManagerCredentialVault  # noqa: PLC0415
+
+        return SecretManagerCredentialVault(project_id)
+    return InMemoryCredentialVault()
+
+
+def _build_oauth_state_store(settings: Settings) -> Any:
+    """다중 인스턴스에서는 공유 저장소가 필수다."""
+    control = settings.control
+    if control.backend == "firestore" and control.gcp_project_id:
+        from .gcp.state import FirestoreOAuthStateStore  # noqa: PLC0415
+
+        return FirestoreOAuthStateStore(
+            project_id=control.gcp_project_id,
+            database=control.firestore_database or "(default)",
+        )
+    return InMemoryOAuthStateStore()
+
+
+def _build_staging_store(settings: Settings) -> Any:
+    bucket = settings.source.local_staging_bucket
+    if bucket:
+        from .gcp.storage import GcsLocalStagingStore  # noqa: PLC0415
+
+        return GcsLocalStagingStore(bucket)
+    return InMemoryLocalStagingStore()
+
+
+def _build_bindings(settings: Settings) -> Any | None:
+    """provider 식별자 매핑 저장소. Firestore 가 없으면 만들지 않는다.
+
+    없으면 Drive/GitHub 의 mounts·webhook 라우터를 붙이지 않는다. 반쯤 조립해
+    런타임에 실패하게 두지 않는다.
+    """
+    control = settings.control
+    if control.backend == "firestore" and control.gcp_project_id:
+        from .gcp.stores import FirestoreMountBindingStore  # noqa: PLC0415
+
+        return FirestoreMountBindingStore(
+            project_id=control.gcp_project_id,
+            database=control.firestore_database or "(default)",
+        )
+    return None
+
+
+def _build_change_relay(settings: Settings) -> ChangeRelayStore:
+    control = settings.control
+    if control.backend == "firestore" and control.gcp_project_id:
+        from .gcp.relay import FirestoreChangeRelayStore  # noqa: PLC0415
+
+        return FirestoreChangeRelayStore(
+            project_id=control.gcp_project_id,
+            database=control.firestore_database or "(default)",
+        )
+    return InMemoryChangeRelayStore()
+
+
+def _build_task_enqueuer(settings: Settings) -> Any:
+    """큐 설정이 없으면 in-memory 로 하강한다.
+
+    워커를 별도 프로세스로 띄우는 배포에서 in-memory 로 남으면 변경이
+    큐에 들어가도 아무도 가져가지 않는다. `/health` 가 이 상태를 드러낸다.
+    """
+    queue = settings.queue
+    if queue.configured:
+        from .gcp.queue import CloudTasksEnqueuer  # noqa: PLC0415
+
+        return CloudTasksEnqueuer(
+            project_id=queue.project_id or "",
+            location=queue.location or "",
+            queue=queue.queue or "",
+            worker_url=queue.worker_url or "",
+            service_account_email=queue.service_account_email or "",
+        )
+    return InMemoryTaskEnqueuer()
+
+
 def build_container(
     env: Mapping[str, str],
     *,
@@ -196,7 +294,7 @@ def build_container(
     observer = StructuredLogger()
 
     uow = unit_of_work_factory or _build_unit_of_work_factory(settings)
-    queue = task_enqueuer or InMemoryTaskEnqueuer()
+    queue = task_enqueuer or _build_task_enqueuer(settings)
 
     facade = ControlPlaneFacade(
         unit_of_work_factory=uow,
@@ -250,11 +348,13 @@ def build_container(
 
     connections = ConnectionRegistry()
     devices = DeviceRegistry()
+    change_relay = _build_change_relay(settings)
     source_ports = SourcePorts(
-        change_sink=ControlSourceChangeSink(facade),
-        credential_vault=InMemoryCredentialVault(),
-        oauth_state_store=InMemoryOAuthStateStore(),
-        staging_store=InMemoryLocalStagingStore(),
+        change_sink=ControlSourceChangeSink(facade, relay=change_relay),
+        credential_vault=_build_credential_vault(settings),
+        oauth_state_store=_build_oauth_state_store(settings),
+        staging_store=_build_staging_store(settings),
+        change_relay=change_relay,
         connections=connections,
         devices=devices,
     )
@@ -263,6 +363,14 @@ def build_container(
         connections=connections,
         devices=devices,
     )
+
+    bindings = _build_bindings(settings)
+    drive = build_drive_bundle(
+        settings,
+        credential_vault=source_ports.credential_vault,
+        bindings=bindings,
+    )
+    github = build_github_bundle(settings, bindings=bindings)
 
     return Container(
         settings=settings,
@@ -274,6 +382,9 @@ def build_container(
         source_ports=source_ports,
         source_registration=source_registration,
         intelligence=_build_intelligence(settings),
+        drive=drive,
+        github=github,
+        bindings=bindings,
     )
 
 

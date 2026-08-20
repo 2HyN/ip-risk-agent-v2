@@ -192,6 +192,10 @@ class LicenseAnalyzer:
             return False
 
         try:
+            # filters 는 넘기지 않는다. corpus 는 의무 안내(OBLIGATION_GUIDE)와
+            # SPDX 참조를 함께 담을 수 있고, 둘 다 정당한 근거다. 좁히려면
+            # 관할처럼 의미가 분명한 기준이 필요한데 아직 그 개념이 없다.
+            # 관련도 통제는 retriever 쪽 거리 임계값이 담당한다.
             chunks = await self._retriever.retrieve(
                 reference_query(expression, outcome), top_k=3
             )

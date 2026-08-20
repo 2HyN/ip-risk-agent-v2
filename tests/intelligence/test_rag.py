@@ -221,3 +221,110 @@ def test_facade_runs_license_analysis_with_rag_evidence():
     assert len(results) == 1
     assert results[0].versions.rag_corpus_version == "2026-08-14.1"
     assert any(e.evidence_id.startswith("rag:") for e in results[0].evidence)
+
+
+# --------------------------------------------------------------------------
+# 관련성 임계값 — corpus 에 없는 라이선스에 엉뚱한 근거가 붙는 것을 막는다.
+# --------------------------------------------------------------------------
+
+
+def test_threshold_defaults_on_and_can_be_disabled_explicitly():
+    """기본으로 켜져 있어야 한다. 끄려면 명시해야 한다."""
+    from ip_risk_agent.intelligence.rag.engine import RagEngineConfig, _threshold
+
+    env = {"GCP_PROJECT_ID": "p", "RAG_REGION": "r", "RAG_CORPUS_ID": "c"}
+    assert RagEngineConfig.from_env(env).vector_distance_threshold == 0.6
+
+    assert _threshold(None) == 0.6
+    assert _threshold("") == 0.6
+    assert _threshold("abc") == 0.6  # 잘못된 값에 꺼지면 안 된다
+    assert _threshold("0.35") == 0.35
+    assert _threshold("none") is None
+
+
+def test_retrieval_payload_carries_threshold_and_filters():
+    """임계값과 filters 가 실제 요청에 실려야 한다.
+
+    이전에는 `filters` 를 인자로 받고도 payload 에 넣지 않아, 매니페스트의
+    metadata 가 무용지물이었다.
+    """
+    import asyncio
+
+    from ip_risk_agent.intelligence.rag.engine import RagEngineConfig, RagEngineRetriever
+
+    captured: dict = {}
+
+    class CapturingClient:
+        async def post(self, url, json=None, headers=None):
+            captured["payload"] = json
+
+            class Response:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"contexts": {"contexts": []}}
+
+            return Response()
+
+        async def aclose(self):
+            return None
+
+    config = RagEngineConfig(
+        project_id="p", region="r", corpus_id="c", vector_distance_threshold=0.42
+    )
+    retriever = RagEngineRetriever(
+        config, credentials=_StubCredentials(), client=CapturingClient()
+    )
+    asyncio.run(retriever.retrieve("query", filters={"jurisdiction": "KR"}))
+
+    retrieval = captured["payload"]["query"]["rag_retrieval_config"]
+    assert retrieval["filter"]["vector_distance_threshold"] == 0.42
+    assert retrieval["metadata_filter"]["filters"] == [
+        {"key": "jurisdiction", "value": "KR"}
+    ]
+
+
+def test_distant_chunks_are_dropped_even_if_the_server_returns_them():
+    """서버가 필터를 무시해도 우리가 한 번 더 막는다."""
+    import asyncio
+
+    from ip_risk_agent.intelligence.rag.engine import RagEngineConfig, RagEngineRetriever
+
+    class LooseClient:
+        async def post(self, url, json=None, headers=None):
+            class Response:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {
+                        "contexts": {
+                            "contexts": [
+                                {"text": "가까운 근거", "distance": 0.1},
+                                {"text": "먼 근거", "distance": 0.95},
+                            ]
+                        }
+                    }
+
+            return Response()
+
+        async def aclose(self):
+            return None
+
+    config = RagEngineConfig(
+        project_id="p", region="r", corpus_id="c", vector_distance_threshold=0.5
+    )
+    retriever = RagEngineRetriever(
+        config, credentials=_StubCredentials(), client=LooseClient()
+    )
+    chunks = asyncio.run(retriever.retrieve("query"))
+
+    assert [chunk.text for chunk in chunks] == ["가까운 근거"]
+
+
+class _StubCredentials:
+    """google-auth 대역. 토큰만 있으면 된다."""
+
+    valid = True
+    token = "stub-token"

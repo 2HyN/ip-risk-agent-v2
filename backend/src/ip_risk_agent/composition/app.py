@@ -19,10 +19,16 @@ from ip_risk_agent.application.public_facade import PublicVwsAction
 from ip_risk_agent.connectors.github.install_routes import (
     create_github_install_router,
 )
+from ip_risk_agent.connectors.github.mounts_routes import create_github_mounts_router
+from ip_risk_agent.connectors.github.routes import create_github_webhook_router
+from ip_risk_agent.connectors.google_drive.mounts_routes import (
+    create_drive_mounts_router,
+)
 from ip_risk_agent.connectors.google_drive.oauth import HttpxDriveOAuthClient
 from ip_risk_agent.connectors.google_drive.oauth_routes import (
     create_drive_oauth_router,
 )
+from ip_risk_agent.connectors.google_drive.routes import create_drive_webhook_router
 from ip_risk_agent.connectors.local.routes import create_local_desktop_router
 
 from . import authz
@@ -31,19 +37,20 @@ from .container import Container, build_container
 # 어떤 provider 라우터가 왜 빠졌는지 사람이 읽을 수 있게 남긴다.
 SKIP_REASONS = {
     "google_drive": "GOOGLE_DRIVE_CLIENT_ID/SECRET/REDIRECT_URI 미설정",
-    "github": "GITHUB_APP_ID/GITHUB_APP_SLUG 미설정",
+    "github": "GITHUB_APP_ID/GITHUB_APP_SLUG/GITHUB_APP_PRIVATE_KEY 미설정",
+    "google_drive:bindings": "Firestore 미설정 — Drive 조회 포트를 만들 수 없음",
+    "github:bindings": "Firestore 미설정 — GitHub 조회 포트를 만들 수 없음",
+    "github:private_key": "GITHUB_APP_PRIVATE_KEY 미설정 — App 인증 불가",
+    "google_drive:webhook": "DRIVE_WATCH_CHANNEL_TOKEN 미설정",
+    "github:webhook": "GITHUB_WEBHOOK_SECRET 미설정 — 서명 검증 불가",
 }
 
 
-def _mount_source_routers(app: FastAPI, container: Container) -> dict[str, object]:
-    """Source 라우터를 붙이고 무엇을 붙였는지 보고한다."""
+def _mount_local(app: FastAPI, container: Container) -> None:
     ports = container.source_ports
     registration = container.source_registration
     authorize = container.facade.authorize_vws_action
-    mounted: list[str] = []
-    skipped: dict[str, str] = {}
 
-    # ── Local: 외부 자격증명이 필요 없다. 항상 붙는다.
     app.include_router(
         create_local_desktop_router(
             staging_store=ports.staging_store,
@@ -68,47 +75,163 @@ def _mount_source_routers(app: FastAPI, container: Container) -> dict[str, objec
             ),
         )
     )
-    mounted.append("local")
 
-    # ── Google Drive: OAuth 앱 자격증명이 있어야 의미가 있다.
+
+def _mount_drive(
+    app: FastAPI, container: Container, mounted: list[str], skipped: dict[str, str]
+) -> None:
     source = container.settings.source
-    if source.drive_configured:
-        app.include_router(
-            create_drive_oauth_router(
-                client_id=source.drive_client_id or "",
-                redirect_uri=source.drive_redirect_uri or "",
-                state_store=ports.oauth_state_store,
-                oauth_client=HttpxDriveOAuthClient(
-                    client_id=source.drive_client_id or "",
-                    client_secret=source.drive_client_secret or "",
-                    redirect_uri=source.drive_redirect_uri or "",
-                ),
-                credential_vault=ports.credential_vault,
-                connection_creation_callback=registration,
-                authz_dependency=authz.workspace_scoped(
-                    authorize, PublicVwsAction.SOURCE_MOUNT
-                ),
-            )
-        )
-        mounted.append("google_drive:oauth")
-    else:
+    if not source.drive_configured:
         skipped["google_drive"] = SKIP_REASONS["google_drive"]
+        return
 
-    # ── GitHub: App slug 가 있어야 설치 흐름을 시작할 수 있다.
-    if source.github_configured:
-        app.include_router(
-            create_github_install_router(
-                app_slug=source.github_app_slug or "",
-                state_store=ports.oauth_state_store,
-                connection_creation_callback=registration,
-                authz_dependency=authz.workspace_scoped(
-                    authorize, PublicVwsAction.SOURCE_MOUNT
-                ),
-            )
+    ports = container.source_ports
+    registration = container.source_registration
+    authorize = container.facade.authorize_vws_action
+    connections = ports.connections
+
+    # 연결 시작은 조회 포트가 없어도 된다. 항상 붙인다.
+    app.include_router(
+        create_drive_oauth_router(
+            client_id=source.drive_client_id or "",
+            redirect_uri=source.drive_redirect_uri or "",
+            state_store=ports.oauth_state_store,
+            oauth_client=HttpxDriveOAuthClient(
+                client_id=source.drive_client_id or "",
+                client_secret=source.drive_client_secret or "",
+                redirect_uri=source.drive_redirect_uri or "",
+            ),
+            credential_vault=ports.credential_vault,
+            connection_creation_callback=registration,
+            authz_dependency=authz.workspace_scoped(
+                authorize, PublicVwsAction.SOURCE_MOUNT
+            ),
         )
-        mounted.append("github:install")
-    else:
+    )
+    mounted.append("google_drive:oauth")
+
+    bundle = container.drive
+    if bundle is None:
+        skipped["google_drive:bindings"] = SKIP_REASONS["google_drive:bindings"]
+        return
+
+    app.include_router(
+        create_drive_mounts_router(
+            provider_factory=bundle.provider_factory,
+            credential_vault=ports.credential_vault,
+            connection_credential_lookup=bundle.credential_lookup,
+            tracking_scope_store=bundle.tracking_scope_store,
+            mount_creation_callback=registration,
+            # Picker 세션은 resource_id 가 connection_id, Mount 생성은
+            # risk_workspace_id 다. 경로로 갈라 각자 맞는 스코프를 태운다.
+            authz_dependency=authz.path_scoped(
+                {
+                    "/picker-session": authz.connection_scoped(
+                        authorize, PublicVwsAction.SOURCE_MOUNT, connections
+                    )
+                },
+                authz.workspace_scoped(authorize, PublicVwsAction.SOURCE_MOUNT),
+            ),
+        )
+    )
+    mounted.append("google_drive:mounts")
+
+    if not source.drive_watch_channel_token:
+        skipped["google_drive:webhook"] = SKIP_REASONS["google_drive:webhook"]
+        return
+
+    # webhook 은 provider 가 호출하므로 세션 authz 를 걸지 않는다.
+    # 대신 channel token 으로 발신자를 검증한다.
+    app.include_router(
+        create_drive_webhook_router(
+            adapter=bundle.adapter,
+            channel_resolver=bundle.channel_resolver,
+            channel_token=source.drive_watch_channel_token,
+            change_sink=ports.change_sink,
+        )
+    )
+    mounted.append("google_drive:webhook")
+
+
+def _mount_github(
+    app: FastAPI, container: Container, mounted: list[str], skipped: dict[str, str]
+) -> None:
+    source = container.settings.source
+    if not source.github_configured:
         skipped["github"] = SKIP_REASONS["github"]
+        return
+
+    ports = container.source_ports
+    registration = container.source_registration
+    authorize = container.facade.authorize_vws_action
+    connections = ports.connections
+
+    app.include_router(
+        create_github_install_router(
+            app_slug=source.github_app_slug or "",
+            state_store=ports.oauth_state_store,
+            connection_creation_callback=registration,
+            authz_dependency=authz.workspace_scoped(
+                authorize, PublicVwsAction.SOURCE_MOUNT
+            ),
+        )
+    )
+    mounted.append("github:install")
+
+    bundle = container.github
+    if bundle is None:
+        # 왜 못 만들었는지 정확히 구분해 알린다. 뭉뚱그리면 설정을 고칠 때
+        # 엉뚱한 곳을 보게 된다.
+        reason = (
+            "github:private_key"
+            if not source.github_app_private_key
+            else "github:bindings"
+        )
+        skipped[reason] = SKIP_REASONS[reason]
+        return
+
+    app.include_router(
+        create_github_mounts_router(
+            provider_factory=bundle.provider_factory,
+            connection_installation_lookup=bundle.installation_lookup,
+            tracking_scope_store=bundle.tracking_scope_store,
+            mount_creation_callback=registration,
+            # 저장소 목록은 connection_id, Mount 생성은 risk_workspace_id 다.
+            authz_dependency=authz.path_scoped(
+                {
+                    "/repositories": authz.connection_scoped(
+                        authorize, PublicVwsAction.SOURCE_MOUNT, connections
+                    )
+                },
+                authz.workspace_scoped(authorize, PublicVwsAction.SOURCE_MOUNT),
+            ),
+        )
+    )
+    mounted.append("github:mounts")
+
+    if bundle.webhook_processor is None:
+        skipped["github:webhook"] = SKIP_REASONS["github:webhook"]
+        return
+
+    app.include_router(
+        create_github_webhook_router(
+            webhook_processor=bundle.webhook_processor,
+            mount_resolver=bundle.mount_resolver,
+            change_sink=ports.change_sink,
+        )
+    )
+    mounted.append("github:webhook")
+
+
+def _mount_source_routers(app: FastAPI, container: Container) -> dict[str, object]:
+    """Source 라우터를 붙이고 무엇을 붙였는지 보고한다."""
+    mounted: list[str] = ["local"]
+    skipped: dict[str, str] = {}
+
+    # Local 은 외부 자격증명이 필요 없다. 항상 붙는다.
+    _mount_local(app, container)
+    _mount_drive(app, container, mounted, skipped)
+    _mount_github(app, container, mounted, skipped)
 
     return {"mounted": mounted, "skipped": skipped}
 
@@ -142,9 +265,15 @@ def create_app(
         비밀값은 담지 않는다. 어떤 저장소를 쓰는지, 어떤 provider 라우터가
         붙었는지, 분석 경로가 살아 있는지만 알린다.
         """
+        ports = resolved.source_ports
         return {
             "status": "ok",
             "control_backend": resolved.backend,
+            "queue": resolved.queue_backend,
+            "credential_vault": type(ports.credential_vault).__name__,
+            "staging_store": type(ports.staging_store).__name__,
+            "oauth_state_store": type(ports.oauth_state_store).__name__,
+            "change_relay": type(ports.change_relay).__name__,
             "google_login": (
                 "configured"
                 if resolved.settings.control.google_login_configured

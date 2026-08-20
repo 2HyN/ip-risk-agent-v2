@@ -90,6 +90,10 @@ class SourceSettings:
     github_webhook_secret_id: str | None = None
     github_app_callback_url: str | None = None
     local_staging_bucket: str | None = None
+    # 아래 둘은 Secret Manager 에 보관하고 배포가 실제 값을 주입한다.
+    # `*_SECRET_ID` 는 그 secret 을 가리키는 참조이고, 여기 담기는 것은 값이다.
+    github_app_private_key: str | None = field(default=None, repr=False)
+    github_webhook_secret: str | None = field(default=None, repr=False)
 
     @property
     def drive_configured(self) -> bool:
@@ -98,6 +102,33 @@ class SourceSettings:
     @property
     def github_configured(self) -> bool:
         return bool(self.github_app_id and self.github_app_slug)
+
+
+@dataclass(frozen=True, slots=True)
+class QueueSettings:
+    """Cloud Tasks. 값이 없으면 in-memory 큐로 하강한다.
+
+    in-memory 큐는 같은 프로세스 안에서만 유효하므로 워커를 따로 띄우는 배포
+    구성에서는 반드시 설정해야 한다.
+    """
+
+    project_id: str | None = None
+    location: str | None = None
+    queue: str | None = None
+    worker_url: str | None = None
+    service_account_email: str | None = None
+
+    @property
+    def configured(self) -> bool:
+        return all(
+            (
+                self.project_id,
+                self.location,
+                self.queue,
+                self.worker_url,
+                self.service_account_email,
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +171,7 @@ class Settings:
     control: ControlSettings
     source: SourceSettings
     intelligence: IntelligenceSettings
+    queue: QueueSettings
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "Settings":
@@ -174,6 +206,15 @@ class Settings:
                 github_webhook_secret_id=_clean(env, "GITHUB_WEBHOOK_SECRET_ID"),
                 github_app_callback_url=_clean(env, "GITHUB_APP_CALLBACK_URL"),
                 local_staging_bucket=_clean(env, "LOCAL_STAGING_BUCKET"),
+                github_app_private_key=_clean(env, "GITHUB_APP_PRIVATE_KEY"),
+                github_webhook_secret=_clean(env, "GITHUB_WEBHOOK_SECRET"),
+            ),
+            queue=QueueSettings(
+                project_id=_clean(env, "GCP_PROJECT_ID"),
+                location=_clean(env, "CLOUD_TASKS_LOCATION"),
+                queue=_clean(env, "CLOUD_TASKS_QUEUE"),
+                worker_url=_clean(env, "ANALYSIS_WORKER_URL"),
+                service_account_email=_clean(env, "CLOUD_TASKS_SERVICE_ACCOUNT"),
             ),
             intelligence=IntelligenceSettings(
                 gemini_model_id=_clean(env, "GEMINI_MODEL_ID"),
@@ -191,6 +232,7 @@ __all__ = [
     "Backend",
     "ControlSettings",
     "IntelligenceSettings",
+    "QueueSettings",
     "Settings",
     "SourceSettings",
 ]

@@ -1,0 +1,11 @@
+{
+  "_comment": "staging 버킷 수명주기. 원본을 오래 두지 않는 것이 이 버킷의 존재 이유다. 워커가 가져갈 시간과 큐 재시도 여유를 포함해 2일로 둔다 (Agent 2 Spec 45 항목 17). 적용: gcloud storage buckets update gs://BUCKET --lifecycle-file=deploy/storage/staging-lifecycle.json",
+  "lifecycle": {
+    "rule": [
+      {
+        "action": { "type": "Delete" },
+        "condition": { "age": 2 }
+      }
+    ]
+  }
+}

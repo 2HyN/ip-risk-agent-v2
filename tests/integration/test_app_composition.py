@@ -74,6 +74,13 @@ def test_control_and_source_routes_are_mounted_on_one_app(client: TestClient) ->
 
 
 def test_provider_routers_appear_once_configured() -> None:
+    """자격증명이 생기면 연결 시작 라우터가 붙는다.
+
+    Drive/GitHub 는 단계별로 조립된다. OAuth·설치 시작은 조회 포트가 없어도
+    되지만, Mount 생성과 webhook 은 provider 식별자 매핑(Firestore)이 있어야
+    한다. 없으면 **붙이지 않고 이유를 남긴다** — 반쯤 조립해 런타임에 실패하게
+    두지 않는다.
+    """
     container = build_test_container(
         {
             "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
@@ -84,14 +91,42 @@ def test_provider_routers_appear_once_configured() -> None:
         }
     )
     with TestClient(create_app(container=container)) as client:
-        payload = client.get("/health").json()
-        assert payload["sources"]["skipped"] == {}
-        assert "google_drive:oauth" in payload["sources"]["mounted"]
-        assert "github:install" in payload["sources"]["mounted"]
+        sources = client.get("/health").json()["sources"]
+        assert "google_drive:oauth" in sources["mounted"]
+        assert "github:install" in sources["mounted"]
 
         paths = route_paths(client.app)
         assert "/api/v1/source-connections/google-drive/start" in paths
         assert "/api/v1/source-connections/github/install/start" in paths
+
+        # Firestore 가 없으므로 Drive 의 뒷단계는 붙지 않아야 한다.
+        assert "google_drive:bindings" in sources["skipped"]
+        # GitHub 은 private key 까지 있어야 adapter 를 만들 수 있고,
+        # 그 사실이 "Firestore 미설정"과 구분되어 드러나야 한다.
+        assert "github:private_key" in sources["skipped"]
+
+
+def test_incomplete_provider_config_does_not_mount_half_a_router() -> None:
+    """설정이 부분적일 때 무엇이 왜 빠졌는지 `/health` 가 밝힌다."""
+    container = build_test_container(
+        {
+            "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
+            "GOOGLE_DRIVE_CLIENT_SECRET": "drive-secret",
+            "GOOGLE_DRIVE_REDIRECT_URI": "http://testserver/oauth/drive",
+        }
+    )
+    with TestClient(create_app(container=container)) as client:
+        sources = client.get("/health").json()["sources"]
+        paths = route_paths(client.app)
+
+        # 연결 시작은 열리고
+        assert "/api/v1/source-connections/google-drive/start" in paths
+        # Mount 생성·webhook 은 열리지 않는다
+        assert "/webhooks/google-drive" not in paths
+        assert "google_drive:mounts" not in sources["mounted"]
+        assert "google_drive:webhook" not in sources["mounted"]
+        # 이유가 남는다
+        assert sources["skipped"]["google_drive:bindings"]
 
 
 def test_login_roundtrip_establishes_a_session(client: TestClient) -> None:
