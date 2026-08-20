@@ -8,12 +8,35 @@ version = "0.0.0"
 description = "Secure Human-in-the-Loop IP Risk Management System"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+  # Baseline (Frozen Shared Contract)
   "pydantic==2.13.4",
+
+  # Agent 1 — Platform & Control Plane
+  "fastapi==0.141.1",
+  "google-cloud-firestore==2.28.1",
+  "authlib==1.7.2",
+  "httpx==0.28.1",
+  "itsdangerous==2.2.0",
+
+  # Agent 2 — Source Integration & Desktop
+  "google-api-python-client>=2.180,<3.0",
+  "google-auth>=2.40,<3.0",
+  "PyJWT[crypto]==2.10.1",
+
+  # Agent 3 — Risk Intelligence & RAG
+  "defusedxml==0.7.1",
+  "PyYAML==6.0.3",
+  "google-genai==2.17.0",
+
+  # Integration — ASGI runtime
+  "uvicorn[standard]==0.52.4",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest==9.1.1",
+  "httpx2==2.10.0",        # Starlette TestClient transport (Agent 1)
+  "pytest-asyncio==1.4.0", # Agent 3 async provider tests
 ]
 
 [tool.setuptools.packages.find]
@@ -21,6 +44,10 @@ where = ["shared/contracts/python", "backend/src"]
 include = ["iprisk_contracts*", "ip_risk_agent*"]
 
 [tool.pytest.ini_options]
-testpaths = ["shared/contracts/tests"]
+testpaths = ["shared/contracts/tests", "tests"]
 pythonpath = ["shared/contracts/python", "backend/src", "."]
 addopts = "--strict-config --strict-markers -ra -p no:cacheprovider"
+asyncio_mode = "strict"
+markers = [
+  "live: 실제 외부 provider 를 호출한다. 자격증명이 없으면 건너뛴다",
+]
