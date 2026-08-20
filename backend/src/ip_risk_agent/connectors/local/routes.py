@@ -9,30 +9,11 @@ from pydantic import BaseModel
 from iprisk_contracts.common import ChangeType, SourceArtifactRef, SourceType
 from iprisk_contracts.source_change import SourceChange
 
+from ..common.authz import AuthzDependency, allow_all_authz
 from ..common.change_sink import SourceChangeSink
 from ..common.fingerprint import local_change_fingerprint
 from .identity import encode_local_artifact_id
 from .staging_store import LocalStagingStore
-
-
-class AuthzDependency(Protocol):
-    """Agent 2 Spec §3/§37: VWS membership/role 판단은 Agent 1이 제공하는
-    authz_dependency를 주입받아 쓴다 — Agent 2가 직접 Membership DB를
-    읽지 않는다. resource_id는 라우트마다 의미가 다르다:
-    - /desktop/events, /desktop/staging: mount_id (이미 존재하는 mount)
-    - /desktop/mounts/register: risk_workspace_id (이 VWS에 mount를 만들
-      권한이 있는지)
-    - /desktop/devices/register: 없음(빈 문자열) — device 등록은 VWS
-      scope가 아니라 "유효한 app 세션인지"만 필요하다.
-    허용되면 조용히 반환, 아니면 스스로 HTTPException(401/403)을 던진다."""
-
-    async def __call__(self, request: Request, resource_id: str) -> None: ...
-
-
-async def allow_all_authz(request: Request, resource_id: str) -> None:
-    """개발/테스트 전용 기본값 — 아무 것도 검사하지 않는다.
-    프로덕션 배포 전 반드시 Agent 1의 실제 authz_dependency로 교체해야 한다."""
-    return None
 
 
 class DeviceRegistrationRequest(BaseModel):
