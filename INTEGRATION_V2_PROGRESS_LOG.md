@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 1 완료 — Phase 2 진입 대기**
+> 현재 단계: **통합 Phase 2 완료 — Phase 3 진입 대기**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -94,7 +94,7 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 | Phase | 목표 | 핵심 산출물 | 종료 gate | 상태 |
 |---|---|---|---|---|
 | 1 | 계획 확정과 agent 문서 통합 | 전체 phase 계획, Agent 1/2/3 단일 문서, 삭제 보류 목록 | source 문서 coverage와 보존 확인 | 완료 (`31e3fc4`) |
-| 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 대기 |
+| 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 완료 |
 | 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 대기 |
 | 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 대기 |
 | 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 대기 |
@@ -196,3 +196,60 @@ agent-deliverables/agent-3-dependencies.md
 - 이 phase는 문서 정리만 수행하므로 runtime test는 실행하지 않는다. Phase 2부터 각 phase gate에 맞는 검증을 기록한다.
 - Phase 1 산출물 commit: `31e3fc4e2490b963208a230a4e40b718ec86ec2c` (`docs: consolidate agent integration references`)
 - 종료 gate: **통과**. Phase 2 dependency/toolchain 수렴 작업을 시작할 수 있다.
+
+## Phase 2 — dependency/toolchain 수렴
+
+### 시작 상태와 범위
+
+- 시작 HEAD: `acc4ab7603105444d5657d48b32428c89ae3f886`
+- 목표: 두 통합 기준 문서의 exact dependency를 manifest와 lock에 적용하고, 같은 환경에서 세 Plane 및 Web/Desktop baseline을 검증한다.
+- 포함: Python/Node manifest와 lock, tool version pin, pytest 설정, Source frontend test 포팅, `.env.example`, `README.md`.
+- 제외: P0 경계 변경, API/Worker composition, Web/Electron 제품 wiring, GCP adapter 및 외부 resource 구성.
+
+### 수렴 결과
+
+- runtime을 CPython `3.14.7`, Node.js `24.19.0`, pnpm `11.19.0`, TypeScript `5.9.3`으로 고정하고 `.python-version`, `.node-version`을 추가했다.
+- `pyproject.toml`에 baseline §5의 production direct dependency 17개와 dev dependency 3개를 exact pin으로 적용했다.
+- pytest discovery에 contracts/control/connectors/intelligence/integration/e2e를 포함하고 strict asyncio 및 `live` marker를 등록했다.
+- Python 산출물 이름을 `requirements.lock`으로 확정했다. direct dependency는 `pyproject.toml`, CPython 3.14 transitive resolution은 이 lock이 담당한다.
+- baseline §5.3의 검증 snapshot을 유지하기 위해 `protobuf==7.35.1`을 포함한 주요 transitive version을 lock에 고정했다.
+- Frontend manifest는 baseline exact set을 유지하고, Desktop의 `chokidar`, `electron`, `@types/node` caret를 제거해 각각 `5.0.0`, `43.4.0`, `24.13.3`으로 고정했다.
+- Source frontend의 `node:test`/`node:assert` test 2개를 Vitest assertion과 runner로 포팅했다.
+- 기존 feature branch lock을 최종본으로 사용하지 않고 통합 workspace manifest에서 `pnpm-lock.yaml`을 재생성했다.
+- `.env.example`에 baseline §10 전체 변수와 `APP_ENV`, `APP_ROLE`, `LOG_LEVEL`을 반영했다. 실제 secret/resource 값은 추가하지 않았다.
+- `README.md`를 단일 통합 환경, repository 구조, install/lock 정책, 환경 변수, 검증 명령, 현재 실행 가능 범위와 보안 불변조건 중심으로 전면 재작성했다.
+- Frozen Contract generator를 실행했으며 tracked contract content에는 변경이 없다.
+
+### 검증 기록
+
+| 검증 | 결과 |
+|---|---|
+| `python --version` | `3.14.7` |
+| `node --version` | `v24.19.0` |
+| `pnpm --version` | `11.19.0` |
+| clean `.venv/lock-check`에서 `requirements.lock` 설치 + editable no-deps + `pip check` | 통과 |
+| manylinux2014 x86_64 / CPython 3.14 / binary-only `requirements.lock` dry-run | 통과 |
+| `pnpm install --frozen-lockfile` | 통과, 4 workspace projects / 159 packages |
+| contract generation 후 `git diff --exit-code -- shared/contracts` | 통과, content 변경 없음 |
+| Python `compileall` + `pip check` | 통과 |
+| contracts/control/connectors/intelligence non-live suite | `568 passed, 1 skipped, 10 deselected` |
+| root TypeScript typecheck/build/resolution | 통과 |
+| Frontend Vitest | `6 files, 23 passed` |
+| Desktop Node test | `65 tests, 63 passed, 2 skipped` |
+
+첫 Python suite 실행은 코드 assertion 실패 없이 `566 passed` 후 sandbox 사용자 Temp 디렉터리 권한으로 `tmp_path` setup error 2건이 발생했다. `--basetemp .venv/pytest-tmp`로 repository 내부 ignored 경로를 지정해 같은 suite를 재실행했고 `568 passed, 1 skipped`로 통과했다. skip은 Firestore emulator 미설정 1건이며, deselected 10건은 명시적으로 제외한 `live` test다. Desktop skip 2건은 Windows Developer Mode/admin 권한이 없어 symlink 생성이 불가능한 환경 제약이다.
+
+### Phase 2 gate
+
+- [x] baseline production/dev exact version 적용
+- [x] Python lock clean install 및 `pip check`
+- [x] Linux Cloud Run 계열 wheel 가용성 dry-run
+- [x] Node lock 재생성과 frozen install
+- [x] FastAPI `0.141.1`에서 Source connector suite 통과
+- [x] Pydantic `2.13.4`/Python `3.14.7`에서 Intelligence suite 통과
+- [x] Source frontend test Vitest 통과
+- [x] Frontend/Desktop typecheck, build, resolution 및 test 통과
+- [x] Frozen Contract content 무변경
+- [x] README 및 environment template 수렴
+
+종료 gate: **통과**. Phase 3 P0 경계 보강을 시작할 수 있다. Phase 2 변경은 이 로그를 포함하는 단일 dependency/toolchain commit으로 기록한다.

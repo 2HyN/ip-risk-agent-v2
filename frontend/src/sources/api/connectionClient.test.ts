@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 
 import { HttpConnectionApiClient, type FetchLike } from "./connectionClient.js";
 
@@ -36,11 +35,11 @@ test("startDriveConnection posts risk_workspace_id and returns authorizeUrl/stat
 
   const result = await client.startDriveConnection("rw1");
 
-  assert.equal(result.authorizeUrl, "https://accounts.google.com/o/oauth2/v2/auth?...");
-  assert.equal(result.state, "abc123");
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.url, "http://localhost:8000/api/v1/source-connections/google-drive/start");
-  assert.deepEqual(calls[0]?.body, { risk_workspace_id: "rw1" });
+  expect(result.authorizeUrl).toBe("https://accounts.google.com/o/oauth2/v2/auth?...");
+  expect(result.state).toBe("abc123");
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.url).toBe("http://localhost:8000/api/v1/source-connections/google-drive/start");
+  expect(calls[0]?.body).toEqual({ risk_workspace_id: "rw1" });
 });
 
 test("startGithubConnection posts risk_workspace_id and returns authorizeUrl/state", async () => {
@@ -54,9 +53,9 @@ test("startGithubConnection posts risk_workspace_id and returns authorizeUrl/sta
 
   const result = await client.startGithubConnection("rw1");
 
-  assert.equal(result.state, "xyz");
-  assert.ok(result.authorizeUrl.includes("installations/new"));
-  assert.equal(calls[0]?.body && (calls[0].body as { risk_workspace_id: string }).risk_workspace_id, "rw1");
+  expect(result.state).toBe("xyz");
+  expect(result.authorizeUrl).toContain("installations/new");
+  expect(calls[0]?.body && (calls[0].body as { risk_workspace_id: string }).risk_workspace_id).toBe("rw1");
 });
 
 test("throws when the server responds with an error status", async () => {
@@ -65,5 +64,5 @@ test("throws when the server responds with an error status", async () => {
   });
   const client = new HttpConnectionApiClient("http://localhost:8000", fetchImpl);
 
-  await assert.rejects(() => client.startDriveConnection("rw1"));
+  await expect(client.startDriveConnection("rw1")).rejects.toThrow();
 });

@@ -1,401 +1,214 @@
 # IP Risk Agent
 
-Secure Human-in-the-Loop IP Risk Management System for Local Directory, GitHub Repository, and Google Drive workspaces.
+IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-이 저장소는 하나의 공용 Git repository에서 개발축별 branch를 분리하여 병렬 개발한다. 모든 개발자는 동일한 `main` 기준점에서 자신의 branch를 시작하며, 각 개발축의 파일 ownership과 Frozen Shared Contract 경계를 유지한다.
+현재 `integration-v2`에는 Platform Control, Source Integration/Desktop, Risk Intelligence/RAG의 독립 구현과 단일 dependency/toolchain이 합쳐져 있다. Frozen Contract v1과 각 Plane의 unit suite는 같은 환경에서 통과하지만, API/Worker composition과 Plane 사이 production wiring은 후속 통합 단계에서 완성한다. 따라서 현재 상태를 완성된 배포 애플리케이션으로 간주하지 않는다.
 
-## 1. 공통 개발 환경
+## 통합 상태
 
-프로젝트 개발자는 각자 자신의 PC에 아래 환경을 구성한다.
+| 범위 | 상태 |
+|---|---|
+| 세 feature branch merge와 conflict 해결 | 완료 |
+| Agent 인계 문서 통합 | 완료 |
+| Python/Node dependency 및 lock 수렴 | 완료 |
+| Source frontend test의 Vitest 통합 | 완료 |
+| P0 경계 보강 | 예정 |
+| API/Worker composition | 예정 |
+| Web/Electron 제품 wiring | 예정 |
+| GCP 내부 구성과 외부 배포 | 예정 |
 
-### 필수 버전
+세부 상태와 검증 증거는 `INTEGRATION_V2_PROGRESS_LOG.md`에 기록한다. 이 로그는 통합 작업용 비규범 문서이며, 설계와 의존성 결정은 `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 `INTEGRATION_V2_EXECUTION_PLAN.md`가 우선한다.
 
-- **Python**: CPython `3.14.7` 고정
-- **Python compatibility**: `>=3.14,<3.15`
-- **Pydantic**: `2.13.4` 고정
-- **pytest**: `9.1.1` 고정
-- **Node.js**: `24.19.0`
-- **pnpm**: `11.19.0`
-
-Node.js 24.19.0은 아래 공식 다운로드 페이지에서 설치한다.
+## 시스템 구성
 
 ```text
-https://nodejs.org/en/download
+shared/contracts/                 Frozen Contract v1과 generated bindings
+backend/src/ip_risk_agent/
+  api/                            Control API와 인증 경계
+  application/                    canonical application service
+  core/                           domain model과 policy
+  persistence/                    in-memory/Firestore persistence
+  connectors/                     Drive, GitHub, Local source adapters
+  intelligence/                   Patent, License, Gemini, RAG
+frontend/                         React/Vite Product UI와 Source UI 모듈
+apps/desktop/                     Electron main/preload, Local watcher와 registry
+rag-corpus/                       reference-only RAG corpus와 provenance
+tests/                            contracts/control/connectors/intelligence/integration/e2e
+scripts/                          contract generation과 resolution 검증
+docs/                             Agent별 통합 참조 문서
 ```
 
-Node.js 설치 후 새 터미널을 열고 확인한다.
+핵심 Plane의 책임은 다음과 같다.
 
-```bash
+- Control Plane은 VWS, membership, SourceMetadata, canonical state, Risk, Review와 authorization을 소유한다.
+- Source Plane은 provider connection, mount, metadata/snapshot lookup과 content-free SourceChange 생산을 담당한다.
+- Intelligence Plane은 supplied snapshot을 분석하고 Patent/License/RAG evidence를 반환한다. canonical state를 직접 변경하지 않는다.
+- Integration layer는 설정, 인증 adapter, provider binding, API와 Worker 조립을 담당하며 후속 Phase에서 구현한다.
+
+`shared/contracts/**`는 frozen 영역이다. 변경이 필요하면 `contract-change-requests/` 절차를 사용하며 feature 또는 통합 편의를 위해 직접 수정하지 않는다.
+
+## 고정 개발 환경
+
+| Tool/runtime | Version |
+|---|---:|
+| CPython | `3.14.7` |
+| Node.js | `24.19.0` |
+| pnpm | `11.19.0` |
+| TypeScript | `5.9.3` |
+| Pydantic | `2.13.4` |
+| pytest | `9.1.1` |
+
+`.python-version`, `.node-version`, `pyproject.toml`과 root `package.json`이 이 기준을 표현한다. 다른 Python minor 또는 caret/range 기반 Node dependency로 개발 환경을 임의 변경하지 않는다.
+
+## 설치
+
+### 1. 버전 확인
+
+```powershell
+python --version
 node --version
-npm --version
-```
-
-`node --version` 결과가 다음이어야 한다.
-
-```text
-v24.19.0
-```
-
-pnpm을 설치한다.
-
-```bash
-npm install -g pnpm@11.19.0
-```
-
-확인:
-
-```bash
 pnpm --version
 ```
 
-예상 결과:
+각 출력은 위 고정 버전과 일치해야 한다.
 
-```text
-11.19.0
-```
+### 2. Python
 
-## 2. 저장소 문서
+일반 개발 설치:
 
-개발 전에 다음 6개 문서를 읽는다.
-
-```text
-IP_RISK_AGENT_MEETING_BLUEPRINT.md
-CODING_AGENT_MASTER_SPEC.md
-CODING_AGENT_SPEC_1_PLATFORM_CONTROL.md
-CODING_AGENT_SPEC_2_SOURCE_DESKTOP.md
-CODING_AGENT_SPEC_3_RISK_INTELLIGENCE_RAG.md
-ENVIRONMENT_SETUP.md
-```
-
-문서 역할은 다음과 같다.
-
-- `IP_RISK_AGENT_MEETING_BLUEPRINT.md`: 전체 제품/아키텍처/보안/개발축 청사진
-- `CODING_AGENT_MASTER_SPEC.md`: 모든 개발축이 따라야 할 최상위 개발 규약
-- `CODING_AGENT_SPEC_1_PLATFORM_CONTROL.md`: Agent 1 상세 구현 명세
-- `CODING_AGENT_SPEC_2_SOURCE_DESKTOP.md`: Agent 2 상세 구현 명세
-- `CODING_AGENT_SPEC_3_RISK_INTELLIGENCE_RAG.md`: Agent 3 상세 구현 명세
-- `ENVIRONMENT_SETUP.md`: 공통 사전환경 구조와 실행/검증 방법
-
-충돌 시 `CODING_AGENT_MASTER_SPEC.md`의 규칙을 우선한다.
-
-## 3. Branch 구조
-
-공용 저장소는 아래 branch 구조를 사용한다.
-
-```text
-main
-├─ platform-control
-├─ source-integration-desktop
-├─ risk-intelligence-rag
-└─ integration
-```
-
-### `main`
-
-확정된 공통 기준점이다.
-
-포함:
-
-- 청사진 및 개발 명세
-- 공통 개발 환경
-- Frozen `shared/contracts/**`
-- 초기 repository skeleton
-
-병렬 개발 도중 각 Agent가 자신의 기능 구현을 직접 `main`에 push하지 않는다.
-
-### `platform-control`
-
-Platform & Control Plane 전용 branch.
-
-주요 ownership:
-
-```text
-backend/src/ip_risk_agent/core/**
-backend/src/ip_risk_agent/application/**
-backend/src/ip_risk_agent/persistence/core_firestore/**
-Agent 1 소유 API 영역
-frontend/src/app/**
-frontend/src/auth/**
-frontend/src/workspace/**
-frontend/src/risk/**
-frontend/src/history/**
-frontend/src/security/**
-frontend/src/shared/**
-tests/control/**
-```
-
-### `source-integration-desktop`
-
-Source Integration & Desktop 전용 branch.
-
-주요 ownership:
-
-```text
-backend/src/ip_risk_agent/connectors/**
-Agent 2 소유 source API 영역
-frontend/src/sources/**
-apps/desktop/**
-tests/connectors/**
-```
-
-### `risk-intelligence-rag`
-
-Risk Intelligence & RAG 전용 branch.
-
-주요 ownership:
-
-```text
-backend/src/ip_risk_agent/intelligence/**
-rag-corpus/**
-tests/intelligence/**
-```
-
-### `integration`
-
-최종 통합 전용 branch.
-
-주요 ownership:
-
-```text
-backend/src/ip_risk_agent/composition/**
-backend/src/ip_risk_agent/main.py
-backend/src/ip_risk_agent/worker.py
-deploy/**
-root dependency/toolchain/lock/config files
-tests/integration/**
-tests/e2e/**
-```
-
-## 4. 절대 개발 경계
-
-### Frozen Shared Contracts
-
-```text
-shared/contracts/**
-```
-
-병렬 개발 중 Agent 1/2/3는 이 영역을 임의 수정하지 않는다.
-
-Contract 변경이 필요하면 코드를 직접 고치지 말고 Master Spec의 contract-change request 규칙을 따른다.
-
-### 다른 개발축 내부 구현 직접 import 금지
-
-허용:
-
-```text
-Control      -> shared contracts
-Source       -> shared contracts
-Intelligence -> shared contracts
-Integration  -> all public plane surfaces
-```
-
-금지:
-
-```text
-Control      -> connectors internals
-Control      -> intelligence internals
-Source       -> Control internals
-Source       -> Intelligence internals
-Intelligence -> Control internals
-Intelligence -> connectors internals
-```
-
-## 5. 처음 저장소를 Clone한 뒤 환경 구성
-
-각 개발자는 자신의 PC에서 공용 repository를 clone한다.
-
-```bash
-git clone <REMOTE_REPOSITORY_URL>
-cd ip-risk-agent-v2
-```
-
-### Python 버전 확인
-
-프로젝트 가상환경을 만들기 전에 Python 3.14.7이 설치되어 있는지 확인한다.
-
-```bash
-py -V:3.14.7 --version
-```
-
-설치되어 있지 않다면:
-
-```bash
-py install 3.14.7
-```
-
-### Python 가상환경
-
-Git Bash:
-
-```bash
-py -V:3.14.7 -m venv .venv
-source .venv/Scripts/activate
-python -m pip install --upgrade pip
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
+python -m pip check
 ```
 
-설치된 버전을 확인한다.
+Windows가 아닌 환경에서는 가상환경을 `source .venv/bin/activate`로 활성화한다.
 
-```bash
-python --version
-python -c "import pydantic; print(pydantic.__version__)"
-pytest --version
+CI 또는 재현 가능한 설치에서는 transitive version까지 고정한 lock을 먼저 적용한다.
+
+```powershell
+python -m pip install -r requirements.lock
+python -m pip install --no-deps -e .
+python -m pip check
 ```
 
-다음 버전이어야 한다.
+`pyproject.toml`은 direct production/dev dependency의 source of truth이고, `requirements.lock`은 CPython 3.14에서 해석한 transitive set이다. manifest를 변경하면 두 파일을 같은 commit에서 갱신하고 Windows 및 Linux target을 다시 검증한다.
 
-```text
-Python 3.14.7
-Pydantic 2.13.4
-pytest 9.1.1
-```
+### 3. Node workspace
 
-### Node / TypeScript dependency
-
-Node.js 24.19.0과 pnpm 11.19.0을 설치한 뒤 프로젝트 root에서 실행한다.
-
-```bash
+```powershell
 pnpm install --frozen-lockfile
 ```
 
-`.venv/`, `node_modules/`, `.pnpm-store/`, `dist/` 등은 Git으로 공유하지 않는다. 각 PC에서 위 manifest/lockfile을 기준으로 재생성한다.
+workspace는 `@iprisk/contracts`, `@iprisk/frontend`, `@iprisk/desktop`으로 구성된다. 모든 dependency는 exact version 또는 `workspace:*`로 고정되어 있다. `pnpm-lock.yaml`을 직접 편집하지 않는다.
 
-## 6. 초기 환경 검증
+## 환경 변수
 
-프로젝트 root에서 실행한다.
+`.env.example`을 로컬 전용 `.env`로 복사하고 필요한 값만 설정한다. `.env`, secret, OAuth token, PEM, service-account JSON과 실제 resource ID를 commit하지 않는다.
 
-```bash
-pnpm run typecheck
+```powershell
+Copy-Item .env.example .env
+```
+
+변수 그룹은 다음과 같다.
+
+| Group | Variables |
+|---|---|
+| Runtime | `APP_ENV`, `APP_ROLE`, `LOG_LEVEL` |
+| Shared/GCP | `GCP_PROJECT_ID`, `FIRESTORE_DATABASE`, `APP_PUBLIC_BASE_URL`, `SESSION_SECRET`, `FIRESTORE_EMULATOR_HOST` |
+| Google login | `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`, `GOOGLE_LOGIN_REDIRECT_URI` |
+| Google Drive | `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GOOGLE_DRIVE_REDIRECT_URI`, `GOOGLE_DRIVE_WEBHOOK_BASE_URL`, `DRIVE_WATCH_CHANNEL_TOKEN` |
+| GitHub App | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CALLBACK_URL`, `GITHUB_APP_PRIVATE_KEY_SECRET_ID`, `GITHUB_WEBHOOK_SECRET_ID` |
+| Local Desktop | `LOCAL_STAGING_BUCKET`, `IPRISK_SERVER_BASE_URL` |
+| Cloud Tasks | `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT` |
+| Intelligence | `GEMINI_MODEL_ID`, `GEMINI_API_KEY`, `VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG`, `KIPRIS_API_KEY_SECRET_ID`, `KIPRIS_ACCESS_KEY`, `RAG_REGION`, `RAG_CORPUS_ID`, `RAG_CORPUS_VERSION`, `PACKAGE_METADATA_BASE_URL` |
+
+`GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. `FIRESTORE_EMULATOR_HOST`는 test 전용이며 production에서 설정하지 않는다. Cloud Tasks 네 변수는 하나의 configuration group으로 취급하고 일부만 설정된 상태에서 in-memory fallback하지 않는다.
+
+Production secret은 Secret Manager reference로 해석해야 한다. `.env.example`에 비밀 값이나 예시 private key를 추가하지 않는다.
+
+## Contract 생성과 검증
+
+Contract schema에서 generated binding을 재생성한다.
+
+```powershell
 pnpm run generate
+git diff --exit-code -- shared/contracts
+```
+
+두 번째 명령에서 diff가 발생하면 원인을 확인한다. Frozen Contract 변경을 일반 생성 결과로 commit해서는 안 된다.
+
+전체 non-live baseline 검증:
+
+```powershell
+python -m compileall -q backend/src shared/contracts/python scripts
+python -m pip check
+python -m pytest shared/contracts/tests tests/control tests/connectors tests/intelligence -m "not live"
+
+pnpm run typecheck
 pnpm run build
 pnpm run verify:resolution
-pytest
-python -m compileall backend/src shared/contracts/python scripts
+pnpm --filter @iprisk/frontend test
+pnpm --filter @iprisk/desktop test
+pnpm install --frozen-lockfile
 ```
 
-모든 명령이 성공한 상태에서 개발을 시작한다.
+Windows sandbox나 제한된 계정에서 pytest의 기본 temp 경로 권한이 거부되면 repository 내부의 ignored 경로를 명시할 수 있다.
 
-특히 `shared/contracts/typescript/dist`가 없는 clean 상태에서도 TypeScript typecheck가 성공해야 한다.
-
-## 7. 각 개발자의 Branch 시작 방법
-
-모든 개발자는 자신의 담당 branch만 checkout하여 작업한다.
-
-### Agent 1
-
-```bash
-git fetch origin
-git switch platform-control
-git pull --ff-only origin platform-control
+```powershell
+python -m pytest shared/contracts/tests tests/control tests/connectors tests/intelligence -m "not live" --basetemp .venv/pytest-tmp
 ```
 
-### Agent 2
+`live` marker는 실제 provider credential과 명시적 opt-in 없이 실행하지 않는다. Firestore emulator test는 `FIRESTORE_EMULATOR_HOST`가 없으면 skip되는 것이 정상이다.
 
-```bash
-git fetch origin
-git switch source-integration-desktop
-git pull --ff-only origin source-integration-desktop
+## 로컬 실행 범위
+
+Frontend 개발 서버는 다음과 같이 실행할 수 있다.
+
+```powershell
+pnpm --filter @iprisk/frontend dev
 ```
 
-### Agent 3
+Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. 현재 통합 API/Worker entrypoint는 아직 조립 중이므로 모든 화면과 Source flow가 end-to-end로 동작한다고 기대해서는 안 된다.
 
-```bash
-git fetch origin
-git switch risk-intelligence-rag
-git pull --ff-only origin risk-intelligence-rag
+Desktop package 검증:
+
+```powershell
+pnpm --filter @iprisk/desktop build
+pnpm --filter @iprisk/desktop test
 ```
 
-### Integration 담당
+Electron Product renderer, device enrollment credential과 production server wiring은 후속 Web/Electron 통합 범위다.
 
-```bash
-git fetch origin
-git switch integration
-git pull --ff-only origin integration
-```
+## 보안 불변조건
 
-## 8. 일상 작업 흐름
+- SourceChange와 Cloud Tasks payload에는 content, filename, path, URL, secret을 넣지 않는다.
+- Source Plane은 canonical Risk와 VWS state를 직접 변경하지 않는다.
+- Intelligence Plane은 canonical database에 직접 쓰지 않는다.
+- Drive/GitHub/Local adapter는 사용자가 명시적으로 선택한 scope 밖의 원문을 가져오지 않는다.
+- 외부 provider failure, partial 또는 inconclusive 결과를 empty success로 취급하지 않는다.
+- RAG corpus에는 private Source Workspace 원문을 적재하지 않는다.
+- production 설정 누락을 in-memory adapter로 조용히 대체하지 않는다.
 
-작업 시작 전:
+## 문서 기준
 
-```bash
-git status
-git fetch origin
-git pull --ff-only
-```
+설계 및 구현 시 다음 우선순위를 사용한다.
 
-구현 후 담당 테스트를 실행한다.
+1. `CODING_AGENT_MASTER_SPEC.md`와 세 상세 명세
+2. `IP_RISK_AGENT_MEETING_BLUEPRINT.md`
+3. `INTEGRATION_V2_DEPENDENCY_BASELINE.md`
+4. `INTEGRATION_V2_EXECUTION_PLAN.md`
+5. `docs/AGENT_1_PLATFORM_CONTROL.md`
+6. `docs/AGENT_2_SOURCE_DESKTOP.md`
+7. `docs/AGENT_3_RISK_INTELLIGENCE_RAG.md`
 
-예:
+`INTEGRATION_V2_PROGRESS_LOG.md`는 진행 추적용 부가 기록이다. 기존 Agent delivery/dependency 문서는 최종 통합 검증이 끝난 뒤 GCP 배포 전에 제거할 예정이며, 그 시점까지는 provenance와 교차 검증을 위해 보존한다.
 
-```bash
-pytest
-pnpm run typecheck
-```
+## 통합 작업 규칙
 
-변경 사항 확인:
-
-```bash
-git status
-git diff
-```
-
-Commit:
-
-```bash
-git add <OWNED_FILES>
-git commit -m "<type>: <summary>"
-```
-
-Push:
-
-```bash
-git push origin HEAD
-```
-
-각 개발자는 자신의 branch에만 push한다.
-
-## 9. `main` 변경을 자신의 Branch에 반영
-
-병렬 개발 중 공통 기준점에 필요한 수정이 `main`에 반영된 경우 자신의 branch에서 다음과 같이 동기화한다.
-
-```bash
-git fetch origin
-git switch <YOUR_BRANCH>
-git merge origin/main
-```
-
-충돌이 발생하면 자신의 ownership 범위와 Master Spec을 기준으로 해결한다.
-
-Frozen Contract 또는 타 Agent 소유 영역에서 의미 있는 충돌이 발생했다면 임의로 해결하지 말고 팀에서 먼저 합의한다.
-
-## 10. 개발 완료 시
-
-각 Agent는 자신의 상세 개발 명세에 정의된 테스트와 Acceptance Criteria를 통과시킨다.
-
-최종적으로 코드와 함께 해당 Agent 명세에서 요구하는 `AGENT_DELIVERY.md`를 작성한다.
-
-Integration 단계에서는 세 Agent branch의 결과를 `integration` branch로 병합한 뒤 다음을 수행한다.
-
-```text
-SourceAdapter wiring
-Analyzer Registry wiring
-Control/Source/Intelligence composition
-root dependency merge
-Cloud worker/API composition
-integration tests
-e2e tests
-```
-
-통합 검증 완료 후에만 `main`으로 반영한다.
-
-## 11. 중요 원칙
-
-- 하나의 공용 repository를 사용한다.
-- 개인별 별도 repository를 만들지 않는다.
-- 모든 작업 branch는 동일한 `main` 기준점에서 시작한다.
-- `.venv`, `node_modules`, `.pnpm-store`, `dist`는 공유하지 않는다.
-- dependency와 환경은 manifest/lockfile/`ENVIRONMENT_SETUP.md`를 통해 재현한다.
-- `shared/contracts/**`는 병렬 개발 동안 Frozen이다.
-- 자신의 ownership 밖의 기능을 대신 구현하지 않는다.
-- provider/system failure를 성공 또는 “Risk 없음”으로 변환하지 않는다.
-- raw source/credential을 로그나 Shared Contract에 추가하지 않는다.
+- 모든 통합 변경은 `integration-v2`에서만 수행한다.
+- 가능하면 하나의 Phase를 하나의 commit으로 유지한다.
+- phase gate가 통과하기 전에 다음 phase의 기능 변경을 섞지 않는다.
+- manifest를 변경하면 lock, install, 전체 영향 Plane test 결과를 함께 갱신한다.
+- GCP Console/IAM/resource 생성은 코드·배포 산출물과 전체 검증이 완료된 뒤 수행한다.

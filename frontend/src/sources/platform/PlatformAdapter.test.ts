@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 
 import {
   detectPlatformAdapter,
@@ -9,18 +8,18 @@ import {
 
 test("detectPlatformAdapter returns web adapter when window is unavailable (Node/SSR context)", () => {
   const adapter = detectPlatformAdapter();
-  assert.equal(adapter.platform, "web");
+  expect(adapter.platform).toBe("web");
 });
 
 test("WebPlatformAdapter.chooseLocalDirectory always returns null", async () => {
   const adapter = new WebPlatformAdapter();
   const result = await adapter.chooseLocalDirectory();
-  assert.equal(result, null);
+  expect(result).toBeNull();
 });
 
 test("WebPlatformAdapter.openTrackedArtifact throws", async () => {
   const adapter = new WebPlatformAdapter();
-  await assert.rejects(() => adapter.openTrackedArtifact("h", "p"));
+  await expect(adapter.openTrackedArtifact("h", "p")).rejects.toThrow();
 });
 
 test("ElectronPlatformAdapter.chooseLocalDirectory delegates to desktopApi", async () => {
@@ -39,9 +38,9 @@ test("ElectronPlatformAdapter.chooseLocalDirectory delegates to desktopApi", asy
 
   const result = await adapter.chooseLocalDirectory();
 
-  assert.equal(called, true);
-  assert.equal(result?.canonicalRootPath, "/tmp/example");
-  assert.equal(adapter.platform, "desktop");
+  expect(called).toBe(true);
+  expect(result?.canonicalRootPath).toBe("/tmp/example");
+  expect(adapter.platform).toBe("desktop");
 });
 
 test("detectPlatformAdapter returns desktop adapter when window.desktopApi is present", () => {
@@ -58,7 +57,7 @@ test("detectPlatformAdapter returns desktop adapter when window.desktopApi is pr
 
   try {
     const adapter = detectPlatformAdapter();
-    assert.equal(adapter.platform, "desktop");
+    expect(adapter.platform).toBe("desktop");
   } finally {
     delete (globalThis as { window?: unknown }).window;
   }

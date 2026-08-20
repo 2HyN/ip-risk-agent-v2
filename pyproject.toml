@@ -9,11 +9,29 @@ description = "Secure Human-in-the-Loop IP Risk Management System"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "pydantic==2.13.4",
+  "fastapi==0.141.1",
+  "starlette==1.6.0",
+  "google-cloud-firestore==2.28.1",
+  "authlib==1.7.2",
+  "httpx==0.28.1",
+  "itsdangerous==2.2.0",
+  "google-api-python-client==2.198.0",
+  "google-auth[requests]==2.56.3",
+  "PyJWT[crypto]==2.10.1",
+  "defusedxml==0.7.1",
+  "PyYAML==6.0.3",
+  "google-genai==2.17.0",
+  "uvicorn[standard]==0.52.4",
+  "google-cloud-secret-manager==2.30.0",
+  "google-cloud-tasks==2.24.0",
+  "google-cloud-storage==3.13.1",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "httpx2==2.10.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -21,6 +39,17 @@ where = ["shared/contracts/python", "backend/src"]
 include = ["iprisk_contracts*", "ip_risk_agent*"]
 
 [tool.pytest.ini_options]
-testpaths = ["shared/contracts/tests"]
+testpaths = [
+  "shared/contracts/tests",
+  "tests/control",
+  "tests/connectors",
+  "tests/intelligence",
+  "tests/integration",
+  "tests/e2e",
+]
 pythonpath = ["shared/contracts/python", "backend/src", "."]
 addopts = "--strict-config --strict-markers -ra -p no:cacheprovider"
+asyncio_mode = "strict"
+markers = [
+  "live: tests requiring real external providers or credentials",
+]

@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@iprisk/contracts": "workspace:*",
-    "chokidar": "^5.0.0"
+    "chokidar": "5.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "electron": "^43.4.0",
+    "@types/node": "24.13.3",
+    "electron": "43.4.0",
     "typescript": "5.9.3"
   }
 }
