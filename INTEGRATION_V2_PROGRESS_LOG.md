@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**  
 > 시작일: 2026-08-21  
-> 현재 단계: feature branch merge 및 conflict resolution  
+> 현재 단계: feature branch merge 및 conflict resolution 완료  
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -59,17 +59,29 @@
 
 ### 3. `risk-intelligence-rag`
 
-- 상태: 대기
-- merge commit: 미정
-- conflict: 미정
-- 해결/검증: 미정
+- 상태: 완료
+- merge commit: `13caa161d204c819dbaa90fdf5292b1fd2ea071f`
+- conflict: 없음
+- 해결/검증:
+  - `ort` strategy로 `--no-ff` merge 완료
+  - Intelligence, Gemini, Patent, License, RAG, corpus와 test가 추가됨
+  - merge 직후 worktree에 미해결 파일 없음
+  - dependency/toolchain 정리 및 전체 test는 이번 단계 범위 밖이므로 실행하지 않음
 
 ## 현재 단계 종료 조건
 
-- [ ] 세 feature branch merge commit이 `integration-v2` history에 존재
-- [ ] 모든 merge conflict 해결
-- [ ] conflict marker 없음
-- [ ] `git diff --check` 통과
-- [ ] `shared/contracts/**`에 의도하지 않은 변경 없음
-- [ ] 다른 네 worktree clean 유지
-- [ ] 전체 통합 개발 및 dependency 재생성은 시작하지 않음
+- [x] 세 feature branch merge commit이 `integration-v2` history에 존재
+- [x] 모든 merge conflict 해결
+- [x] conflict marker 없음
+- [x] `git diff --check` 통과
+- [x] `shared/contracts/**`에 의도하지 않은 변경 없음
+- [x] 다른 네 worktree clean 유지
+- [x] 전체 통합 개발 및 dependency 재생성은 시작하지 않음
+
+## 단계 종료 요약
+
+- merge 순서: `platform-control` → `source-integration-desktop` → `risk-intelligence-rag`
+- merge conflict: frontend 설정 파일 4건, 모두 기준 문서의 확정안대로 해결
+- semantic integration: 미실행
+- dependency/lockfile 최종화: 미실행
+- test/build: 다음 dependency 통합 단계로 보류
