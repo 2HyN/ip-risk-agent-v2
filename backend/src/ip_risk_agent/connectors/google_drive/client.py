@@ -2,7 +2,7 @@
 
 2HyN/ip-risk-agent (팀 저장소, public)의 connectors/google_drive.py를
 바탕으로 이식했다. google-api-python-client / google-auth가 설치되어
-있어야 import 가능하다 (agent-deliverables/agent-2-dependencies.md 참고).
+있어야 import 가능하다 (root ``pyproject.toml``의 고정 dependency 참고).
 설치 전까지 이 모듈을 쓰는 테스트는 importorskip으로 건너뛴다.
 """
 

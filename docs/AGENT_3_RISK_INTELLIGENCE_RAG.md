@@ -1,6 +1,6 @@
 # Agent 3 — Risk Intelligence & RAG 통합 참조
 
-> 문서 상태: Agent 3 분산 문서 통합본
+> 문서 상태: Agent 3 최종 유지 문서 (Phase 8 원본 제거 완료)
 > 코드 기준: `risk-intelligence-rag` merge 결과 (`68e07a3fdf543bcb4871cb13aee95fcc64b5749d`)
 > 적용 branch: `integration-v2`
 > 최종 dependency 결정: [`../INTEGRATION_V2_DEPENDENCY_BASELINE.md`](../INTEGRATION_V2_DEPENDENCY_BASELINE.md)
@@ -15,7 +15,7 @@
 | `AGENT_3_DELIVERY.md` | 구현 범위, public entrypoint, test, contract 준수, wiring, 제약 |
 | `agent-deliverables/agent-3-dependencies.md` | package 선택, live provider 결과, 수정 이력, Integration 요청 |
 
-원본은 전체 통합 검증 후 Phase 8에서만 삭제한다.
+원본은 Phase 7 전체 검증 통과 후 Phase 8에서 제거했으며 Git history로만 보존한다.
 
 ## 2. 역할과 경계
 
@@ -231,7 +231,9 @@ chunks = await retriever.retrieve(query, filters=..., top_k=...)
 
 - 실제 RAG Engine production uploader
 
-Phase 6에서 ADC 기반 uploader 또는 공식 관리 도구를 호출하는 repository script를 확정한다. private Source Workspace 자료는 corpus에 넣지 않는다.
+Phase 6의 repository script는 approved path와 checksum을 검증하는 write-free dry-run으로
+고정했다. 실제 ADC 기반 upload는 corpus resource가 생성되는 Phase 9에서 runbook에
+따라 수행하며 private Source Workspace 자료는 corpus에 넣지 않는다.
 
 초기 corpus는 AGPL-3.0, LGPL-2.1, permissive notice 자료 3건뿐이다. 지원 라이선스 전체 coverage가 아니다.
 
@@ -346,7 +348,7 @@ Non-live suite는 CI 기본이다. live suite는 명시적 opt-in과 credential�
 - partial/missing result set의 canonical terminal 처리
 - shared lifecycle에서 Gemini/RAG HTTP client close
 
-### Phase 6~9
+### Phase 9 live 범위
 
 - RAG production ingestion 방법
 - exact RAG GA region/corpus resource
@@ -362,11 +364,11 @@ Non-live suite는 CI 기본이다. live suite는 명시적 opt-in과 credential�
 - global license policy
 - 일부 provider 설정이 없을 때 local-only feature disable 가능하나 production silent disable 금지
 
-## 16. Phase 8 원본 삭제 확인표
+## 16. Phase 8 원본 삭제 결과
 
 | 원본 | 대체 section |
 |---|---|
 | delivery | §2~10, §13~15 |
 | dependency request | §8, §11~13 |
 
-삭제 전 build/test/운영 절차의 원본 파일명 참조를 이 문서 또는 최종 개발/운영 문서로 교체한다. 보호 대상 명세·기준 문서와 provenance/history 구간의 과거 참조는 실행 경로가 아님을 확인한 뒤 보존할 수 있다.
+build/test/운영 절차의 원본 파일명 참조를 이 문서와 최종 개발/운영 문서로 교체한 뒤 원본을 삭제했다. 보호 대상 명세·기준 문서와 provenance/history 구간의 과거 참조는 실행 경로가 아니므로 보존한다.

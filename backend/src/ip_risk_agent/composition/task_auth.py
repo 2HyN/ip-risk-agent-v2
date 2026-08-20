@@ -1,4 +1,4 @@
-"""Worker task identity boundary; production OIDC implementation arrives in Phase 6."""
+"""Worker task identity boundary; production OIDC adapter lives in ``gcp.identity``."""
 
 from __future__ import annotations
 

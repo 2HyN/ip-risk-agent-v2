@@ -81,7 +81,7 @@ class RagEngineRetriever:
             except ImportError as exc:  # pragma: no cover - 설치 여부에 따라 갈린다
                 raise RuntimeError(
                     "google-auth is required for RagEngineRetriever; "
-                    "see agent-deliverables/agent-3-dependencies.md"
+                    "install the root project dependencies"
                 ) from exc
             credentials, _project = google.auth.default(scopes=[SCOPE])
 

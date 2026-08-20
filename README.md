@@ -2,7 +2,7 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain, P0 경계, API/Worker composition, Web/Electron 제품 흐름과 Phase 6 GCP 내부 배포 기반이 합쳐져 있다. Product UI는 현재 workspace에서 Google Drive·GitHub·Local source 연결과 상태 관리, Open Original을 수행하고, Electron은 one-time enrollment, OS 암호화 credential, bearer background event와 watcher 복구를 제공한다. Firestore operational store, Secret Manager/GCS/Cloud Tasks/OIDC adapter, same-origin 정적 hosting, non-root image와 Cloud Build/Run/Tasks/Scheduler/TTL 입력물은 저장소 안에서 검증된다. 실제 GCP resource와 credential을 만드는 외부 작업은 아직 수행하지 않았다.
+현재 `integration-v2`는 Phase 8 release candidate다. 세 Plane, 고정 dependency/toolchain, P0 경계, API/Worker composition, Web/Electron 제품 흐름과 GCP 내부 배포 기반이 통합되어 전체 non-live regression을 통과했다. Firestore operational store, Secret Manager/GCS/Cloud Tasks/OIDC adapter, same-origin 정적 hosting, non-root image와 Cloud Build/Run/Tasks/Scheduler/TTL 입력물은 저장소 안에서 검증된다. 실제 GCP resource/IAM/credential 생성과 provider live 검증은 아직 수행하지 않았다.
 
 ## 통합 상태
 
@@ -16,6 +16,8 @@ IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 �
 | API/Worker composition과 local integration E2E | 완료 |
 | Web/Electron 제품 wiring | 완료 |
 | GCP 내부 adapter와 배포 입력물 | 완료 |
+| 전체 release regression과 staging runbook | 완료 |
+| 구 Agent 원본 제거와 release candidate 고정 | 완료 |
 | GCP 외부 resource/IAM/live 배포 | 예정 |
 
 세부 상태와 검증 증거는 `INTEGRATION_V2_PROGRESS_LOG.md`에 기록한다. 이 로그는 통합 작업용 비규범 문서이며, 설계와 의존성 결정은 `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 `INTEGRATION_V2_EXECUTION_PLAN.md`가 우선한다.
@@ -227,7 +229,7 @@ pnpm --filter @iprisk/desktop test
 6. `docs/AGENT_2_SOURCE_DESKTOP.md`
 7. `docs/AGENT_3_RISK_INTELLIGENCE_RAG.md`
 
-`INTEGRATION_V2_PROGRESS_LOG.md`는 진행 추적용 부가 기록이다. 기존 Agent delivery/dependency 문서는 최종 통합 검증이 끝난 뒤 GCP 배포 전에 제거할 예정이며, 그 시점까지는 provenance와 교차 검증을 위해 보존한다.
+`INTEGRATION_V2_PROGRESS_LOG.md`는 진행 추적용 부가 기록이다. 기존 Agent delivery/dependency 원본 8개는 Phase 7 전체 검증 뒤 제거했으며, provenance는 세 통합 문서의 표와 Git history에 남는다. 외부 배포 순서와 증거 형식은 `docs/STAGING_VERIFICATION_RUNBOOK.md`를 따른다.
 
 ## 통합 작업 규칙
 

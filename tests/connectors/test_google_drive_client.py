@@ -1,5 +1,5 @@
 """google_drive/client.py 확인. google-api-python-client/google-auth가
-설치되어 있어야 실행된다 (agent-deliverables/agent-2-dependencies.md 참고).
+설치되어 있어야 실행된다 (root ``pyproject.toml``의 고정 dependency 참고).
 아직 설치 전이라면 이 파일 전체가 SKIPPED로 표시되는 게 정상이다."""
 
 from __future__ import annotations

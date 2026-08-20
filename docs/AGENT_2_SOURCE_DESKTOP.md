@@ -1,6 +1,6 @@
 # Agent 2 — Source Integration & Desktop 통합 참조
 
-> 문서 상태: Agent 2 분산 문서 통합본
+> 문서 상태: Agent 2 최종 유지 문서 (Phase 8 원본 제거 완료)
 > 코드 기준: Agent 2 merge 결과와 `integration-v2` Phase 5 제품 통합
 > 적용 branch: `integration-v2`
 > 최종 dependency 결정: [`../INTEGRATION_V2_DEPENDENCY_BASELINE.md`](../INTEGRATION_V2_DEPENDENCY_BASELINE.md)
@@ -15,7 +15,7 @@
 | `AGENT_2_DELIVERY.md` | 구현 범위, 파일, route/port, 실행/test, 보안 체크, 제약 |
 | `agent-deliverables/agent-2-dependencies.md` | provider/Electron dependency 선택과 검증 이력 |
 
-원본은 전체 통합 검증 후 Phase 8에서만 삭제한다.
+원본은 Phase 7 전체 검증 통과 후 Phase 8에서 제거했으며 Git history로만 보존한다.
 
 ## 2. 역할과 경계
 
@@ -384,13 +384,15 @@ Source frontend tests는 merge 후 Vitest 체계로 포팅해야 한다. Windows
 
 ## 14. Known issues와 우선순위
 
-### Phase 6 production blocker
+### GCP 외부/live 후속
 
-- production pending connection/canonical mount 및 operational store persistence
-- production vault/runtime/tracking/lookup/staging adapter
-- Drive watch 생성/갱신과 concrete Source router composition
-- built frontend의 API `/app` static hosting 조립
+- Drive watch 실제 생성/갱신과 provider credential 기반 live 확인
+- Firestore/Secret Manager/GCS/Tasks concrete adapter의 staging resource 확인
 - durable process-restart event spool과 packaging/signing/update 정책
+
+Pending connection/device/runtime persistence, managed adapter와 built frontend `/app`
+hosting은 Phase 6에서 저장소 내부 구현을 완료했다. 실제 resource/IAM/provider 검증은
+`STAGING_VERIFICATION_RUNBOOK.md` 순서로 Phase 9에서 수행한다.
 
 ### 후속/제한
 
@@ -405,11 +407,11 @@ Source frontend tests는 merge 후 Vitest 체계로 포팅해야 한다. Windows
 
 제약을 success로 숨기지 않고 readiness, UI와 운영 문서에 드러낸다.
 
-## 15. Phase 8 원본 삭제 확인표
+## 15. Phase 8 원본 삭제 결과
 
 | 원본 | 대체 section |
 |---|---|
 | delivery | §2~14 |
 | dependency request | §10~12 |
 
-삭제 전 build/test/운영 절차의 원본 파일명 참조를 이 문서 또는 최종 개발/운영 문서로 바꾼다. 보호 대상 명세·기준 문서와 provenance/history 구간의 과거 참조는 실행 경로가 아님을 확인한 뒤 보존할 수 있다.
+build/test/운영 절차의 원본 파일명 참조를 이 문서와 최종 개발/운영 문서로 바꾼 뒤 원본을 삭제했다. 보호 대상 명세·기준 문서와 provenance/history 구간의 과거 참조는 실행 경로가 아니므로 보존한다.

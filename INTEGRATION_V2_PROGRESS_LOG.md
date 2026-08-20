@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 7 완료 — Phase 8 진입 가능**
+> 현재 단계: **통합 Phase 8 완료 — Release Candidate / Phase 9 진입 가능**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -99,8 +99,8 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 | 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 완료 (`bbbcd2b`) |
 | 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 완료 (`e89c6e0`) |
 | 6 | GCP 내부 구현 | Firestore operational stores, Secret Manager/GCS/Tasks adapters, indexes, Docker/Cloud Run/Scheduler/RAG tooling | emulator 및 staging-ready dry run | 완료 (`41cdc42`) |
-| 7 | 전체 검증과 release freeze | 전체 회귀, 보안/실패/복구 test, live-test runbook, blocker 0건 | 통합 완료 승인 | 완료 (본 commit) |
-| 8 | 문서 정리와 배포 후보 고정 | 구 agent 문서 삭제, README/운영 문서 최종화, release candidate commit | 삭제 후 전체 검증 재통과 | 대기 |
+| 7 | 전체 검증과 release freeze | 전체 회귀, 보안/실패/복구 test, live-test runbook, blocker 0건 | 통합 완료 승인 | 완료 (`5f9aa58`) |
+| 8 | 문서 정리와 배포 후보 고정 | 구 agent 문서 삭제, README/운영 문서 최종화, release candidate commit | 삭제 후 전체 검증 재통과 | 완료 (본 commit) |
 | 9 | GCP 외부 구성·배포·실환경 검증 | console/IAM/resource 구성, 배포, live provider/E2E 증거 | production readiness 승인 | 대기 |
 
 ### Phase 의존 관계
@@ -660,3 +660,72 @@ provider 작업 전에 CI 또는 배포 host에서 재확인한다. 다른 workt
 종료 gate: **통과**. runtime과 dependency를 release freeze했으며, Phase 8에서 계획된
 agent 원본 8개만 삭제하고 참조를 통합 문서/README/운영 문서로 수렴한 뒤 같은 전체
 regression을 다시 실행한다.
+
+## Phase 8 — 문서 정리와 Release Candidate 고정
+
+### 시작 상태와 범위
+
+- 시작 HEAD: `5f9aa585676fb6c7f286935436ec5650dd149b04`
+- 목표: Phase 1에서 지정한 구 Agent 원본 8개를 제거하고, 유지 문서와 실행 경로의
+  참조를 최종 상태로 수렴한 뒤 삭제 후 전체 regression으로 RC를 고정한다.
+- 보호: 코딩 에이전트 명세 4개, 청사진, dependency/execution 기준 문서 2개,
+  통합 현황 로그, 세 Agent 통합 문서와 runtime provenance 문서는 삭제하지 않는다.
+
+### 삭제와 참조 수렴
+
+계획된 아래 8개만 삭제했다.
+
+```text
+AGENT_1_DELIVERY.md
+AGENT_1_PLATFORM_CONTROL_IMPLEMENTATION_PLAN.md
+LOCAL_RUN_AND_TEST_GUIDE.md
+agent-deliverables/agent-1-dependencies.md
+AGENT_2_DELIVERY.md
+agent-deliverables/agent-2-dependencies.md
+AGENT_3_DELIVERY.md
+agent-deliverables/agent-3-dependencies.md
+```
+
+- Google Drive/Gemini/RAG runtime error와 connector test가 삭제된 dependency 문서를
+  가리키던 5개 참조를 root `pyproject.toml` 설치 안내로 교체했다.
+- 세 Agent 통합 문서의 상태를 최종 유지 문서로 바꾸고 원본 삭제 결과, Phase 6 완료
+  사항과 Phase 9 live 후속을 반영했다.
+- README를 Phase 8 RC 상태, release regression/runbook 완료, 원본 제거와 Git history
+  provenance 구조로 갱신했다.
+- 보호 대상 Master Spec의 `agent-deliverables/` 구조 예시, dependency baseline과
+  execution/progress history의 과거 파일명은 실행 경로가 아니므로 그대로 보존했다.
+
+### 삭제 후 검증 기록
+
+| 검증 | 결과 |
+|---|---|
+| 삭제 대상 8개 존재 여부 | 모두 없음 |
+| runtime/build/test/운영 문서의 삭제 파일 참조 | 없음 |
+| Python `compileall` + `pip check` | 통과 |
+| 전체 non-live Python suite | `597 passed, 1 skipped, 10 deselected` |
+| root TypeScript typecheck/build/resolution | 통과 |
+| Frontend Vitest | `9 files, 30 passed` |
+| Desktop Node test | `72 tests, 70 passed, 2 skipped` |
+| `pnpm install --frozen-lockfile` | 통과, lock 변경 없음 |
+| deploy validator/RAG dry-run | 통과, 3 documents/checksum 일치/external write 없음 |
+| contract 재생성 및 `shared/contracts/**` diff | 변경 없음 |
+| dependency manifest/lock diff | 변경 없음 |
+| `git diff --check` | 통과 |
+
+skip/deselection 사유는 Phase 7과 동일하다. 문서 삭제와 안내 문자열 교체 외 runtime
+동작 변경은 없으며, GCP Console/IAM/resource/provider live 작업은 시작하지 않았다.
+
+### Phase 8 gate
+
+- [x] Phase 7 전체 검증 선행
+- [x] 지정된 구 Agent 원본 8개만 삭제
+- [x] 세 Agent 통합 문서와 README/운영 문서만으로 build/test/handoff 가능
+- [x] 실행 경로의 삭제 파일 참조 0건
+- [x] 삭제 후 전체 Python/Web/Desktop regression 재통과
+- [x] Frozen Contract/dependency lock 무변경
+- [x] Phase 9 staging/live runbook과 rollback 기준 존재
+- [x] 다른 worktree 무변경, GCP 외부 작업 미시작
+
+종료 gate: **통과**. 이 Phase 8 commit을 GCP 외부 작업에 전달할 Release Candidate로
+고정한다. 다음 단계는 `docs/STAGING_VERIFICATION_RUNBOOK.md`를 따르는 Phase 9이며,
+실제 project/resource/IAM/credential 변경은 별도 승인 없이는 수행하지 않는다.

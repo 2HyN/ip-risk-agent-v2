@@ -1,6 +1,6 @@
 # Agent 1 — Platform & Control Plane 통합 참조
 
-> 문서 상태: Agent 1 분산 문서 통합본
+> 문서 상태: Agent 1 최종 유지 문서 (Phase 8 원본 제거 완료)
 > 코드 기준: `platform-control` merge 결과 (`de1dacce05474d4e3e6c7c2567f6b8a6bbdbeb64`)
 > 적용 branch: `integration-v2`
 > 최종 dependency 결정: [`../INTEGRATION_V2_DEPENDENCY_BASELINE.md`](../INTEGRATION_V2_DEPENDENCY_BASELINE.md)
@@ -17,7 +17,7 @@
 | `agent-deliverables/agent-1-dependencies.md` | Agent 1이 검증한 package/runtime 후보와 환경 요청 |
 | `LOCAL_RUN_AND_TEST_GUIDE.md` | local setup, focused scenario, 승인 명령과 실패 판정 |
 
-날짜별 반복 progress log와 제안 commit message는 프로젝트 실행 정보가 아니므로 그대로 복제하지 않았다. 대신 최종 상태, 남은 제약과 재현 가능한 검증 명령을 보존했다. 원본은 전체 통합 검증이 끝나는 Phase 8 전까지 삭제하지 않는다.
+날짜별 반복 progress log와 제안 commit message는 프로젝트 실행 정보가 아니므로 그대로 복제하지 않았다. 대신 최종 상태, 남은 제약과 재현 가능한 검증 명령을 보존했다. 위 원본은 Phase 7 전체 검증 통과 후 Phase 8에서 제거했으며 Git history로만 보존한다.
 
 ## 2. 역할과 절대 경계
 
@@ -420,9 +420,9 @@ Focused scenario:
 
 이 제약을 보완할 때도 본 문서 §2의 불변식을 유지한다.
 
-## 16. Phase 8 원본 삭제 확인표
+## 16. Phase 8 원본 삭제 결과
 
-Phase 8에서 아래 mapping을 확인한 뒤 원본을 삭제한다.
+아래 mapping과 대체 절차를 확인한 뒤 원본을 삭제했다.
 
 | 원본 | 대체 section |
 |---|---|
@@ -431,4 +431,4 @@ Phase 8에서 아래 mapping을 확인한 뒤 원본을 삭제한다.
 | dependency request | §12~13 |
 | local run guide | §14 |
 
-삭제 전 build/test/운영 절차의 원본 파일명 참조를 이 문서 또는 최종 운영 문서로 교체한다. 보호 대상 명세·기준 문서와 provenance/history 구간의 과거 참조는 실행 경로가 아님을 확인한 뒤 보존할 수 있다.
+build/test/운영 절차의 원본 파일명 참조는 이 문서, root README와 최종 운영 문서로 교체했다. 보호 대상 명세·기준 문서와 provenance/history 구간의 과거 참조는 실행 경로가 아니므로 보존한다.

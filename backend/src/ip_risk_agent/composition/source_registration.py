@@ -67,7 +67,7 @@ class PendingConnectionStore(Protocol):
 
 
 class InMemoryPendingConnectionStore:
-    """Test/local adapter; Phase 6 supplies the durable Firestore implementation."""
+    """Test/local adapter; production uses the isolated GCP Firestore implementation."""
 
     def __init__(self) -> None:
         self.pending: dict[str, PendingSourceConnection] = {}
