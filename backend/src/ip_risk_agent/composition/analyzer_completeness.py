@@ -30,9 +30,13 @@ class CompleteIntelligenceFacade:
 
     async def analyze(self, artifact: AnalysisArtifact) -> list[AnalysisResult]:
         requested = frozenset(artifact.requested_analyzers)
-        if len(artifact.requested_analyzers) != len(requested) or requested != self._active:
+        if (
+            not requested
+            or len(artifact.requested_analyzers) != len(requested)
+            or not requested.issubset(self._active)
+        ):
             raise AnalyzerCompletenessError(
-                "artifact requested analyzer set does not match active analyzers"
+                "artifact requested analyzers must be a unique active subset"
             )
         results = list(await self._delegate.analyze(artifact))
         result_types = [result.analysis_type for result in results]
@@ -52,7 +56,8 @@ class CompleteIntelligenceFacade:
         return results
 
     def supports(self, artifact: AnalysisArtifact) -> bool:
-        return frozenset(artifact.requested_analyzers) == self._active
+        requested = frozenset(artifact.requested_analyzers)
+        return bool(requested) and requested.issubset(self._active)
 
 
 __all__ = ["AnalyzerCompletenessError", "CompleteIntelligenceFacade"]

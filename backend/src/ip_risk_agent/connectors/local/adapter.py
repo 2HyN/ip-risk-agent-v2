@@ -109,12 +109,17 @@ class LocalAdapter:
             source_access_receipt=receipt,
         )
 
-        try:
-            await self._staging_store.delete(ref)
-        except SourceConnectorError:
-            pass  # best-effort; TTL이 진짜 안전망이다 (Agent2 Spec 30/32번)
-
         return snapshot
+
+    async def cleanup(self, change: SourceChange) -> None:
+        """Delete staging only after Integration reaches a terminal outcome."""
+        object_name = change.safe_metadata.get("staging_object_name")
+        if not isinstance(object_name, str) or not object_name:
+            return
+        try:
+            await self._staging_store.delete(StagingRef(object_name=object_name))
+        except SourceConnectorError:
+            pass  # best-effort; bucket TTL remains the final safety net
 
     def _unsupported_snapshot(self, change: SourceChange, *, resolved_revision: str) -> SourceSnapshot:
         receipt = build_access_receipt(SourceAccessType.METADATA, content_bytes=0)

@@ -33,6 +33,10 @@ class AnalyzerRegistry:
     def get(self, analysis_type: AnalysisType) -> Analyzer | None:
         return self._analyzers.get(analysis_type)
 
+    @property
+    def analysis_types(self) -> tuple[AnalysisType, ...]:
+        return tuple(sorted(self._analyzers, key=lambda item: item.value))
+
     def selected(self, artifact: AnalysisArtifact) -> list[Analyzer]:
         """요청되었고 등록되어 있으며 이 artifact 를 다룰 수 있는 것만.
 

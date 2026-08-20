@@ -62,6 +62,7 @@ class PendingConnectionStore(Protocol):
     async def get_pending_by_key(self, key: str) -> PendingSourceConnection | None: ...
     async def save_pending(self, value: PendingSourceConnection) -> None: ...
     async def get_binding(self, registration_key: str) -> SourceMountBinding | None: ...
+    async def get_binding_for_mount(self, mount_id: str) -> SourceMountBinding | None: ...
     async def save_binding(self, value: SourceMountBinding) -> None: ...
 
 
@@ -72,6 +73,7 @@ class InMemoryPendingConnectionStore:
         self.pending: dict[str, PendingSourceConnection] = {}
         self.by_key: dict[str, str] = {}
         self.bindings: dict[str, SourceMountBinding] = {}
+        self.bindings_by_mount: dict[str, str] = {}
         self.lock = asyncio.Lock()
 
     async def get_pending(self, connection_id: str) -> PendingSourceConnection | None:
@@ -88,8 +90,13 @@ class InMemoryPendingConnectionStore:
     async def get_binding(self, registration_key: str) -> SourceMountBinding | None:
         return self.bindings.get(registration_key)
 
+    async def get_binding_for_mount(self, mount_id: str) -> SourceMountBinding | None:
+        registration_key = self.bindings_by_mount.get(mount_id)
+        return self.bindings.get(registration_key) if registration_key else None
+
     async def save_binding(self, value: SourceMountBinding) -> None:
         self.bindings[value.registration_key] = value
+        self.bindings_by_mount[value.mount_id] = value.registration_key
 
 
 class SourceRegistrationService:

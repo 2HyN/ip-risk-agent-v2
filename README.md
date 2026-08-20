@@ -2,7 +2,7 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain과 production 조립 전에 필요한 P0 경계가 합쳐져 있다. Canonical worker input, lease/retry, Source authz/CSRF, pending connection, desktop device auth와 analyzer 완전성은 integration test로 고정됐지만, API/Worker composition과 실제 runtime adapter wiring은 후속 단계에서 완성한다. 따라서 현재 상태를 완성된 배포 애플리케이션으로 간주하지 않는다.
+현재 `integration-v2`에는 세 Plane의 독립 구현, 단일 dependency/toolchain, P0 경계와 Phase 4 API/Worker composition이 합쳐져 있다. Runtime profile별 설정 검증, Control/Source API 조립, ID-only analysis worker pipeline, provider registry, Open Original과 health/lifespan 경계는 integration test로 고정됐다. 다만 Web/Electron 제품 wiring과 production용 Firestore·Cloud Tasks·Secret Manager·GCS adapter는 후속 Phase 소유이므로 아직 완성된 배포 애플리케이션은 아니다.
 
 ## 통합 상태
 
@@ -13,7 +13,7 @@ IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 �
 | Python/Node dependency 및 lock 수렴 | 완료 |
 | Source frontend test의 Vitest 통합 | 완료 |
 | P0 경계 보강 | 완료 |
-| API/Worker composition | 예정 |
+| API/Worker composition과 local integration E2E | 완료 |
 | Web/Electron 제품 wiring | 예정 |
 | GCP 내부 구성과 외부 배포 | 예정 |
 
@@ -28,7 +28,7 @@ backend/src/ip_risk_agent/
   application/                    canonical application service
   core/                           domain model과 policy
   persistence/                    in-memory/Firestore persistence
-  composition/                    Plane 사이 auth/registration/analysis 경계
+  composition/                    설정/container, API/Worker와 Plane 사이 경계
   connectors/                     Drive, GitHub, Local source adapters
   intelligence/                   Patent, License, Gemini, RAG
 frontend/                         React/Vite Product UI와 Source UI 모듈
@@ -44,7 +44,7 @@ docs/                             Agent별 통합 참조 문서
 - Control Plane은 VWS, membership, SourceMetadata, canonical state, Risk, Review와 authorization을 소유한다.
 - Source Plane은 provider connection, mount, metadata/snapshot lookup과 content-free SourceChange 생산을 담당한다.
 - Intelligence Plane은 supplied snapshot을 분석하고 Patent/License/RAG evidence를 반환한다. canonical state를 직접 변경하지 않는다.
-- Integration layer는 현재 fail-closed 인증, pending binding, device credential과 analyzer 완전성 경계를 소유한다. 설정/container, API와 Worker runtime 조립은 다음 Phase에서 구현한다.
+- Integration layer는 fail-closed 인증, pending binding, device credential, analyzer 완전성, runtime 설정/container, API와 Worker pipeline 조립을 소유한다.
 
 `shared/contracts/**`는 frozen 영역이다. 변경이 필요하면 `contract-change-requests/` 절차를 사용하며 feature 또는 통합 편의를 위해 직접 수정하지 않는다.
 
@@ -140,12 +140,12 @@ git diff --exit-code -- shared/contracts
 
 두 번째 명령에서 diff가 발생하면 원인을 확인한다. Frozen Contract 변경을 일반 생성 결과로 commit해서는 안 된다.
 
-전체 non-live baseline 검증:
+전체 non-live baseline 및 integration 검증:
 
 ```powershell
 python -m compileall -q backend/src shared/contracts/python scripts
 python -m pip check
-python -m pytest shared/contracts/tests tests/control tests/connectors tests/intelligence -m "not live"
+python -m pytest shared/contracts/tests tests/control tests/connectors tests/intelligence tests/integration tests/e2e -m "not live"
 
 pnpm run typecheck
 pnpm run build
@@ -158,12 +158,25 @@ pnpm install --frozen-lockfile
 Windows sandbox나 제한된 계정에서 pytest의 기본 temp 경로 권한이 거부되면 repository 내부의 ignored 경로를 명시할 수 있다.
 
 ```powershell
-python -m pytest shared/contracts/tests tests/control tests/connectors tests/intelligence -m "not live" --basetemp .venv/pytest-tmp
+python -m pytest shared/contracts/tests tests/control tests/connectors tests/intelligence tests/integration tests/e2e -m "not live" --basetemp .venv/pytest-tmp
 ```
 
 `live` marker는 실제 provider credential과 명시적 opt-in 없이 실행하지 않는다. Firestore emulator test는 `FIRESTORE_EMULATOR_HOST`가 없으면 skip되는 것이 정상이다.
 
 ## 로컬 실행 범위
+
+API entrypoint는 factory로 조립한다. `SESSION_SECRET`에는 32자 이상의 로컬 전용 임의 값을 사용한다.
+
+```powershell
+$env:APP_ENV = "local"
+$env:APP_ROLE = "api"
+$env:SESSION_SECRET = "<32자 이상의 로컬 전용 임의 값>"
+uvicorn ip_risk_agent.main:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+`/health/live`는 프로세스 생존, `/health/ready`는 현재 role의 필수 구성 상태를 나타낸다. API는 Control route, 등록된 Source route와 `POST /api/v1/workspaces/{vws_id}/artifacts/{artifact_id}/open-original`을 한 application에 조립한다.
+
+Worker entrypoint는 `ip_risk_agent.worker:create_app`이며 외부 제품 API를 노출하지 않고 `POST /internal/tasks/analyze-change`와 health route만 제공한다. Task body는 `change_event_id` 하나만 허용한다. 실제 로컬 분석에는 source adapter, intelligence facade와 task authenticator를 composition override로 명시적으로 주입해야 하며, 기본 구성 누락은 readiness 실패로 드러난다. Production은 durable store/queue, 전체 source adapter, analyzer와 workload identity가 없으면 시작 단계에서 실패하고 in-memory 구현으로 자동 대체하지 않는다.
 
 Frontend 개발 서버는 다음과 같이 실행할 수 있다.
 
@@ -171,7 +184,7 @@ Frontend 개발 서버는 다음과 같이 실행할 수 있다.
 pnpm --filter @iprisk/frontend dev
 ```
 
-Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. 현재 통합 API/Worker entrypoint는 아직 조립 중이므로 모든 화면과 Source flow가 end-to-end로 동작한다고 기대해서는 안 된다.
+Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. Phase 4는 backend composition까지의 범위이며 SourcePanel, OAuth 완료 화면, Electron enrollment/local flow의 제품 연결은 Phase 5에서 수행한다.
 
 Desktop package 검증:
 

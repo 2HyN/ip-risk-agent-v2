@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from iprisk_contracts import AnalysisArtifact, AnalysisResult
+from iprisk_contracts import AnalysisArtifact, AnalysisResult, AnalysisType
 
 from .common.analyzer import Analyzer
 from .common.errors import (
@@ -86,6 +86,10 @@ class IntelligenceFacade:
 
     def supports(self, artifact: AnalysisArtifact) -> bool:
         return bool(self._registry.selected(artifact))
+
+    @property
+    def active_analysis_types(self) -> tuple[AnalysisType, ...]:
+        return self._registry.analysis_types
 
 
 def create_analyzer_registry(

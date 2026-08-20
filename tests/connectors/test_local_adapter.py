@@ -78,13 +78,16 @@ def test_fetch_snapshot_returns_full_text_from_staging():
     asyncio.run(scenario())
 
 
-def test_fetch_snapshot_deletes_staging_object_after_success():
+def test_cleanup_deletes_staging_object_only_after_terminal_pipeline_signal():
     async def scenario():
         adapter, staging_store = await _build_adapter()
         ref = await staging_store.put("content", {})
         change = _change(staging_object_name=ref.object_name)
 
         await adapter.fetch_snapshot(change)
+
+        assert await staging_store.get(ref) == "content"
+        await adapter.cleanup(change)
 
         with pytest.raises(NotFoundError):
             await staging_store.get(ref)

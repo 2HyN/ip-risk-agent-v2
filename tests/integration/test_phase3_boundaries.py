@@ -49,6 +49,7 @@ from ip_risk_agent.composition.source_registration import (
     PendingConnectionStatus,
     SourceRegistrationService,
 )
+from ip_risk_agent.composition.source_bindings import DriveMountConnectionLookup
 from ip_risk_agent.connectors.common.credential_vault import CredentialRef
 from ip_risk_agent.core.auth import User
 
@@ -252,6 +253,11 @@ def test_pending_connection_is_idempotent_and_mounts_only_after_selection() -> N
         assert command.connection_key == "GOOGLE_DRIVE:google-subject-1"
         assert store.pending[first].status is PendingConnectionStatus.ACTIVE
         assert await service.resolve_credential_ref(first) == credential
+        mounted_connection = await DriveMountConnectionLookup(store).resolve(
+            result.server_mount_id
+        )
+        assert mounted_connection.connection_id == "canonical-connection-1"
+        assert mounted_connection.credential_ref == credential
 
         other_service = SourceRegistrationService(
             store=store,
@@ -416,6 +422,15 @@ def test_analyzer_sets_and_result_identity_must_be_exact() -> None:
             active_analysis_types=expected,
         )
         assert len(await complete.analyze(artifact())) == 2
+        license_only = artifact().model_copy(
+            update={"requested_analyzers": [AnalysisType.LICENSE]}
+        )
+        license_facade = CompleteIntelligenceFacade(
+            FakeIntelligence([result(AnalysisType.LICENSE)]),
+            configured_analysis_types=expected,
+            active_analysis_types=expected,
+        )
+        assert len(await license_facade.analyze(license_only)) == 1
 
         for invalid in (
             [result(AnalysisType.PATENT)],

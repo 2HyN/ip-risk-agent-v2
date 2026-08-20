@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 3 완료 — Phase 4 진입 대기**
+> 현재 단계: **통합 Phase 4 완료 — Phase 5 진입 대기**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -95,8 +95,8 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 |---|---|---|---|---|
 | 1 | 계획 확정과 agent 문서 통합 | 전체 phase 계획, Agent 1/2/3 단일 문서, 삭제 보류 목록 | source 문서 coverage와 보존 확인 | 완료 (`31e3fc4`) |
 | 2 | dependency/toolchain 수렴 | root Python/Node manifest, 최종 lock, env schema | install/frozen install, Plane 전체 baseline test | 완료 (`83c901f`) |
-| 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 완료 |
-| 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 대기 |
+| 3 | P0 경계 보강 | canonical worker input, lease/retry, Source authz/CSRF, pending connection, device auth, analyzer 완결성 | 경계별 integration test | 완료 (`dfa1193`) |
+| 4 | Backend/API/Worker 조립 | settings/container, Control+Source app, worker pipeline, provider registry, Open Original backend | local API/worker E2E와 상태 전이 검증 | 완료 |
 | 5 | Web/Electron 제품 통합 | SourcePanel, OAuth completion/mount UI, Electron renderer/enrollment/local flow | browser/desktop E2E | 대기 |
 | 6 | GCP 내부 구현 | Firestore operational stores, Secret Manager/GCS/Tasks adapters, indexes, Docker/Cloud Run/Scheduler/RAG tooling | emulator 및 staging-ready dry run | 대기 |
 | 7 | 전체 검증과 release freeze | 전체 회귀, 보안/실패/복구 test, live-test runbook, blocker 0건 | 통합 완료 승인 | 대기 |
@@ -329,3 +329,84 @@ Python skip 1건은 Phase 2와 동일하게 `FIRESTORE_EMULATOR_HOST` 미설정�
 - [x] Frozen Contract와 dependency/lock 무변경
 
 종료 gate: **통과**. Phase 4에서는 이 phase의 public boundary만 사용해 settings/container, 통합 API와 analysis worker pipeline을 조립한다. In-memory operational store를 production fallback으로 사용하지 않으며, durable adapter는 Phase 6에서 제공한다.
+
+## Phase 4 — Backend/API/Worker 조립
+
+### 시작 상태와 범위
+
+- 시작 HEAD: `dfa1193882dddfc5d56b6a040fc08f36c465c7f2`
+- 목표: Phase 3의 public boundary를 settings/container와 실행 가능한 API/Worker application으로 조립하고, SourceChange에서 canonical terminal state까지의 local integration 경로를 검증한다.
+- 포함: runtime profile 설정 검증, container/factory, Control+Source API 조립, provider registry와 canonical source binding, analysis pipeline, internal task 인증, Open Original, health/readiness/lifespan.
+- 제외: Web/Electron 제품 wiring, production Firestore operational store, Secret Manager/GCS/Cloud Tasks concrete adapter, 실제 GCP IAM/OIDC/resource 구성. 전자는 Phase 5, durable GCP 구현은 Phase 6, 외부 작업은 Phase 9 소유다.
+
+### 수렴 결과
+
+1. **설정과 container**
+   - `test`, `local`, `production` runtime profile과 `api`, `worker`, `scheduler` role을 명시하고 URL, secret 길이와 provider configuration group의 all-or-none 규칙을 시작 시점에 검증한다.
+   - test/local은 명시적인 in-memory 구성만 허용하고 production은 durable store/queue, 전체 provider/analyzer와 workload identity가 주입되지 않으면 시작을 거부한다.
+   - API/Worker factory, shared container와 close callback 기반 lifespan을 추가했으며 module import만으로 외부 client 또는 resource를 생성하지 않는다.
+
+2. **통합 API surface**
+   - Control session/hardening/error boundary와 Control router bundle을 하나의 API application에 설치한다.
+   - Source web, webhook, desktop router는 소유 Plane의 router를 수정하지 않고 composition bundle로 주입한다.
+   - liveness와 role별 readiness route를 추가하고 누락된 필수 runtime 구성은 안전한 `503`으로 노출한다.
+
+3. **Source provider와 canonical binding**
+   - `SourceType`별 adapter registry가 중복 등록과 미등록 dispatch를 fail-closed로 처리한다.
+   - Drive/GitHub의 pending credential·installation을 canonical mount에서 조회하는 binding lookup과 SourceChange를 Control facade에 전달하는 sink를 추가했다.
+   - production worker는 Drive, GitHub, Local adapter의 정확한 전체 집합을 요구한다.
+
+4. **Analysis worker pipeline**
+   - `POST /internal/tasks/analyze-change`는 인증 후 `change_event_id`만 받으며 path, URL, content 또는 provider credential을 task body로 허용하지 않는다.
+   - canonical claim → source adapter snapshot → receipt → Security Gate → 완전성 검증된 Intelligence 결과 → Control accept → terminal state 순서를 고정했다.
+   - active lease 중복 delivery와 gate deny는 `2xx`, retryable provider failure는 canonical `FAILED` 기록 후 `5xx`, claim 이후의 adapter/config/analyzer contract failure는 안전한 terminal failure 후 `2xx`로 분류했다. Pipeline 자체가 없는 경우는 canonical failure 없이 ACK하지 않고 readiness 실패와 `503`을 반환한다.
+   - Local staging object는 snapshot fetch 직후 삭제하지 않고 canonical terminal 기록 뒤 best-effort cleanup하여 crash/retry 복구 가능성을 보존한다.
+
+5. **Open Original**
+   - 요청 시 Control facade authorization을 통과한 뒤 mount 단위 authorization을 다시 수행하고 provider adapter로 dispatch한다.
+   - Drive는 정확한 `drive.google.com`, GitHub는 정확한 `github.com` HTTPS host만 허용하여 lookalike host를 거부한다.
+   - Local 응답은 device/artifact opaque ID만 반환하며 filesystem path를 서버 응답에 포함하지 않는다.
+
+6. **통합 중 발견한 경계 보정**
+   - Phase 3 analyzer wrapper가 gate의 source별 analyzer 부분집합까지 전체 active 집합과 같다고 요구하던 오류를 수정했다. Startup 구성은 여전히 전체 집합 일치를 요구하고, 각 artifact 결과는 gate가 요청한 정확한 부분집합과 일치해야 한다.
+   - retryable 예외와 예기치 않은 worker 예외가 canonical failure를 남기며 cleanup 자체의 실패가 이미 결정된 terminal 결과를 뒤집지 않도록 고정했다.
+
+### 검증 기록
+
+| 검증 | 결과 |
+|---|---|
+| Phase 4 focused API/Worker/Open Original/Local suite | `19 passed` |
+| Python `compileall` + `pip check` | 통과 |
+| contracts/control/connectors/intelligence/integration/e2e non-live 전체 suite | `584 passed, 1 skipped, 10 deselected` |
+| API composition/session/source route/lifespan integration | 통과 |
+| worker success/duplicate/retry/config/analyzer failure integration | 통과 |
+| Open Original authorization/host/local opaque response integration | 통과 |
+| root TypeScript typecheck/build/resolution | 통과 |
+| Frontend Vitest | `6 files, 23 passed` |
+| Desktop Node test | `65 tests, 63 passed, 2 skipped` |
+| `pnpm install --frozen-lockfile` | 통과, lock 변경 없음 |
+
+Python skip 1건은 이전 phase와 동일한 `FIRESTORE_EMULATOR_HOST` 미설정이며 deselected 10건은 실제 provider credential이 필요한 `live` test다. Desktop skip 2건도 Windows symlink 권한 제약이다. Phase 4에서 dependency manifest/lock과 Frozen Contract는 변경하지 않았다.
+
+최종 순서 회귀를 추가한 뒤 첫 focused 실행은 project dependency가 없는 시스템 Python을 사용해 FastAPI import와 `asyncio_mode` 설정 단계에서 실패했다. `.venv` Python으로 교정한 실행에서는 cleanup probe가 provider event ID로 canonical job을 조회해 assertion 관찰 자체가 실패했다. Probe를 canonical `change_event_id` 기준으로 수정하고 pipeline 미구성 ACK 방지 회귀를 추가한 뒤 focused `19 passed`, 이어서 전체 Python `584 passed, 1 skipped, 10 deselected`로 재검증했다. 이 과정에서 production code의 추가 실패는 발견되지 않았다.
+
+### 명시적 후속 범위
+
+- SourcePanel, OAuth completion/mount UI, Electron enrollment credential 저장과 Local flow 제품 연결은 Phase 5에서 수행한다.
+- Firestore operational store, Secret Manager/GCS/Cloud Tasks concrete adapter와 production OIDC verifier는 Phase 6에서 container override에 연결한다.
+- 실제 Google/GitHub/KIPRIS/Gemini credential을 사용하는 live test와 GCP Console/IAM/resource 작업은 아직 수행하지 않았다.
+- 위 구현이 없는 상태를 숨기지 않도록 production 구성은 누락된 adapter에서 fail-fast하고 Worker readiness는 실패한다.
+
+### Phase 4 gate
+
+- [x] runtime profile과 provider configuration group fail-fast
+- [x] production in-memory fallback 금지
+- [x] Control+Source router와 health/lifespan 조립
+- [x] ID-only task body와 인증된 worker endpoint
+- [x] canonical claim부터 terminal state까지 pipeline 통합
+- [x] duplicate/retry/gate/config/analyzer failure 상태 전이 검증
+- [x] Open Original 재인가, provider dispatch와 host/local 경계 검증
+- [x] local API/worker integration 및 전체 non-live 회귀 통과
+- [x] Frozen Contract와 dependency/lock 무변경
+
+종료 gate: **통과**. Phase 5에서는 현재 API/Worker public surface를 기준으로 Web Source flow와 Electron enrollment/local flow를 제품 UI에 연결한다.
