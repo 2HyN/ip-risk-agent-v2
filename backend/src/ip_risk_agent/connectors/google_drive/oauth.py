@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from ..common.retry import with_retry
+from ..common.retry import with_http_retry
 from .error_mapping import map_drive_status_code
 
 GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -64,7 +64,7 @@ class HttpxDriveOAuthClient:
                 raise map_drive_status_code(resp.status_code, "failed to exchange authorization code")
             return resp.json()
 
-        return await with_retry(_call)
+        return await with_http_retry(_call, provider="google_drive")
 
 
 def decode_identity_from_id_token(id_token: str) -> tuple[str, str]:

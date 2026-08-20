@@ -12,6 +12,8 @@ import asyncio
 import random
 from typing import Awaitable, Callable, TypeVar
 
+import httpx
+
 from .errors import RateLimitedError, SourceConnectorError, TemporaryUnavailableError
 
 T = TypeVar("T")
@@ -49,3 +51,40 @@ async def with_retry(
             delay = min(max_delay_seconds, base_delay_seconds * (2 ** (attempt - 1)))
             jitter = random.uniform(0, delay * 0.25)
             await sleep(delay + jitter)
+
+
+async def with_http_retry(
+    fn: Callable[[], Awaitable[T]],
+    *,
+    provider: str,
+    max_attempts: int = 3,
+    base_delay_seconds: float = 0.5,
+    max_delay_seconds: float = 8.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> T:
+    """with_retry에 한 가지를 더한다 — httpx가 응답 자체를 못 받았을 때
+    (DNS 실패, 연결 타임아웃, 연결 거부 등) 던지는 httpx.RequestError를
+    TemporaryUnavailableError(retryable=True)로 먼저 바꿔준다.
+
+    이게 없으면 "HTTP 상태코드가 5xx라서 실패"는 재시도되지만, "애초에
+    응답을 못 받아서 실패"는 SourceConnectorError가 아니라서 with_retry가
+    잡지도 못하고 그냥 새어나간다 — 실제로 이 문제를 재현해서 확인한 뒤
+    추가했다."""
+
+    async def _wrapped() -> T:
+        try:
+            return await fn()
+        except httpx.RequestError as exc:
+            raise TemporaryUnavailableError(
+                provider=provider,
+                safe_message=f"network error contacting {provider}: {type(exc).__name__}",
+                retryable=True,
+            ) from exc
+
+    return await with_retry(
+        _wrapped,
+        max_attempts=max_attempts,
+        base_delay_seconds=base_delay_seconds,
+        max_delay_seconds=max_delay_seconds,
+        sleep=sleep,
+    )

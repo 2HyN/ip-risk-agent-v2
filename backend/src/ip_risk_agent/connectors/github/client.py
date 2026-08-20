@@ -6,7 +6,7 @@ import time
 import httpx
 import jwt
 
-from ..common.retry import with_retry
+from ..common.retry import with_http_retry
 from .error_mapping import map_github_status_code
 from .models import (
     GITHUB_API_BASE,
@@ -46,7 +46,7 @@ class GitHubAppProvider:
             data = resp.json()
             return GitHubInstallationToken(token=data["token"], expires_at=data["expires_at"])
 
-        return await with_retry(_call)
+        return await with_http_retry(_call, provider="github")
 
     async def get_default_branch(self, owner: str, repo: str) -> str:
         token = await self.get_installation_token()
@@ -59,7 +59,7 @@ class GitHubAppProvider:
                 raise map_github_status_code(resp.status_code, "failed to fetch repository metadata")
             return resp.json().get("default_branch") or "main"
 
-        return await with_retry(_call)
+        return await with_http_retry(_call, provider="github")
 
     async def get_commit(self, owner: str, repo: str, sha: str) -> GitHubCommit:
         token = await self.get_installation_token()
@@ -81,7 +81,7 @@ class GitHubAppProvider:
             ]
             return GitHubCommit(sha=data["sha"], files=files)
 
-        return await with_retry(_call)
+        return await with_http_retry(_call, provider="github")
 
     async def get_file_content(self, owner: str, repo: str, path: str, ref: str) -> GitHubFileContent:
         token = await self.get_installation_token()
@@ -99,7 +99,7 @@ class GitHubAppProvider:
             text = base64.b64decode(content_b64).decode("utf-8", errors="replace") if content_b64 else ""
             return GitHubFileContent(path=path, sha=data.get("sha", ""), text=text, size=data.get("size", 0))
 
-        return await with_retry(_call)
+        return await with_http_retry(_call, provider="github")
 
     @staticmethod
     def _auth_headers(token: str) -> dict[str, str]:
@@ -135,7 +135,7 @@ class GitHubAppProvider:
                 for repo in data.get("repositories", [])
             ]
 
-        return await with_retry(_call)
+        return await with_http_retry(_call, provider="github")
 
 
 class GitHubAppProviderFactory:
