@@ -2,7 +2,7 @@
 
 > 성격: **삭제 가능한 비규범적 작업 로그**
 > 시작일: 2026-08-21
-> 현재 단계: **통합 Phase 8 완료 — Release Candidate / Phase 9 진입 가능**
+> 현재 단계: **통합 Phase 9 진행 중 — 외부 project/권한/credential 입력 대기**
 > 기준 문서: `INTEGRATION_V2_DEPENDENCY_BASELINE.md`, `INTEGRATION_V2_EXECUTION_PLAN.md`
 
 이 문서는 통합 진행 중 확인한 사실, 실행 결과와 임시 판단을 시간순으로 남기는 보조 기록이다. 프로젝트의 실행, build, test 또는 배포가 이 문서에 의존해서는 안 되며, 작업 완료 후 삭제해도 프로젝트 완결성에 영향이 없어야 한다. 규범적 결정이 이 로그와 두 기준 문서 사이에서 충돌하면 기준 문서가 우선한다.
@@ -101,7 +101,7 @@ Merge는 준비 단계인 Phase 0으로 완료됐다. 본 통합은 아래 **9�
 | 6 | GCP 내부 구현 | Firestore operational stores, Secret Manager/GCS/Tasks adapters, indexes, Docker/Cloud Run/Scheduler/RAG tooling | emulator 및 staging-ready dry run | 완료 (`41cdc42`) |
 | 7 | 전체 검증과 release freeze | 전체 회귀, 보안/실패/복구 test, live-test runbook, blocker 0건 | 통합 완료 승인 | 완료 (`5f9aa58`) |
 | 8 | 문서 정리와 배포 후보 고정 | 구 agent 문서 삭제, README/운영 문서 최종화, release candidate commit | 삭제 후 전체 검증 재통과 | 완료 (본 commit) |
-| 9 | GCP 외부 구성·배포·실환경 검증 | console/IAM/resource 구성, 배포, live provider/E2E 증거 | production readiness 승인 | 대기 |
+| 9 | GCP 외부 구성·배포·실환경 검증 | console/IAM/resource 구성, 배포, live provider/E2E 증거 | production readiness 승인 | 진행 중 (외부 입력 대기) |
 
 ### Phase 의존 관계
 
@@ -729,3 +729,78 @@ skip/deselection 사유는 Phase 7과 동일하다. 문서 삭제와 안내 문�
 종료 gate: **통과**. 이 Phase 8 commit을 GCP 외부 작업에 전달할 Release Candidate로
 고정한다. 다음 단계는 `docs/STAGING_VERIFICATION_RUNBOOK.md`를 따르는 Phase 9이며,
 실제 project/resource/IAM/credential 변경은 별도 승인 없이는 수행하지 않는다.
+
+## Phase 9 — GCP 외부 구성·배포·실환경 검증
+
+### 시작 상태와 범위
+
+- 시작 HEAD / Release Candidate: `e05ad90583f0c3c35363fd02dcb64c399c522afc`
+- 목표: 승인된 staging GCP project에서 IAM/resource를 구성하고 같은 RC image digest를
+  API/Worker에 배포한 뒤 provider/RAG positive·negative E2E와 rollback을 검증한다.
+- repository 내부 작업: Phase 9 진입 gate 재확인, 외부 실행 절차와 증거 형식 기록.
+- repository 외부 작업: GCP/Google/GitHub Console, Cloud Shell/CI build, OAuth/GitHub
+  credential 구성, live test. 실제 credential 값은 저장소나 이 로그에 기록하지 않는다.
+
+### 2026-08-21 착수 결과
+
+1. RC worktree가 clean이고 시작 commit이 Phase 8 RC임을 확인했다.
+2. 현재 host에는 `gcloud` CLI가 없고 활성 Google Cloud account/project도 제공되지
+   않았다. Phase 6에서 확인한 것처럼 Docker CLI도 없는 상태다.
+3. project ID, billing 승인, 외부 작업자 권한, service account, provider credential,
+   domain이 확정되지 않아 비용·IAM·credential 변경을 임의로 시작하지 않았다.
+4. `PHASE_9_GCP_EXTERNAL_WORK_GUIDE.md`를 별도의 삭제 가능한 비규범 문서로 작성했다.
+   유지 문서는 이 파일을 역참조하지 않으므로 Phase 9 종료 후 삭제해도 runtime,
+   build/test, 배포 계약 또는 프로젝트 문서 완결성에 영향이 없다.
+5. 가이드에는 RC 재검증, API/identity/IAM, Artifact Registry/image digest, Firestore
+   index/TTL, private bucket/lifecycle, Secret Manager, Worker→Tasks→API→Scheduler,
+   RAG, Google OAuth/Drive/Picker, GitHub App, domain/TLS, live negative test, alert와
+   rollback/Go-No-Go 순서를 고정했다.
+
+### Repository 진입 gate 재검증
+
+| 검증 | 결과 |
+|---|---|
+| Python `compileall` / `pip check` | 통과 / `No broken requirements found` |
+| 전체 non-live Python suite | `597 passed, 1 skipped, 10 deselected` |
+| frozen pnpm install / contract generate·diff | 통과 / Frozen Contract 변경 없음 |
+| root typecheck / build / resolution | 통과 |
+| Frontend Vitest | `9 files, 30 passed` |
+| Desktop Node test | `72 tests, 70 passed, 2 skipped` |
+| deploy static validator | `GCP deployment inputs: valid` |
+| RAG ingestion dry-run | 3 documents, checksum 일치, external write 없음 |
+| main과 세 feature worktree | 모두 clean, 변경 없음 |
+
+첫 Python suite 실행은 Windows 전역 pytest 임시 디렉터리
+`C:\Users\leehy\AppData\Local\Temp\pytest-of-leehy` 접근 거부로 `tmp_path` fixture 3건이
+setup error였다. repository 내부 `--basetemp .pytest-tmp-phase9`를 지정해 동일 608개
+collection을 다시 실행했고 위 결과로 전부 수렴했다. 코드나 test assertion 실패는
+없었다. skip/deselection은 Phase 7/8과 동일하게 Firestore emulator 1건과 explicit live
+provider 10건이며, Desktop skip 2건은 Windows symlink 권한 제약이다.
+
+### 현재 차단 입력
+
+- staging GCP `PROJECT_ID`, project number, billing 및 비용 한도 승인
+- application/RAG region, Firestore database ID, bucket/queue 이름
+- Console/Cloud Shell 실행 권한 또는 구성 완료 결과
+- OAuth test user/client, GitHub test App/repository, KIPRIS provider key
+- API custom domain 또는 staging `run.app` URL 정책
+
+이는 repository 결함이 아니라 승인된 외부 환경이 필요한 Phase 9 입력이다. 입력이
+준비되기 전에는 cloud resource 생성, IAM binding, credential 등록과 live provider
+호출을 실행하지 않는다.
+
+### Phase 9 gate
+
+- [x] Phase 8 RC와 외부 작업 진입 조건 재확인
+- [x] 삭제 가능한 GCP 외부 작업 문서와 단계별 체크리스트 작성
+- [ ] staging project/API/service account/IAM 최소 권한 구성
+- [ ] RC image build와 immutable digest 고정
+- [ ] Firestore/index/TTL, bucket/lifecycle, secrets 구성
+- [ ] private Worker→Cloud Tasks→public API→Scheduler 순서 배포
+- [ ] RAG corpus와 Google OAuth/Drive/Picker/GitHub App 구성
+- [ ] provider/RAG positive·negative live E2E 통과
+- [ ] monitoring alert와 rollback drill 통과
+- [ ] production readiness Go 승인
+
+현재 gate: **진행 중 — 외부 입력 대기**. repository 안에서 수행 가능한 Phase 9 착수
+문서화까지 완료했으며, 외부 환경이 준비되면 체크리스트 §2부터 증거를 누적한다.
