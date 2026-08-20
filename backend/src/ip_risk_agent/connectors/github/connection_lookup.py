@@ -36,3 +36,26 @@ class InMemoryGitHubConnectionLookup:
             raise NotFoundError(
                 provider="github", safe_message=f"no installation registered for mount {mount_id}"
             ) from exc
+
+
+class GitHubConnectionInstallationLookup(Protocol):
+    """mount이 아니라 connection_id로 바로 installation_id를 찾는다.
+    저장소 목록 조회처럼 아직 mount가 없는 단계에서 필요하다."""
+
+    async def resolve_installation_id(self, connection_id: str) -> str: ...
+
+
+class InMemoryGitHubConnectionInstallationLookup:
+    def __init__(self) -> None:
+        self._mapping: dict[str, str] = {}
+
+    def register(self, connection_id: str, installation_id: str) -> None:
+        self._mapping[connection_id] = installation_id
+
+    async def resolve_installation_id(self, connection_id: str) -> str:
+        try:
+            return self._mapping[connection_id]
+        except KeyError as exc:
+            raise NotFoundError(
+                provider="github", safe_message=f"no installation registered for connection {connection_id}"
+            ) from exc

@@ -37,6 +37,16 @@ class GitHubInstallationToken:
     expires_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class GitHubRepository:
+    id: int
+    full_name: str
+    owner: str
+    name: str
+    private: bool
+    default_branch: str
+
+
 class GitHubProvider(Protocol):
     async def get_installation_token(self) -> GitHubInstallationToken: ...
 
@@ -45,3 +55,5 @@ class GitHubProvider(Protocol):
     async def get_commit(self, owner: str, repo: str, sha: str) -> GitHubCommit: ...
 
     async def get_file_content(self, owner: str, repo: str, path: str, ref: str) -> GitHubFileContent: ...
+
+    async def list_installation_repositories(self) -> list[GitHubRepository]: ...

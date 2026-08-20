@@ -24,6 +24,7 @@ from .models import (
     GitHubCommitFile,
     GitHubFileContent,
     GitHubInstallationToken,
+    GitHubRepository,
 )
 
 
@@ -92,6 +93,34 @@ class GitHubAppProvider:
     @staticmethod
     def _auth_headers(token: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+
+    async def list_installation_repositories(self) -> list[GitHubRepository]:
+        """이 installation이 접근 가능한 저장소 목록을 가져온다.
+
+        MVP는 단일 페이지(최대 100개)만 처리한다 — 한 installation에
+        저장소가 100개를 넘는 경우는 페이지네이션 추가가 필요하다
+        (known limitation으로 문서화함)."""
+
+        token = await self.get_installation_token()
+        url = f"{GITHUB_API_BASE}/installation/repositories"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                url, headers=self._auth_headers(token.token), params={"per_page": 100}
+            )
+        if resp.status_code >= 400:
+            raise map_github_status_code(resp.status_code, "failed to list installation repositories")
+        data = resp.json()
+        return [
+            GitHubRepository(
+                id=repo["id"],
+                full_name=repo["full_name"],
+                owner=repo["owner"]["login"],
+                name=repo["name"],
+                private=repo["private"],
+                default_branch=repo.get("default_branch") or "main",
+            )
+            for repo in data.get("repositories", [])
+        ]
 
 
 class GitHubAppProviderFactory:
