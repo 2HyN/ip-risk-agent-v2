@@ -17,12 +17,12 @@
 
 ## 2. Toolchain
 
-검증 기준 버전은 Python 3.12.13, Node.js 24.19.0, pnpm 11.19.0, TypeScript 5.9.3, Pydantic 2.13.4, pytest 9.1.1이다. Python package는 `pyproject.toml`, JavaScript package는 pnpm workspace와 `pnpm-lock.yaml`로 관리한다.
+검증 기준 버전은 Python 3.14.7, Node.js 24.19.0, pnpm 11.19.0, TypeScript 5.9.3, Pydantic 2.13.4, pytest 9.1.1이다. Python package는 `pyproject.toml`, JavaScript package는 pnpm workspace와 `pnpm-lock.yaml`로 관리한다.
 
 Windows PowerShell 기준 bootstrap:
 
 ```powershell
-py -3.12 -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 pnpm install --frozen-lockfile
 ```

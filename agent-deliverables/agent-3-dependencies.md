@@ -7,7 +7,7 @@ Risk Intelligence & RAG plane 이 직접 선택하고 설치한 dependency 목�
 
 | 패키지 | 버전 | 용도 | 선택 사유 |
 |---|---|---|---|
-| `pydantic` | `2.13.3` | Contract 및 모델 출력 스키마 | baseline 에 이미 선언됨 |
+| `pydantic` | `2.13.4` | Contract 및 모델 출력 스키마 | baseline 에 이미 선언됨 |
 | `httpx` | `0.28.1` | deps.dev · PyPI · npm · KIPRIS · RAG REST 호출 | 이 plane 은 의존성 수만큼 조회를 반복한다. 진짜 async 와 연결 재사용이 필요했다. `urllib` + `asyncio.to_thread` 는 스레드를 낭비하고 타임아웃 제어가 거칠다 |
 | `defusedxml` | `0.7.1` | KIPRIS XML 파싱 | 외부에서 받은 XML 이다. 표준 `xml.etree` 는 엔티티 확장 공격에 취약하다. 파서만 바꾸면 되므로 비용이 거의 없다 |
 | `PyYAML` | `6.0.3` | RAG corpus 매니페스트 | 명세 34 의 형식이 YAML 이다. 이전에는 의존성을 늘릴 수 없어 TOML 로 우회했으나 이제 명세대로 맞췄다. `safe_load` 만 쓴다 |
@@ -114,7 +114,8 @@ MEDIUM 으로 올리도록 조정했다.
 아니다. 검증에는 `gemini-3-flash-preview` 를 사용했다. 배포 시 값을 정해야 한다.
 
 **Python** — 3.13 에서 개발·검증했다. `tomllib` 를 더 쓰지 않으므로 하한은 3.10 이다.
-`pyproject.toml` 의 `>=3.14` 와 `ENVIRONMENT_SETUP.md` 의 3.12 가 서로 다르니 통일이 필요하다.
+~~`pyproject.toml` 의 `>=3.14` 와 `ENVIRONMENT_SETUP.md` 의 3.12 가 서로 다르니 통일이 필요하다.~~
+→ Integration 단계에서 **3.14.7 로 통일**했고, 이 plane 의 58 건을 3.14.7 에서 재검증해 전부 통과했다.
 
 **버전 고정** — 위 버전에서 검증했다. 다른 Agent 와 충돌하지 않으면 그대로 반영하고,
 충돌 시 조정 후 `pytest tests/intelligence` 로 재검증하면 된다.
