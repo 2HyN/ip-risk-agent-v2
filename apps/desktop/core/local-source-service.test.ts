@@ -93,6 +93,8 @@ test("connectLocalMount saves a record scoped to this device", async () => {
     const record = await service.connectLocalMount({
       canonicalRootPath: root,
       serverMountId: "server-mount-1",
+      riskWorkspaceId: "rw1",
+      sourceWorkspaceId: "sw1",
       includePatterns: ["**/*.py"],
       excludePatterns: [],
     });
@@ -119,6 +121,8 @@ test("openTrackedArtifact resolves the path and calls the opener", async () => {
     const record = await service.connectLocalMount({
       canonicalRootPath: root,
       serverMountId: "server-mount-1",
+      riskWorkspaceId: "rw1",
+      sourceWorkspaceId: "sw1",
       includePatterns: [],
       excludePatterns: [],
     });
@@ -146,6 +150,8 @@ test("openTrackedArtifact throws when the opener reports an error", async () => 
     const record = await service.connectLocalMount({
       canonicalRootPath: root,
       serverMountId: "server-mount-1",
+      riskWorkspaceId: "rw1",
+      sourceWorkspaceId: "sw1",
       includePatterns: [],
       excludePatterns: [],
     });
@@ -170,6 +176,8 @@ test("openTrackedArtifact rejects a path escaping the mount root", async () => {
     const record = await service.connectLocalMount({
       canonicalRootPath: root,
       serverMountId: "server-mount-1",
+      riskWorkspaceId: "rw1",
+      sourceWorkspaceId: "sw1",
       includePatterns: [],
       excludePatterns: [],
     });
@@ -193,6 +201,8 @@ test("showTrackedArtifactInFolder calls opener.showInFolder", async () => {
     const record = await service.connectLocalMount({
       canonicalRootPath: root,
       serverMountId: "server-mount-1",
+      riskWorkspaceId: "rw1",
+      sourceWorkspaceId: "sw1",
       includePatterns: [],
       excludePatterns: [],
     });
@@ -223,6 +233,8 @@ test("getDesktopConnectionStatus reports device id and mount count", async () =>
     await service.connectLocalMount({
       canonicalRootPath: root,
       serverMountId: "server-mount-1",
+      riskWorkspaceId: "rw1",
+      sourceWorkspaceId: "sw1",
       includePatterns: [],
       excludePatterns: [],
     });

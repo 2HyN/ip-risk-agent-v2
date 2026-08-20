@@ -27,6 +27,8 @@ export interface ArtifactOpener {
 export interface ConnectLocalMountParams {
   canonicalRootPath: string;
   serverMountId: string;
+  riskWorkspaceId: string;
+  sourceWorkspaceId: string;
   includePatterns: string[];
   excludePatterns: string[];
 }
@@ -65,6 +67,8 @@ export class LocalSourceService {
       serverMountId: params.serverMountId,
       canonicalRootPath: params.canonicalRootPath,
       deviceId: this.device.deviceId,
+      riskWorkspaceId: params.riskWorkspaceId,
+      sourceWorkspaceId: params.sourceWorkspaceId,
       includePatterns: params.includePatterns,
       excludePatterns: params.excludePatterns,
       status: "ACTIVE",

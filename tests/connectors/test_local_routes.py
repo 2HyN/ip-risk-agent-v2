@@ -127,3 +127,54 @@ def test_event_fingerprint_is_deterministic_for_same_input():
     r2 = client.post("/desktop/events", json=body)
 
     assert r1.json()["event_id"] == r2.json()["event_id"]
+
+
+def test_move_event_creates_previous_artifact():
+    client, _, sink = _build_client()
+
+    upload_resp = client.post("/desktop/staging", json={"content": "print(\'moved\')"})
+    object_name = upload_resp.json()["object_name"]
+
+    response = client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-1",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/new_name.py",
+            "change_type": "MOVE",
+            "staging_object_name": object_name,
+            "previous_relative_path": "src/old_name.py",
+        },
+    )
+
+    assert response.status_code == 200
+    change = sink.received[0]
+    assert change.change_type.value == "MOVE"
+    assert change.artifact.display_name == "new_name.py"
+    assert change.previous_artifact is not None
+    assert change.previous_artifact.display_name == "old_name.py"
+
+
+def test_move_event_without_previous_path_returns_400():
+    client, _, sink = _build_client()
+
+    upload_resp = client.post("/desktop/staging", json={"content": "print(1)"})
+    object_name = upload_resp.json()["object_name"]
+
+    response = client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-1",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/new_name.py",
+            "change_type": "MOVE",
+            "staging_object_name": object_name,
+        },
+    )
+
+    assert response.status_code == 400
+    assert sink.received == []

@@ -18,11 +18,15 @@ import { fileURLToPath } from "node:url";
 
 import { LocalSourceService } from "../core/local-source-service.js";
 import { ensureDeviceIdentity, FileDeviceIdentityStore } from "../local-registry/device-identity.js";
-import { FileLocalRegistryStore } from "../local-registry/store.js";
+import { FileLocalRegistryStore, type LocalMountRecord } from "../local-registry/store.js";
+import { startLocalWatcher, type LocalWatcherHandle } from "../watcher/watcher.js";
+import { DesktopEventReporter, FetchHttpClient } from "./desktop-event-reporter.js";
 import { ElectronArtifactOpener } from "./electron-artifact-opener.js";
 import { ElectronDirectoryPicker } from "./electron-directory-picker.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
+
+const SERVER_BASE_URL = process.env["IPRISK_SERVER_BASE_URL"] ?? "http://localhost:8000";
 
 async function bootstrap(): Promise<void> {
   const userDataDir = app.getPath("userData");
@@ -37,8 +41,40 @@ async function bootstrap(): Promise<void> {
     new ElectronArtifactOpener()
   );
 
+  const httpClient = new FetchHttpClient(SERVER_BASE_URL);
+  const activeWatchers = new Map<string, LocalWatcherHandle>();
+
+  const startWatchingMount = async (record: LocalMountRecord): Promise<void> => {
+    if (activeWatchers.has(record.localMountHandle)) {
+      return;
+    }
+    const reporter = new DesktopEventReporter(httpClient, {
+      riskWorkspaceId: record.riskWorkspaceId,
+      mountId: record.localMountHandle,
+      sourceWorkspaceId: record.sourceWorkspaceId,
+      deviceId: record.deviceId,
+    });
+    const handle = await startLocalWatcher(record.canonicalRootPath, (event) => {
+      reporter.report(event).catch((err: unknown) => {
+        console.error(`failed to report local change for ${record.localMountHandle}:`, err);
+      });
+    });
+    activeWatchers.set(record.localMountHandle, handle);
+  };
+
+  // 앱 재시작 후에도 이미 연결돼있던 mount들은 계속 감시를 이어간다.
+  for (const record of await registry.list()) {
+    if (record.status === "ACTIVE") {
+      await startWatchingMount(record);
+    }
+  }
+
   ipcMain.handle("chooseTrackedDirectory", () => service.chooseTrackedDirectory());
-  ipcMain.handle("connectLocalMount", (_event, params) => service.connectLocalMount(params));
+  ipcMain.handle("connectLocalMount", async (_event, params) => {
+    const record = await service.connectLocalMount(params);
+    await startWatchingMount(record);
+    return record;
+  });
   ipcMain.handle("openTrackedArtifact", (_event, handle: string, relativePath: string) =>
     service.openTrackedArtifact(handle, relativePath)
   );
@@ -53,7 +89,7 @@ async function bootstrap(): Promise<void> {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // preload 스크립트가 ESM(import)을 쓰기 위해 필요 (Electron 공식 문서 권장)
+      sandbox: false,
       preload: join(currentDir, "../preload/preload.mjs"),
     },
   });

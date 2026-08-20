@@ -19,6 +19,8 @@ async function setup() {
     serverMountId: "server-1",
     canonicalRootPath: root,
     deviceId: "device-1",
+    riskWorkspaceId: "rw1",
+    sourceWorkspaceId: "sw1",
     includePatterns: [],
     excludePatterns: [],
     status: "ACTIVE",

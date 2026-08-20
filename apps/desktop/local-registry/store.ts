@@ -16,6 +16,8 @@ export interface LocalMountRecord {
   serverMountId: string;
   canonicalRootPath: string;
   deviceId: string;
+  riskWorkspaceId: string;
+  sourceWorkspaceId: string;
   includePatterns: string[];
   excludePatterns: string[];
   status: LocalMountStatus;

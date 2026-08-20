@@ -1,7 +1,6 @@
 """Local Desktop 이벤트 수신 라우터. Agent 2 Spec 37/38번(/desktop/**)를
 구현한다. device/mount 등록 라우트는 Control의 canonical Mount 생성
-콜백이 필요해서 이번 범위에서는 제외한다 (Drive/GitHub의 OAuth/install
-라우트를 미룬 것과 동일한 기준).
+콜백이 필요해서 이번 범위에서는 제외한다.
 """
 
 from __future__ import annotations
@@ -35,9 +34,10 @@ class DesktopEventRequest(BaseModel):
     source_workspace_id: str
     device_id: str
     relative_path: str
-    change_type: Literal["CREATE", "UPDATE", "DELETE"]
+    change_type: Literal["CREATE", "UPDATE", "DELETE", "MOVE"]
     revision: str | None = None
     staging_object_name: str | None = None
+    previous_relative_path: str | None = None
 
 
 class DesktopEventResponse(BaseModel):
@@ -63,6 +63,10 @@ def create_local_desktop_router(
             raise HTTPException(
                 status_code=400, detail="staging_object_name is required for non-DELETE events"
             )
+        if event.change_type == "MOVE" and not event.previous_relative_path:
+            raise HTTPException(
+                status_code=400, detail="previous_relative_path is required for MOVE events"
+            )
 
         artifact_id = encode_local_artifact_id(
             device_id=event.device_id, mount_id=event.mount_id, relative_path=event.relative_path
@@ -79,6 +83,19 @@ def create_local_desktop_router(
         if event.staging_object_name:
             safe_metadata["staging_object_name"] = event.staging_object_name
 
+        previous_artifact = None
+        if event.change_type == "MOVE" and event.previous_relative_path:
+            previous_artifact_id = encode_local_artifact_id(
+                device_id=event.device_id,
+                mount_id=event.mount_id,
+                relative_path=event.previous_relative_path,
+            )
+            previous_artifact = SourceArtifactRef(
+                source_artifact_id=previous_artifact_id,
+                display_name=event.previous_relative_path.rsplit("/", 1)[-1],
+                path_hint=event.previous_relative_path,
+            )
+
         display_name = event.relative_path.rsplit("/", 1)[-1]
         change = SourceChange(
             contract_version="1",
@@ -92,6 +109,7 @@ def create_local_desktop_router(
             artifact=SourceArtifactRef(
                 source_artifact_id=artifact_id, display_name=display_name, path_hint=event.relative_path
             ),
+            previous_artifact=previous_artifact,
             change_type=ChangeType[event.change_type],
             revision=event.revision,
             observed_at=datetime.now(timezone.utc),

@@ -16,6 +16,8 @@ function makeRecord(overrides: Partial<LocalMountRecord> = {}): LocalMountRecord
     serverMountId: "server-mount-1",
     canonicalRootPath: "/Users/someone/very/secret/project",
     deviceId: "device-1",
+    riskWorkspaceId: "rw1",
+    sourceWorkspaceId: "sw1",
     includePatterns: ["**/*.py"],
     excludePatterns: ["**/node_modules/**"],
     status: "ACTIVE",
