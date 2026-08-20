@@ -4,7 +4,7 @@ Master Spec 21 의 고정 순서를 그대로 코드로 옮긴 것이다. Source
 Intelligence Plane 사이에 직접 호출 경로가 없다는 규칙을 지키기 위해, 이
 모듈만이 양쪽을 안다.
 
-지켜야 하는 불변조건 (AGENT_1_DELIVERY 5, Master Spec 17/18):
+지켜야 하는 불변조건 (docs/INTEGRATION.md 2절, Master Spec 17/18):
 
 - provider 실패를 빈 성공이나 "Risk 없음" 으로 바꾸지 않는다.
 - Gate 가 승인하지 않으면 Analyzer 를 호출하지 않는다.

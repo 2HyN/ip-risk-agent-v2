@@ -1,10 +1,22 @@
-# 2차 PBL 제출 보고서 — 작성용 정보 팩
+# 2차 PBL 제출 보고서 — 작성 자료
 
-> **대상 양식**: `ip-risk-agent-v2/AJOU_PBL_2차_프로젝트_통합_제출양식_(배포).docx`
+> **대상 양식**: `AJOU_PBL_2차_프로젝트_통합_제출양식_(배포).docx`
 > (PROJECT BASED LEARNING 2차 Team 프로젝트 기획서 및 결과보고서 — 엔터프라이즈급 고도화 및 서비스 상용화 실증, SECTION 00~17)
-> **성격**: 보고서 원고가 아니라, 각 SECTION을 채우는 데 필요한 **확인된 사실 자료 + 미확보 항목 목록**.
-> **자료 출처**: `ip-risk-agent-v2` 저장소 4개 worktree(`main`/`platform-control`/`source-integration-desktop`/`risk-intelligence-rag`)의 코드·문서 직접 확인, 2026-08-20 기준.
-> **1차 보고서**: `ip-risk-agent/docs/sections-01-05.md`, `ip-risk-agent/docs/sections.md` (v1 프로토타입 기준. SECTION 번호 체계가 2차 양식과 다르므로 **재매핑 필요**)
+> **성격**: 보고서 원고가 아니라, 각 SECTION 을 채우는 데 필요한 **확인된 사실 자료 + 미확보 항목 목록**.
+> **기준**: branch `integration`. 세 Plane 병합과 애플리케이션 배선까지 완료한 상태.
+> 모든 수치는 실제 실행 결과이며, 미확보 항목은 그렇다고 표시했다.
+
+## 현재 상태 한눈에
+
+| | 상태 |
+|---|---|
+| 세 Plane 구현 | ✅ 완료 |
+| branch 통합 | ✅ 완료 (충돌 4건 해결) |
+| dependency 확정 | ✅ 완료 (`pip check` 통과) |
+| 애플리케이션 배선 | ✅ 완료 — `uvicorn ip_risk_agent.main:app` 로 기동 |
+| 검증 | ✅ **656 tests / 654 passed / 9 skipped / 0 failed** |
+| GCP 배포 | 🔴 미착수 — `deploy/` 비어 있음, 배포 URL 없음 |
+| 사용자 테스트 | 🔴 미실시 |
 
 ---
 
@@ -192,8 +204,9 @@ Source event
 | F-11 | Risk Dashboard / Detail / Timeline / Review | Must | 목록·상세·이력·disposition 변경 | ✅ 완료 (React 33 파일) |
 | F-12 | Audit / Source Access History | Must | `/audit`, `/audit/export`, `/source-access` | ✅ 완료 |
 | F-13 | 알림 | Should | 목록·읽음 처리 | ✅ 완료 |
-| F-14 | 3-Plane 통합 (`main.py` 배선) | Must | 앱 기동 | 🔴 **미구현** — placeholder |
+| F-14 | 3-Plane 통합 (`main.py` 배선) | Must | 앱 기동 | ✅ **완료** — `/health` 200, 미인증 401 실측 |
 | F-15 | GCP 배포 (Cloud Run × 2) | Must | 배포 URL 접근 | 🔴 **미구현** — `deploy/` 비어 있음 |
+| F-16 | Source 라우터 권한 검사 | Must | 무인증 접근 거부 | ✅ **완료** — 기본값이 무검사였던 것을 Control RBAC 로 교체 |
 
 ### 4.2 프로젝트 범위에서 제외 (Blueprint §46 후속 확장)
 
@@ -218,11 +231,12 @@ Source event
 | 구분 | 방법 | 실측 결과 |
 |---|---|---|
 | 단위 테스트 | pytest / vitest / node:test | Control 286 passed·1 skipped, Connectors 224 passed, Intelligence 58 passed, Desktop 65(63 passed·2 skipped), Frontend 15 + 8 passed |
-| 통합 테스트 | 🔴 미작성 | — |
+| 통합 테스트 | `pytest tests/integration` | **21 passed** — 무인증 거부, 실패 보존, idempotency, Electron→Control 도달 |
 | 정량 평가 | Agent 3 실호출 파이프라인 1회 통과 (§SECTION 08 참조) | ✅ |
 | 정성 평가 | 🔴 사용자 테스트 미실시 | — |
 
-**총계(문서 기록 기준)**: Python 약 568건 + TypeScript 88건. 단 이는 branch별 개별 실행 결과이며 **통합 후 재측정이 필요하다** (§INTEGRATION_BRIEF §4.4 FastAPI 버전 충돌 영향).
+**총계(통합 트리 실측)**: Python **593 passed / 7 skipped**, TypeScript **88 (86 passed / 2 skipped)**.
+합계 **656 tests — 654 passed, 9 skipped, 0 failed**. skip 은 전부 환경 제약(Firestore emulator 1, provider 자격증명 6, symlink 권한 2)이다.
 
 ---
 
@@ -303,7 +317,7 @@ Cloud Scheduler는 Drive watch renewal / reconciliation 등 정기 maintenance�
 
 | Method | Endpoint | 목적 |
 |---|---|---|
-| GET | `/health` | 🔴 **미구현** — Integration이 추가해야 함 (양식이 예시로 요구) |
+| GET | `/health` | ✅ 구현. 상태 + 어떤 저장소·provider·분석 경로가 연결됐는지 반환 (비밀값 미포함) |
 | GET | `/api/v1/auth/google/login` | Google OIDC 로그인 시작 |
 | GET | `/api/v1/auth/google/callback` | OIDC 콜백 |
 | GET | `/api/v1/auth/me` | 현재 세션 사용자 |
@@ -730,10 +744,10 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 | T-02 | Platform & Control Plane | Agent 1 | T-01 | Phase 0~13, 286 passed | ✅ 완료 |
 | T-03 | Source Integration & Desktop | Agent 2 | T-01 | Phase A~F, 297 tests | ✅ 완료 |
 | T-04 | Risk Intelligence & RAG | Agent 3 | T-01 | 58 + 10 passed | ✅ 완료 |
-| T-05 | Branch 통합 (`integration`) | Integration | T-02/03/04 | 충돌 해결 + 전체 테스트 통과 | 🔴 **미착수** |
-| T-06 | 앱 배선 (`main.py`/`worker.py`/`composition/`) | Integration | T-05 | 앱 기동 | 🔴 미착수 |
+| T-05 | Branch 통합 (`integration`) | Integration | T-02/03/04 | 충돌 해결 + 전체 테스트 통과 | ✅ **완료** |
+| T-06 | 앱 배선 (`main.py`/`worker.py`/`composition/`) | Integration | T-05 | 앱 기동 | ✅ **완료** |
 | T-07 | GCP 배포 (Cloud Run × 2, Tasks, Scheduler, Firestore index) | Integration | T-06 | 배포 URL 접근 | 🔴 미착수 |
-| T-08 | 통합·E2E 테스트 | Integration | T-06 | `tests/integration`, `tests/e2e` | 🔴 미착수 |
+| T-08 | 통합 테스트 | Integration | T-06 | `tests/integration` | ✅ **완료 21건**. `tests/e2e` 는 배포 후 |
 | T-09 | 사용자 테스트 | 전원 | T-07 | 3인 이상 과업 수행 | 🔴 미착수 |
 
 ### 협업 기준 표 — 실제 확정된 규칙
@@ -745,7 +759,7 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 | **Frozen Shared Contract** | `shared/contracts/**`는 병렬 개발 동안 Frozen. 변경이 필요하면 코드를 고치지 말고 contract-change request 절차를 따른다. **실제 결과: 세 Agent 모두 request 0건** |
 | **의존성 규칙** | 다른 Plane의 내부 구현 직접 import 금지. 허용: `Control/Source/Intelligence → shared contracts`, `Integration → all public plane surfaces` |
 | **개발 환경** | CPython 3.14.7 / Node.js 24.19.0 / pnpm 11.19.0 / TypeScript 5.9.3 / Pydantic 2.13.4 / pytest 9.1.1. `.venv`·`node_modules`·`.pnpm-store`·`dist`는 공유하지 않고 manifest/lockfile로 재현 |
-| **Dependency 추가** | root `pyproject.toml`을 직접 수정하지 않는다. 각자 venv에서 설치·검증한 뒤 `agent-deliverables/agent-N-dependencies.md`에 **버전·용도·검증 결과·특이사항**을 기록. 최종 pin은 Integration이 병합 |
+| **Dependency 추가** | root `pyproject.toml`을 직접 수정하지 않는다. 각자 venv에서 설치·검증한 뒤 Plane 별 dependency 문서에 **버전·용도·검증 결과·특이사항**을 기록. 최종 pin 은 Integration 이 병합해 [DEPENDENCIES.md](DEPENDENCIES.md) 와 `pyproject.toml` 로 확정 |
 | **환경 변수** | `.env.example`에 이름만 선언. 실제 값은 소스·fixture·log·task payload 어디에도 기록 금지. 각 Plane은 환경변수를 직접 읽지 않고 **생성자 주입** |
 | **코드 품질** | 각 Agent가 자신의 테스트 소유(`tests/control` / `tests/connectors` / `tests/intelligence`). **mock-only로 완료 주장 금지** (Master Spec §59) — real fake + 실제 파일시스템 + 실제 FastAPI TestClient + 실제 provider 호출로 검증 |
 | **인계 문서** | 개발 완료 시 Master Spec §60 형식의 `AGENT_N_DELIVERY.md` 필수 작성 |
@@ -760,7 +774,7 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 | LLM 스키마 호환성 | 🔴 **발생** — Gemini가 `additionalProperties` 거부 | API 전송용 스키마 변환기 추가. 내부 검증은 엄격 유지 |
 | 모델 식별자 미확정 | 🔴 **미해결** — "Gemini 3.6 Flash"는 실재하지 않는 식별자 | 환경변수화로 코드 변경 없이 지정 가능. **배포 전 값 확정 필요** |
 | Plane 간 dependency 충돌 | 🔴 **발생** — FastAPI `0.141.1` vs `0.121.2`, `@types/node` `26.2.0` vs `^24.0.0` | 상위 버전 채택 후 반대편 테스트 재검증 |
-| 문서 간 런타임 버전 불일치 | 🔴 **발생** — pyproject 3.14 / README 3.14.7 / ENVIRONMENT_SETUP 3.12.13 / Agent 3 실제 3.13 | 3.14.7로 통일 후 Agent 3 재검증 |
+| 문서 간 런타임 버전 불일치 | 🔴 **발생** — pyproject 3.14 / README 3.14.7 / 환경 문서 3.12.13 / Intelligence 실제 3.13 | ✅ 3.14.7 로 통일하고 전 Plane 재검증 완료 |
 | 프론트엔드 빌드 철학 충돌 | 🔴 **발생** — vitest+Bundler vs node:test+NodeNext | vitest로 통일, `PlatformAdapter.test.ts` 포팅 |
 | 외부 서비스 미검증 | 🔴 **미해결** — Google OIDC roundtrip, Firestore production, Cloud Tasks, RAG Engine | 배포 환경 확보 후 검증 |
 | 배포 미착수 | 🔴 **미해결** — `deploy/` 비어 있음 | T-07 |
@@ -775,7 +789,7 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 |---|---|---|---|
 | 기획·설계 | Blueprint(49KB) + Master Spec(55KB) + Agent별 상세 명세 3종(85KB) 작성. Frozen Contract 5종·Enum 14종 확정. 3-Plane 경계와 파일 ownership 사전 확정 | 병렬 개발 시 충돌 우려 | **디렉터리 ownership 사전 분할 + Frozen Contract 채택** → 결과적으로 backend 충돌 0건 |
 | 핵심 기능 구현 | Agent 1 Phase 0~13 / Agent 2 Phase A~F / Agent 3 전 영역 완료. 총 568 Python + 88 TS 테스트 | 대역 테스트로는 외부 API 실제 동작을 알 수 없었음 | **실호출 검증 의무화** → 5가지 결함 발견·수정 |
-| 배포·검증 | 🔴 미착수 | 통합 미완료 | T-05 → T-08 |
+| 배포·검증 | 세 branch 병합(충돌 4건, 전부 프론트 설정), dependency 확정, `composition/` 8모듈 배선, 통합 테스트 21건 | ① dependency 충돌이 통합 시점에 한꺼번에 드러남 ② Source 라우터 authz 기본값이 무검사 ③ Cloud Tasks 가 content-free ID 만 넘기는데 이를 `SourceChange` 로 되짚는 공개 메서드가 없음 | ①은 상위 버전 채택 후 반대편 테스트 실측 재검증 ②는 경로별 스코프 어댑터로 교체 ③은 contract-change request 대상으로 기록하고 우회 조회하지 않음 |
 | 시연·회고 | 🔴 미착수 | — | — |
 
 ### 코드 리뷰 표 — 채움 자료
@@ -816,9 +830,9 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 | 웹 인터페이스 | React 19 + Vite 8. `ControlPlaneApp` 진입점. `router="browser"`(Web) / `"hash"`(Electron renderer). 주요 화면: Login / Workspace List / Dashboard / Risk List / Risk Detail / Risk Timeline / History / Security & Data Access / Members / Notifications | 코드 ✅ / 배포 🔴 |
 | 백엔드 서비스 | **Cloud Run** (asia-northeast3 Seoul) — API 1개 + Analysis Worker 1개 | 🔴 미배포 |
 | 데이터/저장소 | **Firestore Native** (Seoul), canonical collection 16개 + composite index 8개. Local staging은 GCS 버킷(`LOCAL_STAGING_BUCKET`), TTL 설정 필요 | 🔴 미배포 |
-| 환경 변수/Secret | **Secret Manager**. 각 Plane은 환경변수를 직접 읽지 않고 생성자 주입. 필요 변수 전체 목록은 `INTEGRATION_BRIEF.md` §5.1 | 🔴 미구성 |
+| 환경 변수/Secret | **Secret Manager**. 각 Plane은 환경변수를 직접 읽지 않고 생성자 주입. 필요 변수 전체 목록은 [DEPENDENCIES.md](DEPENDENCIES.md) 5절 | 🔴 미구성 |
 | 빌드·배포 명령 | `pnpm run generate` → `pnpm run typecheck` → `pnpm run build` → `pytest` → 컨테이너 빌드 → Cloud Run 배포. **CI/CD 미구성** | 🔴 |
-| 헬스 체크 | 🔴 **`/health` 엔드포인트 미구현** (Integration이 추가해야 함) | 🔴 |
+| 헬스 체크 | ✅ `GET /health` — `status`, `control_backend`, `google_login`, `intelligence`, `sources.{mounted,skipped}` 반환. 비밀값 미포함 | ✅ |
 | 로그·모니터링 | structured observability 구현됨 (`StructuredLogger` / `StructuredEventSink`, allow-list 로그). Cloud Logging 연동 미구성 | 코드 ✅ / 연동 🔴 |
 | 비용·한도 | 🔴 미산정. 비용 항목: Gemini 호출, KIPRIS API, RAG Engine, Cloud Run, Firestore, Cloud Tasks. **후보 상위 6건 제한이 이미 비용 통제 장치** | 🔴 |
 
@@ -837,7 +851,7 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 
 배포 URL 접근 / Secret 노출 없음 / 오류 로그 확인 가능 / 재배포 후 동작 / README 실행·배포 안내 일치 — **모두 T-07 이후 확인 가능**
 
-> **대안**: 배포가 제출 기한 내 불가능하면, 로컬 실행 스크린샷 + `LOCAL_RUN_AND_TEST_GUIDE.md` 기반 재현 절차 + 배포 계획(위 표)으로 채우고 SECTION 17.1에 사유와 보완 계획을 명시한다. 양식 SECTION 00 체크리스트가 이 방식을 명시적으로 허용한다.
+> **대안**: 배포가 제출 기한 내 불가능하면, 로컬 실행 스크린샷 + [DEVELOPMENT.md](DEVELOPMENT.md) 기반 재현 절차 + 배포 계획(위 표)으로 채우고 SECTION 17.1에 사유와 보완 계획을 명시한다. 양식 SECTION 00 체크리스트가 이 방식을 명시적으로 허용한다.
 
 ---
 
@@ -847,12 +861,12 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 
 | TC ID | 기능/상황 | **현재 확보 상태** |
 |---|---|---|
-| TC-01 | 핵심 정상 흐름 (연결→변경→분석→Risk 표시) | 🟡 **Plane별로는 검증됨** (Agent 2 Electron 전체 왕복, Agent 3 파이프라인 실호출 1회). **통합 E2E는 미실시** |
+| TC-01 | 핵심 정상 흐름 (연결→변경→분석→Risk 표시) | 🟡 **통합 경로까지 검증됨** — 로그인 → VWS 생성 → 기기 등록 → Mount 등록 → staging → `/desktop/events` → Control 등록이 `tests/integration` 에서 실제로 이어진다. **브라우저 E2E 와 실제 provider 연동은 미실시** |
 | TC-02 | 빈 값 / 형식 오류 | ✅ 자료 있음 — `StrictModel`(`extra="forbid"`) 전면 적용, Control API validation 테스트 |
 | TC-03 | 외부 API 실패 | ✅ 자료 있음 — `ProviderFailureError` + `FailureCategory` + `retryable` 분류. KIPRIS 잘못된 키 실측 확인. 지수 백오프 재시도 |
 | TC-04 | 근거 부족 | ✅ 자료 있음 — KIPRIS 0건을 실패와 구분(실측). `coverage=PARTIAL` 시 자동 해소 금지. 목록 밖 ID 생성 시 결과 폐기 |
 | TC-05 | 모바일/브라우저 | 🔴 **미실시.** 스타일링 자체가 없음 |
-| TC-06 (추가 권장) | 권한 경계 | ✅ 자료 있음 — `test_phase12_permission_matrix.py`, `test_authorization.py`. Owner도 타인 credential 사용 불가 |
+| TC-06 | 권한 경계 | ✅ Control `test_phase12_permission_matrix.py`·`test_authorization.py` + **Integration `test_source_authorization.py`**. Owner 도 타인 credential 사용 불가. Source 라우트 무인증 접근 401, VWS 멤버십 없는 Mount 등록 403 |
 | TC-07 (추가 권장) | 보안 경계 | ✅ 자료 있음 — Local root escape 거부, GitHub webhook HMAC 잘못된 서명 거부, renderer 임의 fs 호출 불가, 미선택 repo/branch/path 무시 |
 
 ### 사용자 테스트 표 (U1~U3) — 🔴 **전면 미실시**
@@ -887,6 +901,10 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 | I-05 | 실측에서 모든 특허 후보가 `LOW`로 깔려 우선순위가 정보를 주지 못함 | 실제 파이프라인 실행 | KIPRIS가 청구항 미제공 → 초록 근거 2개 이상이면 `MEDIUM`으로 상향 | 전부 LOW → 우선순위 분화 | ✅ 완료 |
 | I-06 | Local MOVE 감지 미구현 | 자체 점검 | 내용 해시 기반 MOVE 감지 구현 (D-3 gap) | 감지 가능 | ✅ 완료 |
 | I-07 | Electron watcher가 서버와 연결되지 않음 | 자체 점검 | `/desktop/events` HTTP 엔드포인트로 실제 전송 배선 | 전체 왕복 동작 | ✅ 완료 |
+| I-08 | **Source 라우터 7개가 무인증으로 열려 있었음** | 통합 시 코드 점검 | 기본값 `allow_all_authz`(무검사)를 Control RBAC 어댑터로 교체. `resource_id` 의미가 라우트마다 달라 경로별 스코프로 분기 | 무인증 200 → **401/403**. 회귀 테스트로 잠금 | ✅ 완료 |
+| I-09 | FastAPI 버전 충돌 (`0.141.1` vs `0.121.2`) | 통합 시 dependency 대조 | 상위 버전 채택 후 반대편 224건을 실제로 재실행해 확인 | 충돌 → 전 Plane 단일 환경 통과 | ✅ 완료 |
+| I-10 | `.env.example` 이 코드가 읽는 변수 4개를 누락 | 코드 grep 으로 실제 참조 도출 | `GEMINI_API_KEY`·`KIPRIS_ACCESS_KEY`·`RAG_CORPUS_VERSION`·`IPRISK_SERVER_BASE_URL` 추가 | 배포 시 특허 분석이 **조용히 비활성화**될 위험 제거 | ✅ 완료 |
+| I-11 | `pnpm-lock.yaml` 과 `package.json` 불일치 | `--frozen-lockfile` 실패 | lockfile 재생성 후 커밋 | CI 재현 불가 → 통과 | ✅ 완료 |
 
 > I-01 ~ I-05는 "**대역(fake) 테스트만으로는 발견되지 않고 실호출에서만 드러난 결함**"이라는 하나의 이야기로 묶인다. SECTION 15.3 레슨런의 핵심 소재.
 
@@ -894,9 +912,9 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 
 | 최종 상태 | 내용 |
 |---|---|
-| **정상 시연 가능한 기능** | Plane 단위로는 전부. Electron 로컬 감시 전체 왕복(실제 폴더선택창 확인), License/Patent 분석 실호출 파이프라인, Control API + Web UI. **단, 세 Plane이 하나의 앱으로 연결된 상태는 아직 아님** |
+| **정상 시연 가능한 기능** | **하나의 앱으로 기동한다** (`uvicorn ip_risk_agent.main:app`). Google 로그인(자격증명 있을 때) → VWS 생성/멤버 관리 → Local Source 연결 → 변경 감지 → Risk Dashboard/Detail/Timeline/Review → Audit·Security 화면. Electron 로컬 감시 전체 왕복, License/Patent 분석 실호출 파이프라인 |
 | **부분 구현/제한 기능** | RAG(corpus 3건, RAG Engine 실호출 미검증) / GitHub `reconcile()` no-op / `GET /desktop/mounts/{id}/status` 미구현 / GitHub repo 목록 100개 제한 / `.ipriskignore` fnmatch 기반 / LocalStagingStore 텍스트 전용 / Drive 실제 파일 API 재시도 미적용 |
-| **미구현 기능** | 3-Plane 통합 배선(`main.py`), GCP 배포, `/health`, 통합·E2E 테스트, 스타일링, 사용자 테스트, Copyright analyzer, multimodal artifact, 조직별 정책 |
+| **미구현 기능** | GCP 배포(`deploy/` 비어 있음), 브라우저 E2E, 스타일링, 사용자 테스트, Drive/GitHub webhook·mounts 라우터(자격증명 필요), Open Original resolver, Copyright analyzer, multimodal artifact, 조직별 정책 |
 | **알려진 오류** | Local MOVE는 내용 해시 기반 추정 — 내용이 완전히 같은 다른 파일이면 오판 가능. symlink escape 테스트 2건은 Windows 관리자 권한 없으면 자동 skip |
 | **운영 시 주의사항** | `AuthzDependency` 기본값이 무검사 — **프로덕션 전 반드시 교체.** `FIRESTORE_EMULATOR_HOST`를 production에 설정 금지. 내장 rate limiter는 단일 process 안전망일 뿐 전역 quota 아님. `GEMINI_MODEL_ID` 값 미확정. 특허 후보 상위 6건만 판정(비용) |
 
@@ -955,7 +973,7 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 | "비용은?" | 특허 후보 상위 6건만 판정하도록 제한. 미판정 시 `coverage=PARTIAL`로 자동 해소 차단 |
 | "확장성은?" | Connector / Analyzer / Risk contract 분리. 새 Source나 IP Risk 유형 추가 시 전체 재작성 불필요 |
 | "분석이 실패하면?" | 실패를 "Risk 없음"으로 바꾸지 않는다. `FAILED`/`INCONCLUSIVE`는 기존 active state 유지. Source 삭제도 Risk 자동 해소 금지 |
-| "왜 아직 배포가 안 됐나?" | 3-Plane 병렬 개발을 각 Plane 완료까지 진행했고, 통합 배선이 다음 단계. 통합 계획은 `INTEGRATION_BRIEF.md`에 문서화 |
+| "왜 아직 배포가 안 됐나?" | 병합·dependency 확정·애플리케이션 배선까지 끝났고 앱은 로컬에서 기동한다. 남은 것은 GCP 자원 연동뿐이며 교체 지점을 `SourcePorts` 한 곳에 모아 뒀다 |
 
 ---
 
@@ -974,7 +992,8 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 
 | 백로그 ID | 고도화 항목 | 기대 가치 | 노력 | 우선순위 | 검증 방법 |
 |---|---|---|---|---|---|
-| B-01 | **3-Plane 통합 + GCP 배포** | 제품 성립의 전제 | 상 | 1 | 배포 URL 접근 + E2E 통과 |
+| B-01 | **GCP 배포** (Firestore·Secret Manager·Cloud Tasks·GCS·Cloud Run) | 제품 성립의 전제. 통합·배선은 완료됐고 `SourcePorts` 한 곳만 실물로 교체하면 된다 | 상 | 1 | 배포 URL 접근 + E2E 통과 |
+| B-00 | **RAG 관련성 임계값 도입** | corpus 에 없는 라이선스에 엉뚱한 근거가 붙는 것을 막는다. 작업량이 작고 효과가 즉시 | 하 | 1 | corpus 밖 라이선스 평가 질문으로 확인 |
 | B-02 | **RAG corpus 84종 확대** | 라이선스 설명 커버리지 | 중 | 2 | `manifest.yaml` 추가 + `corpus_version` 상승 + 평가질문 재실행 |
 | B-03 | **특허 청구항 확보 경로** | `HIGH` 우선순위 판정 가능 | 상 | 3 | `PatentDocument.claims`는 이미 구현. 데이터 소스 확보가 관건 |
 | B-04 | **조직별 라이선스 정책** | 엔터프라이즈 필수 | 상 | 4 | Contract v2 또는 별도 정책 컨텍스트 설계 |
@@ -1015,8 +1034,10 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 | 발표 자료 | 1차: `IP DeteDog 발표자료_수정본.pptx` / 2차 🔴 미작성 | — | — |
 | 시연 영상 | 🔴 없음 | — | — |
 | 설계 문서 | `IP_RISK_AGENT_MEETING_BLUEPRINT.md`(49KB), `CODING_AGENT_MASTER_SPEC.md`(55KB), Agent 명세 3종(85KB) | 저장소 내 | ✅ |
-| 인계 문서 | `AGENT_1_DELIVERY.md`, `AGENT_2_DELIVERY.md`, `AGENT_3_DELIVERY.md` + dependency 문서 3종 | 저장소 내 | ✅ |
-| 통합 문서 | `INTEGRATION_BRIEF.md` | 로컬 | ✅ |
+| 구현 현황 | `docs/IMPLEMENTATION_STATUS.md` | 저장소 내 | ✅ |
+| 통합 기록 | `docs/INTEGRATION.md` | 저장소 내 | ✅ |
+| 의존성 확정 | `docs/DEPENDENCIES.md` | 저장소 내 | ✅ |
+| 개발·검증 가이드 | `docs/DEVELOPMENT.md` | 저장소 내 | ✅ |
 
 ### 출처·라이선스 표 — 확인된 것
 
@@ -1040,7 +1061,7 @@ PATENT   SUCCEEDED / COMPLETE · 후보 3건 · 근거 4건
 
 ### 16.1 README 재현 절차 — 이미 문서화된 자료
 
-`README.md` §5~6 + `ENVIRONMENT_SETUP.md`에 전체 절차가 있다. ⚠️ **단 `ENVIRONMENT_SETUP.md`의 Python 버전이 3.12.13으로 잘못 기재되어 있어 제출 전 3.14.7로 수정해야 한다.**
+[DEVELOPMENT.md](DEVELOPMENT.md) 에 환경 구축부터 검증까지 전체 절차가 있다.
 
 ```bash
 git clone https://github.com/2HyN/ip-risk-agent-v2 && cd ip-risk-agent-v2
@@ -1074,42 +1095,56 @@ python -m compileall backend/src shared/contracts/python scripts
 
 ### 17.1 미확인 항목 또는 제출 비고 — 반드시 기재할 내용
 
-1. **3-Plane 통합 미완료** — 세 branch가 각자 완성되었으나 `integration` branch 병합과 `main.py` 배선이 남아 있다. 병합 드라이런 결과 충돌은 프론트엔드 설정 4건뿐이며, 해결 지침과 전체 조립 순서는 `INTEGRATION_BRIEF.md`에 문서화되어 있다.
-2. **GCP 미배포** — `deploy/`가 비어 있고 배포 URL이 없다. 따라서 SECTION 11 점검 표, SECTION 12 사용자 테스트, SECTION 13.1/13.2 최종 화면·영상을 채우지 못했다.
-3. **`GEMINI_MODEL_ID` 미확정** — 명세의 "Gemini 3.6 Flash"가 실재하지 않는 식별자다. 검증에는 `gemini-3-flash-preview`를 사용했다.
-4. **RAG Engine 실호출 미검증** — GCP 프로젝트와 corpus가 필요하다. 요청 형식과 오류 분류는 구현되어 있다.
-5. **RAG 평가 질문 미수행** — 위 4번에 종속.
-6. **사용자 테스트 미실시** — 위 2번에 종속.
+1. **GCP 미배포** — `deploy/` 가 비어 있고 배포 URL 이 없다. 따라서 SECTION 11 점검 표,
+   SECTION 12 사용자 테스트, SECTION 13.1/13.2 최종 화면·영상을 채우지 못했다.
+   통합과 배선은 완료되어 앱이 로컬에서 기동하므로, 남은 것은 GCP 자원 연동이다.
+   교체 지점은 `composition/container.py` 의 `SourcePorts` 한 곳에 모여 있다.
+2. **`GEMINI_MODEL_ID` 미확정** — 명세의 "Gemini 3.6 Flash" 가 실재하지 않는 식별자다.
+   검증에는 `gemini-3-flash-preview` 를 사용했다.
+3. **RAG Engine 실호출 미검증 + 업로더 미구현** — 검색 클라이언트는 있으나 corpus 를
+   RAG Engine 에 올리는 구현이 없다. 콘솔/`gcloud` 수동 업로드가 필요하다.
+4. **RAG 평가 질문 미수행** — 위 3번에 종속. 다만 `InMemoryReferenceRetriever` 로
+   corpus 3건에 대한 평가는 지금도 가능하다.
+5. **RAG corpus 커버리지 18%** — 관련성 임계값이 없어 corpus 에 없는 라이선스에도
+   근거가 붙는다. 개선 우선순위 1번으로 올려 두었다.
+6. **사용자 테스트 미실시** — 위 1번에 종속. 로컬 빌드로 3인 과업 테스트는 가능하다.
+7. **브라우저 E2E 미실시** — `tests/e2e` 가 비어 있다. 통합 테스트 21건은 HTTP 계층까지만
+   검증한다.
+8. **Cloud Tasks 경로 미완성** — 큐가 content-free `change_event_id` 만 넘기는데 이를
+   `SourceChange` 로 되짚는 공개 메서드가 없다. Control 내부를 우회 조회해 임시로 메우지
+   않고 contract-change request 대상으로 기록했다.
 
 ---
 
-## 부록 A. 제출 전 반드시 처리해야 할 문서 수정
+## 부록 A. 문서·설정 정정 (통합 시 처리 완료)
 
-| # | 대상 | 문제 | 조치 |
+| # | 대상 | 문제 | 상태 |
 |---|---|---|---|
-| 1 | `ENVIRONMENT_SETUP.md` 20·25행 | Python **3.12.13** / `py -3.12`로 기재. 실제는 3.14.7 | 3.14.7로 수정 |
-| 2 | `agent-3-dependencies.md` | `pydantic 2.13.3`으로 기재. 실제 baseline은 2.13.4 | 수정 |
-| 3 | `.env.example` | `KIPRIS_ACCESS_KEY`, `GEMINI_API_KEY`, `RAG_CORPUS_VERSION`, `DRIVE_WATCH_CHANNEL_TOKEN`, `GITHUB_APP_SLUG`, `IPRISK_SERVER_BASE_URL` 누락 | 추가 |
-| 4 | `.env.example` | `KIPRIS_API_KEY_SECRET_ID`, `RAG_MANAGED_DB_CONFIG`, `PACKAGE_METADATA_BASE_URL`을 코드가 읽지 않음 | 용도 명확화 또는 정리 |
-| 5 | Master Spec §16/35, Blueprint §35 | "Gemini 3.6 Flash" — 실재하지 않는 식별자 | 실제 모델 ID로 교체 |
-| 6 | 저장소 루트 | 제출양식 `.docx`가 **untracked 상태**로 저장소에 있음 | 커밋하거나 `.gitignore` 처리 |
+| 1 | 환경 문서 | Python **3.12.13** / `py -3.12` 로 기재. 실제는 3.14.7 | ✅ 3.14.7 로 통일. Intelligence 58건을 3.14.7 에서 재검증 |
+| 2 | dependency 문서 | `pydantic 2.13.3` 오기 | ✅ 2.13.4 로 정정 |
+| 3 | `.env.example` | 코드가 읽는 변수 4개 누락 | ✅ 추가 (`GEMINI_API_KEY`, `KIPRIS_ACCESS_KEY`, `RAG_CORPUS_VERSION`, `IPRISK_SERVER_BASE_URL`) + Agent 2 요구 2개 |
+| 4 | `.env.example` | `KIPRIS_API_KEY_SECRET_ID` 를 코드가 읽지 않음 | ✅ Secret Manager 참조 ID 임을 명시하고 주입 흐름 기술 |
+| 5 | 줄바꿈 | Windows `core.autocrlf` 로 생성물이 CRLF 가 되어 diff 발생 | ✅ `.gitattributes` 추가 |
+| 6 | `pnpm-lock.yaml` | `package.json` 과 불일치로 `--frozen-lockfile` 실패 | ✅ 재생성 |
+| 7 | Master Spec 16/35, Blueprint 35 | "Gemini 3.6 Flash" — 실재하지 않는 식별자 | 🔴 **미처리.** 두 문서는 Frozen 명세라 배포 모델 확정 시 함께 정정 |
+| 8 | 저장소 루트 | 제출양식 `.docx` 가 untracked | 🔴 미처리. 커밋하거나 `.gitignore` 처리 |
 
 ## 부록 B. 자료 출처 대조표
 
 | 보고서 SECTION | 주 자료 위치 |
 |---|---|
-| 01, 02 | `IP_RISK_AGENT_MEETING_BLUEPRINT.md` §0~1, §47~48 |
-| 03 | `CODING_AGENT_MASTER_SPEC.md` §21~26, §41~44 |
-| 04 | `CODING_AGENT_MASTER_SPEC.md` §66, Blueprint §46, 각 `AGENT_N_DELIVERY.md` §1 |
-| 05 | Blueprint §31~35, `AGENT_1_DELIVERY.md` §7, 코드 실측 라우트 |
-| 06 | `shared/contracts/**`, Master Spec §8~20, §37, `AGENT_1_DELIVERY.md` §10 |
-| 07 | `backend/src/ip_risk_agent/intelligence/gemini/prompts/*.md`, `agent-3-dependencies.md` |
-| 08 | `rag-corpus/manifest.yaml`, `intelligence/rag/*.py`, Blueprint §19~20, Master Spec §36 |
-| 09 | `README.md` §3~11, Master Spec §57~59 |
-| 10 | `agent-3-dependencies.md` 특이사항, `AGENT_2_DELIVERY.md` §10, git log |
-| 11 | Blueprint §31, Master Spec §48, `deploy/`(비어 있음) |
-| 12, 13 | 각 `AGENT_N_DELIVERY.md` 테스트 절, `AGENT_2_DELIVERY.md` 부록(보안 20항목) |
-| 14 | Blueprint §35, §47~48, Master Spec §3 |
-| 15 | 각 `AGENT_N_DELIVERY.md` §10, Blueprint §46 후속 확장 |
-| 16 | `pyproject.toml`, `package.json`, dependency 문서 3종 |
-| 17 | 본 문서 전체 |
+| 01, 02 | `IP_RISK_AGENT_MEETING_BLUEPRINT.md` 0~1, 47~48 |
+| 03 | `CODING_AGENT_MASTER_SPEC.md` 21~26, 41~44 |
+| 04 | Master Spec 66, Blueprint 46, [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) |
+| 05 | Blueprint 31~35, [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 1절, 코드 실측 라우트 |
+| 06 | `shared/contracts/**`, Master Spec 8~20·37 |
+| 07 | `backend/src/ip_risk_agent/intelligence/gemini/prompts/*.md` |
+| 08 | `rag-corpus/manifest.yaml`, `intelligence/rag/*.py`, Blueprint 19~20, Master Spec 36 |
+| 09 | [DEVELOPMENT.md](DEVELOPMENT.md), Master Spec 57~59 |
+| 10 | [INTEGRATION.md](INTEGRATION.md), [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 3절, git log |
+| 11 | Blueprint 31, Master Spec 48, `deploy/`(비어 있음) |
+| 12, 13 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 0·2절, [INTEGRATION.md](INTEGRATION.md) 8절 |
+| 14 | Blueprint 35·47~48, Master Spec 3 |
+| 15 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) 각 Plane 제약, Blueprint 46 |
+| 16 | `pyproject.toml`, `package.json`, [DEPENDENCIES.md](DEPENDENCIES.md) |
+| 17 | 이 문서 전체 |

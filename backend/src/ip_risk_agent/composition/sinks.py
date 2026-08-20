@@ -2,7 +2,7 @@
 
 Agent 2 는 ``SourceChangeSink.persist(change)`` 만 안다. 그 뒤에서 무슨 일이
 일어나는지는 모른다. 여기서 Control 의 idempotent 등록으로 잇는다
-(AGENT_2_DELIVERY 9-1, Master Spec 21).
+(docs/INTEGRATION.md 6절, Master Spec 21).
 
 ``register_source_change`` 가 내부에서 idempotency 판정, AnalysisJob 생성,
 Cloud Tasks enqueue, 관측 이벤트 발생을 모두 수행한다. 그래서 이 sink 는

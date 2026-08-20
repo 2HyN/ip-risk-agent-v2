@@ -3,7 +3,7 @@
  *
  * Control Plane UI 에 Source Plane 화면을 public integration prop 으로 주입한다.
  * 두 Plane 은 서로의 파일을 import 하지 않는다 — 연결은 이 파일에서만 일어난다
- * (AGENT_1_DELIVERY 8, Master Spec 42).
+ * (docs/INTEGRATION.md 5절, Master Spec 42).
  */
 
 import { StrictMode } from "react";

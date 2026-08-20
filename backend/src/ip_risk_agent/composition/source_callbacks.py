@@ -2,12 +2,12 @@
 
 Agent 2 는 provider 식별자와 선택 결과만 넘기고, canonical
 SourceConnection / SourceWorkspace / Mount 생성은 Control 이 한다
-(AGENT_2_DELIVERY 9-1). 그 사이 변환이 여기 있다.
+(docs/INTEGRATION.md 6절). 그 사이 변환이 여기 있다.
 
 키 설계 원칙 — ``registration_key`` / ``connection_key`` / ``source_workspace_key``
 는 재시도 동안 **같은 값**이어야 한다. Control 이 이 값을 deterministic canonical
 ID 로 바꾸므로, 매번 새 값을 만들면 재시도마다 다른 Mount 가 생긴다
-(AGENT_1_DELIVERY 5).
+(docs/INTEGRATION.md 2절).
 """
 
 from __future__ import annotations

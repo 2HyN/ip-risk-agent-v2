@@ -3,11 +3,11 @@
  *
  * Agent 1 은 `frontend/src/sources/**` 를 직접 import 하지 않고, Agent 2 는
  * Control 의 라우팅을 모른다. 그 사이를 Integration 이 이 컴포넌트로 잇는다
- * (AGENT_1_DELIVERY 8).
+ * (docs/INTEGRATION.md 5절).
  *
  * 여기서 `riskWorkspaceId` 를 현재 VWS 컨텍스트에서 읽는다. Agent 2 가
  * 개발용으로 쓰던 `"dev-workspace"` 하드코딩은 이 경로가 생기면서 사라진다
- * (AGENT_2_DELIVERY 9-4).
+ * (docs/INTEGRATION.md 5절).
  */
 
 import { useMemo, useState } from "react";

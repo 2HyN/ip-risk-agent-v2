@@ -1,7 +1,7 @@
 """Integration 이 주입하는 런타임 원시값.
 
 `clock()` 은 timezone-aware UTC datetime 을, `id_factory(kind)` 는 외부 I/O 없이
-비어 있지 않은 opaque ID 를 돌려줘야 한다 (AGENT_1_DELIVERY 4).
+비어 있지 않은 opaque ID 를 돌려줘야 한다 (docs/IMPLEMENTATION_STATUS.md 1절).
 """
 
 from __future__ import annotations

@@ -125,7 +125,7 @@ class GoogleGenAIClient:
     """google-genai SDK 구현.
 
     SDK 는 선택 의존성이다. 설치되어 있지 않으면 생성 시점에 알린다.
-    필요한 패키지는 ``agent-deliverables/agent-3-dependencies.md`` 에 적어 두었다.
+    필요한 패키지는 ``docs/DEPENDENCIES.md`` 에 적어 두었다.
     """
 
     def __init__(
@@ -142,7 +142,7 @@ class GoogleGenAIClient:
         except ImportError as exc:  # pragma: no cover - 설치 여부에 따라 갈린다
             raise RuntimeError(
                 "google-genai is required for GoogleGenAIClient; "
-                "see agent-deliverables/agent-3-dependencies.md"
+                "see docs/DEPENDENCIES.md"
             ) from exc
 
         self._genai = genai

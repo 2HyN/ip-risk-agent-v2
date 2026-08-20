@@ -11,7 +11,7 @@ Master Spec 21 은 Control 과 분석 사이에 Cloud Tasks 를 둔다. 이 프�
 알려진 계약 공백 — Integration 이 임의로 메우지 않고 기록만 한다
 ---------------------------------------------------------------------------
 `TaskEnqueuer.enqueue_change(change_event_id: str)` 는 content-free ID 하나만
-넘긴다 (AGENT_1_DELIVERY 4). 그런데 파이프라인의 다음 단계인
+넘긴다 (docs/IMPLEMENTATION_STATUS.md 1절). 그런데 파이프라인의 다음 단계인
 `SourceAdapter.fetch_snapshot(change)` 는 `SourceChange` 전체를 요구하고,
 `ControlPlaneFacade` 의 공개 메서드 중 `change_event_id` 로 `SourceChange` 를
 되짚는 것이 없다.
