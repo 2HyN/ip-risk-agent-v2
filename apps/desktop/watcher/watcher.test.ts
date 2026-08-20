@@ -239,3 +239,28 @@ test("delete followed by create of unrelated content does not get merged into MO
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("respects source-level .ipriskignore for newly created files", async () => {
+  const root = mkdtempSync(join(tmpdir(), "iprisk-watch-"));
+  writeFileSync(join(root, ".ipriskignore"), "secrets/**\n");
+  await delay(200);
+
+  const events: LocalChangeEvent[] = [];
+  const handle = await startLocalWatcher(root, (e) => events.push(e), {
+    debounceMs: TEST_DEBOUNCE_MS,
+    moveCorrelationWindowMs: TEST_MOVE_WINDOW_MS,
+  });
+
+  try {
+    mkdirSync(join(root, "secrets"), { recursive: true });
+    writeFileSync(join(root, "secrets", "key.pem"), "-----BEGIN KEY-----");
+    writeFileSync(join(root, "src.py"), "print(1)");
+    await delay(TEST_DEBOUNCE_MS + 300);
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.relativePath, "src.py");
+  } finally {
+    await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

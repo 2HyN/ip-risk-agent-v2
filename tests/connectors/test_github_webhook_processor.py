@@ -14,7 +14,7 @@ from ip_risk_agent.connectors.github.connection_lookup import (
     GitHubConnectionContext,
     InMemoryGitHubConnectionLookup,
 )
-from ip_risk_agent.connectors.github.models import GitHubCommit, GitHubCommitFile
+from ip_risk_agent.connectors.github.models import GitHubCommit, GitHubCommitFile, GitHubFileContent
 from ip_risk_agent.connectors.github.tracking_scope import GitHubTrackingScope
 from ip_risk_agent.connectors.github.webhook_processor import GitHubWebhookProcessor
 
@@ -26,8 +26,9 @@ def _sign(body: bytes) -> str:
 
 
 class FakeGitHubProvider:
-    def __init__(self, commits: dict[str, GitHubCommit]) -> None:
+    def __init__(self, commits: dict[str, GitHubCommit], ipriskignore_text: str | None = None) -> None:
         self._commits = commits
+        self._ipriskignore_text = ipriskignore_text
 
     async def get_installation_token(self):
         raise NotImplementedError
@@ -39,6 +40,12 @@ class FakeGitHubProvider:
         return self._commits[sha]
 
     async def get_file_content(self, owner, repo, path, ref):
+        if path == ".ipriskignore":
+            if self._ipriskignore_text is None:
+                from ip_risk_agent.connectors.common.errors import NotFoundError
+
+                raise NotFoundError(provider="github", safe_message=".ipriskignore not found")
+            return GitHubFileContent(path=path, sha="ignore-sha", text=self._ipriskignore_text, size=0)
         raise NotImplementedError
 
 
@@ -247,5 +254,44 @@ def test_multiple_commits_are_all_processed():
         )
 
         assert len(changes) == 2
+
+    asyncio.run(scenario())
+
+
+def test_source_level_ipriskignore_filters_out_matching_files():
+    async def scenario():
+        commit = GitHubCommit(
+            sha="sha1",
+            files=[
+                GitHubCommitFile(filename="src/a.py", status="modified", previous_filename=None),
+                GitHubCommitFile(filename="secrets/key.pem", status="modified", previous_filename=None),
+            ],
+        )
+        provider = FakeGitHubProvider(commits={"sha1": commit}, ipriskignore_text="secrets/**\n")
+        processor, _ = await _build_processor(provider, include_patterns=["**"])
+
+        body = b'{"test": true}'
+        changes = await processor.process_push_event(
+            _mount(), raw_body=body, signature_header=_sign(body), delivery_id="d1", payload=_push_payload()
+        )
+
+        assert len(changes) == 1
+        assert changes[0].artifact.display_name == "src/a.py"
+
+    asyncio.run(scenario())
+
+
+def test_no_ipriskignore_present_does_not_block_processing():
+    async def scenario():
+        commit = GitHubCommit(sha="sha1", files=[GitHubCommitFile(filename="src/a.py", status="modified", previous_filename=None)])
+        provider = FakeGitHubProvider(commits={"sha1": commit}, ipriskignore_text=None)
+        processor, _ = await _build_processor(provider, include_patterns=["src/**"])
+
+        body = b'{"test": true}'
+        changes = await processor.process_push_event(
+            _mount(), raw_body=body, signature_header=_sign(body), delivery_id="d1", payload=_push_payload()
+        )
+
+        assert len(changes) == 1
 
     asyncio.run(scenario())

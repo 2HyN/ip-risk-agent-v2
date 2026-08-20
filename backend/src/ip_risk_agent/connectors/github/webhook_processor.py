@@ -17,6 +17,7 @@ from iprisk_contracts.source_change import SourceChange
 
 from ..common.errors import InvalidWebhookError, NotFoundError
 from ..common.fingerprint import github_change_fingerprint
+from ..common.ipriskignore import is_denied_by_ipriskignore, parse_ipriskignore
 from ..common.runtime_store import GitHubRuntime, WebhookStatus
 from .connection_lookup import GitHubConnectionContext, GitHubConnectionLookup
 from .identity import encode_github_artifact_id
@@ -50,6 +51,16 @@ class GitHubWebhookProcessor:
         provider = self._provider_factory.create(connection.installation_id)
         return provider, connection
 
+    @staticmethod
+    async def _fetch_source_ignore_patterns(
+        provider: GitHubProvider, owner: str, repo: str, branch: str
+    ) -> list[str]:
+        try:
+            content = await provider.get_file_content(owner, repo, ".ipriskignore", branch)
+        except NotFoundError:
+            return []
+        return parse_ipriskignore(content.text)
+
     async def process_push_event(
         self,
         mount: MountRef,
@@ -81,11 +92,17 @@ class GitHubWebhookProcessor:
         repository_id = f"{scope.owner}/{scope.repo}"
         commit_shas = [c["id"] for c in payload.get("commits", []) if isinstance(c, dict) and c.get("id")]
 
+        source_ignore_patterns = await self._fetch_source_ignore_patterns(
+            provider, scope.owner, scope.repo, branch
+        )
+
         changes: list[SourceChange] = []
         now = datetime.now(timezone.utc)
         for sha in commit_shas:
             commit = await provider.get_commit(scope.owner, scope.repo, sha)
             for file in commit.files:
+                if is_denied_by_ipriskignore(file.filename, source_ignore_patterns):
+                    continue
                 if file.status == "renamed":
                     old_tracked = bool(file.previous_filename) and scope.is_tracked(file.previous_filename)
                     if not scope.is_tracked(file.filename) and not old_tracked:

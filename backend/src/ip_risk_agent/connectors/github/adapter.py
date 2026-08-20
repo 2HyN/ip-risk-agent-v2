@@ -35,6 +35,7 @@ from ..common.errors import (
     PermissionDeniedError,
     SourceConnectorError,
 )
+from ..common.ipriskignore import is_denied_by_ipriskignore, parse_ipriskignore
 from .connection_lookup import GitHubConnectionContext, GitHubConnectionLookup
 from .identity import decode_github_artifact_id
 from .models import GitHubProvider
@@ -70,6 +71,19 @@ class GitHubAdapter:
         provider = self._provider_factory.create(connection.installation_id)
         return provider, connection
 
+    @staticmethod
+    async def _fetch_source_ignore_patterns(
+        provider: GitHubProvider, owner: str, repo: str, branch: str
+    ) -> list[str]:
+        """repo 루트의 .ipriskignore를 읽는다. 없으면 빈 목록(제약 없음) —
+        optional deny source이지 필수 파일이 아니다 (Agent2 Spec §18)."""
+
+        try:
+            content = await provider.get_file_content(owner, repo, ".ipriskignore", branch)
+        except NotFoundError:
+            return []
+        return parse_ipriskignore(content.text)
+
     async def health(self, mount: MountRef) -> SourceHealth:
         try:
             provider, _ = await self._provider_for_mount(mount.mount_id)
@@ -99,10 +113,19 @@ class GitHubAdapter:
                 provider="github", safe_message="artifact is outside the tracked path scope"
             )
 
+        provider, _ = await self._provider_for_mount(change.mount_id)
+
+        source_ignore_patterns = await self._fetch_source_ignore_patterns(
+            provider, identity.owner, identity.repo, identity.branch
+        )
+        if is_denied_by_ipriskignore(identity.path, source_ignore_patterns):
+            raise PermissionDeniedError(
+                provider="github", safe_message="artifact is denied by source-level .ipriskignore"
+            )
+
         if change.change_type is ChangeType.DELETE:
             return self._unsupported_snapshot(change, resolved_revision=change.revision or "deleted")
 
-        provider, _ = await self._provider_for_mount(change.mount_id)
         file_content = await provider.get_file_content(
             identity.owner, identity.repo, identity.path, identity.branch
         )

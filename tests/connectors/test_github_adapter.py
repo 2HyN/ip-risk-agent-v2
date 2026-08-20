@@ -8,7 +8,7 @@ import pytest
 from iprisk_contracts.common import ChangeType, MountRef, SourceArtifactRef, SourceType
 from iprisk_contracts.source_change import SourceChange
 
-from ip_risk_agent.connectors.common.errors import PermissionDeniedError
+from ip_risk_agent.connectors.common.errors import NotFoundError, PermissionDeniedError
 from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
 from ip_risk_agent.connectors.github.adapter import GitHubAdapter
 from ip_risk_agent.connectors.github.connection_lookup import (
@@ -36,7 +36,10 @@ class FakeGitHubProvider:
         raise NotImplementedError
 
     async def get_file_content(self, owner: str, repo: str, path: str, ref: str) -> GitHubFileContent:
-        return self._files[path]
+        try:
+            return self._files[path]
+        except KeyError as exc:
+            raise NotFoundError(provider="github", safe_message=f"{path} not found") from exc
 
 
 class FakeGitHubProviderFactory:
@@ -176,5 +179,37 @@ def test_reconcile_is_safe_no_op():
         assert result.changes == []
         assert result.has_more is False
         assert result.next_cursor == "whatever"
+
+    asyncio.run(scenario())
+
+
+def test_fetch_snapshot_respects_source_level_ipriskignore():
+    async def scenario():
+        provider = FakeGitHubProvider(
+            files={
+                "src/a.py": GitHubFileContent(path="src/a.py", sha="s", text="print(1)", size=8),
+                ".ipriskignore": GitHubFileContent(
+                    path=".ipriskignore", sha="s2", text="src/a.py\n", size=9
+                ),
+            }
+        )
+        adapter = await _build_adapter(provider, include_patterns=["src/**"])
+
+        with pytest.raises(PermissionDeniedError):
+            await adapter.fetch_snapshot(_change("src/a.py"))
+
+    asyncio.run(scenario())
+
+
+def test_fetch_snapshot_proceeds_when_no_ipriskignore_present():
+    async def scenario():
+        provider = FakeGitHubProvider(
+            files={"src/a.py": GitHubFileContent(path="src/a.py", sha="s", text="print(1)", size=8)}
+        )
+        adapter = await _build_adapter(provider, include_patterns=["src/**"])
+
+        snapshot = await adapter.fetch_snapshot(_change("src/a.py"))
+
+        assert snapshot.content_scope.value == "FULL_TEXT"
 
     asyncio.run(scenario())

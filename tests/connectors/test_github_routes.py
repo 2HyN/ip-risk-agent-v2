@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from iprisk_contracts.common import MountRef, SourceType
 
+from ip_risk_agent.connectors.common.errors import NotFoundError
 from ip_risk_agent.connectors.common.change_sink import InMemorySourceChangeSink
 from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
 from ip_risk_agent.connectors.github.connection_lookup import (
@@ -46,7 +47,7 @@ class FakeGitHubProvider:
         return self._commits[sha]
 
     async def get_file_content(self, owner, repo, path, ref):
-        raise NotImplementedError
+        raise NotFoundError(provider="github", safe_message=f"{path} not found")
 
 
 class FakeGitHubProviderFactory:

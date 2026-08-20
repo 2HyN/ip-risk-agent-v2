@@ -17,6 +17,7 @@ import { readFileSync, statSync } from "node:fs";
 import { relative } from "node:path";
 
 import { DEBOUNCE_MS, MAX_FILE_BYTES, isWatchedPath } from "./filters.js";
+import { isDeniedByIpriskignore, loadIpriskignorePatterns } from "./ipriskignore.js";
 import { RootEscapeError, resolveWithinRoot } from "../security/path-guard.js";
 
 export type LocalChangeType = "CREATE" | "UPDATE" | "DELETE" | "MOVE";
@@ -79,6 +80,13 @@ export async function startLocalWatcher(
   const maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
   const moveCorrelationWindowMs = options.moveCorrelationWindowMs ?? DEFAULT_MOVE_CORRELATION_WINDOW_MS;
 
+  // Source-level .ipriskignore (Agent2 Spec §28). watcher 시작 시 한 번만
+  // 로드한다 — 파일이 없으면 빈 목록(제약 없음)이 조용히 반환된다.
+  const sourceIgnorePatterns = loadIpriskignorePatterns(canonicalRoot);
+
+  const isPathAllowed = (relativePath: string): boolean =>
+    isWatchedPath(relativePath) && !isDeniedByIpriskignore(relativePath, sourceIgnorePatterns);
+
   const pending = new Map<string, PendingEntry>();
   const contentHashCache = new Map<string, string>();
   const pendingDeletes = new Map<string, PendingDeleteEntry>();
@@ -91,7 +99,7 @@ export async function startLocalWatcher(
 
   const warmCacheFor = (absolutePath: string): void => {
     const relativePath = relative(canonicalRoot, absolutePath);
-    if (!isWatchedPath(relativePath)) {
+    if (!isPathAllowed(relativePath)) {
       return;
     }
     try {
@@ -182,7 +190,7 @@ export async function startLocalWatcher(
 
     const relativePath = relative(canonicalRoot, absolutePath);
 
-    if (!isWatchedPath(relativePath)) {
+    if (!isPathAllowed(relativePath)) {
       return;
     }
 
