@@ -7,7 +7,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.json && vite build",
-    "test": "node --test \"dist/sources/platform/*.test.js\"",
+    "test": "node --test \"dist/sources/platform/*.test.js\" \"dist/sources/api/*.test.js\"",
     "verify:resolution": "node ../scripts/verify_typescript_resolution.mjs"
   },
   "dependencies": {

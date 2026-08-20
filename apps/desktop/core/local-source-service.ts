@@ -14,21 +14,21 @@ import {
 } from "../local-registry/artifact-resolver.js";
 import type { DesktopDevice } from "../local-registry/device-identity.js";
 import type { LocalMountRecord, LocalRegistryStore } from "../local-registry/store.js";
+import type { MountRegistrationClient } from "../main/mount-registration-client.js";
 
 export interface DirectoryPicker {
   pickDirectory(): Promise<string | null>;
 }
 
 export interface ArtifactOpener {
+  /** 성공하면 빈 문자열, 실패하면 에러 메시지를 반환한다 (Electron shell.openPath와 동일한 계약). */
   openPath(absolutePath: string): Promise<string>;
   showInFolder(absolutePath: string): void;
 }
 
 export interface ConnectLocalMountParams {
   canonicalRootPath: string;
-  serverMountId: string;
   riskWorkspaceId: string;
-  sourceWorkspaceId: string;
   includePatterns: string[];
   excludePatterns: string[];
 }
@@ -50,6 +50,7 @@ export class LocalSourceService {
     private readonly registry: LocalRegistryStore,
     private readonly device: DesktopDevice,
     private readonly opener: ArtifactOpener,
+    private readonly mountRegistrationClient: MountRegistrationClient,
     private readonly handleGenerator: LocalMountHandleGenerator = new LocalMountHandleGenerator()
   ) {}
 
@@ -62,13 +63,22 @@ export class LocalSourceService {
   }
 
   async connectLocalMount(params: ConnectLocalMountParams): Promise<LocalMountRecord> {
+    // 1단계: 서버에 등록 요청 -> server_mount_id/source_workspace_id 발급받음.
+    const { serverMountId, sourceWorkspaceId } = await this.mountRegistrationClient.registerMount({
+      riskWorkspaceId: params.riskWorkspaceId,
+      deviceId: this.device.deviceId,
+      includePatterns: params.includePatterns,
+      excludePatterns: params.excludePatterns,
+    });
+
+    // 2단계: 발급받은 값으로 로컬에 저장 + 감시 준비.
     const record: LocalMountRecord = {
       localMountHandle: this.handleGenerator.generate(),
-      serverMountId: params.serverMountId,
+      serverMountId,
       canonicalRootPath: params.canonicalRootPath,
       deviceId: this.device.deviceId,
       riskWorkspaceId: params.riskWorkspaceId,
-      sourceWorkspaceId: params.sourceWorkspaceId,
+      sourceWorkspaceId,
       includePatterns: params.includePatterns,
       excludePatterns: params.excludePatterns,
       status: "ACTIVE",

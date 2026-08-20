@@ -23,6 +23,7 @@ import { startLocalWatcher, type LocalWatcherHandle } from "../watcher/watcher.j
 import { DesktopEventReporter, FetchHttpClient } from "./desktop-event-reporter.js";
 import { ElectronArtifactOpener } from "./electron-artifact-opener.js";
 import { ElectronDirectoryPicker } from "./electron-directory-picker.js";
+import { HttpMountRegistrationClient } from "./mount-registration-client.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -34,14 +35,25 @@ async function bootstrap(): Promise<void> {
   const deviceStore = new FileDeviceIdentityStore(join(userDataDir, "device-identity.json"));
   const device = await ensureDeviceIdentity(deviceStore, hostname());
 
+  const httpClient = new FetchHttpClient(SERVER_BASE_URL);
+  const mountRegistrationClient = new HttpMountRegistrationClient(httpClient);
+
+  // 앱이 뜰 때마다 이 컴퓨터를 서버에 등록해둔다 (device_id를 app_user에
+  // 연결하는 건 서버 콜백 몫 — 우리는 호출만 한다).
+  try {
+    await mountRegistrationClient.registerDevice(device.deviceId, device.deviceLabel);
+  } catch (err) {
+    console.error("failed to register this device with the server:", err);
+  }
+
   const service = new LocalSourceService(
     new ElectronDirectoryPicker(),
     registry,
     device,
-    new ElectronArtifactOpener()
+    new ElectronArtifactOpener(),
+    mountRegistrationClient
   );
 
-  const httpClient = new FetchHttpClient(SERVER_BASE_URL);
   const activeWatchers = new Map<string, LocalWatcherHandle>();
 
   const startWatchingMount = async (record: LocalMountRecord): Promise<void> => {
