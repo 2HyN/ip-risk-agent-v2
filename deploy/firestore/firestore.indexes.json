@@ -113,16 +113,6 @@
           "order": "ASCENDING"
         }
       ]
-    },
-    {
-      "collectionGroup": "change_events",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "risk_workspace_id",
-          "order": "ASCENDING"
-        }
-      ]
     }
   ],
   "fieldOverrides": []

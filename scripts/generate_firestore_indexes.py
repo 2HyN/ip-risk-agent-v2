@@ -38,6 +38,27 @@ from ip_risk_agent.persistence.core_firestore.schema import (  # noqa: E402
 )
 
 
+def composite_indexes() -> list:
+    """복합 인덱스만 남긴다.
+
+    manifest 는 "이 query 가 이 필드들을 쓴다"는 요구사항이라 필드가 하나인
+    항목도 있다. 그런데 Firestore 는 단일 필드를 **자동으로 색인**하므로 그것을
+    복합 인덱스로 만들려 하면 거부한다.
+
+        INVALID_ARGUMENT: this index is not necessary,
+        configure using single field index controls
+
+    요구사항 자체는 유효하므로 manifest 에서 빼지 않고, 배포 산출물에서만
+    제외한다.
+    """
+    return [index for index in REQUIRED_COMPOSITE_INDEXES if len(index.fields) > 1]
+
+
+def single_field_indexes() -> list:
+    """자동 색인에 맡기는 항목. 무엇이 왜 빠졌는지 알 수 있게 남긴다."""
+    return [index for index in REQUIRED_COMPOSITE_INDEXES if len(index.fields) == 1]
+
+
 def build_document() -> dict:
     """Firebase CLI 가 그대로 먹는 형식.
 
@@ -52,7 +73,7 @@ def build_document() -> dict:
                 {"fieldPath": field, "order": "ASCENDING"} for field in index.fields
             ],
         }
-        for index in REQUIRED_COMPOSITE_INDEXES
+        for index in composite_indexes()
     ]
     return {"indexes": indexes, "fieldOverrides": []}
 
@@ -75,7 +96,7 @@ def render_script() -> str:
         'DATABASE="${FIRESTORE_DATABASE:-(default)}"',
         "",
     ]
-    for index in REQUIRED_COMPOSITE_INDEXES:
+    for index in composite_indexes():
         parts = [
             "gcloud firestore indexes composite create \\",
             '    --database="$DATABASE" \\',
@@ -92,7 +113,7 @@ def render_script() -> str:
 
     lines.extend(
         [
-            f'echo "요청한 인덱스 {len(REQUIRED_COMPOSITE_INDEXES)}개."',
+            f'echo "요청한 복합 인덱스 {len(composite_indexes())}개."',
             'echo "생성 상태 확인:"',
             "echo \"  gcloud firestore indexes composite list "
             '--format=\'table(name.basename(),state)\'"',
@@ -125,14 +146,19 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 1
-        print(f"up to date: {len(REQUIRED_COMPOSITE_INDEXES)} indexes")
+        print(f"up to date: {len(composite_indexes())} composite indexes")
         return 0
 
     for path, content in targets:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8", newline="\n")
         print(f"wrote {path.relative_to(ROOT)}")
-    print(f"{len(REQUIRED_COMPOSITE_INDEXES)} indexes")
+    print(f"{len(composite_indexes())} composite indexes")
+    for index in single_field_indexes():
+        print(
+            f"  skipped (Firestore auto-indexes single fields): "
+            f"{index.collection}.{index.fields[0]}"
+        )
     return 0
 
 

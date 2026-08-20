@@ -54,11 +54,6 @@ gcloud firestore indexes composite create \
     --field-config=field-path=record_kind,order=ascending \
     --field-config=field-path=risk_workspace_id,order=ascending
 
-gcloud firestore indexes composite create \
-    --database="$DATABASE" \
-    --collection-group=change_events \
-    --field-config=field-path=risk_workspace_id,order=ascending
-
-echo "요청한 인덱스 8개."
+echo "요청한 복합 인덱스 7개."
 echo "생성 상태 확인:"
 echo "  gcloud firestore indexes composite list --format='table(name.basename(),state)'"
