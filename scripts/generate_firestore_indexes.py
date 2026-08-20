@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -30,12 +31,34 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "deploy" / "firestore" / "firestore.indexes.json"
 SCRIPT_OUTPUT = ROOT / "deploy" / "firestore" / "create-indexes.sh"
 
-sys.path.insert(0, str(ROOT / "backend" / "src"))
-sys.path.insert(0, str(ROOT / "shared" / "contracts" / "python"))
-
-from ip_risk_agent.persistence.core_firestore.schema import (  # noqa: E402
-    REQUIRED_COMPOSITE_INDEXES,
+# schema.py 는 표준 라이브러리만 쓴다. 그런데 패키지로 import 하면
+# core_firestore/__init__.py 가 Firestore SDK 까지 끌어와서, 의존성이 설치되지
+# 않은 Python 으로는 실행할 수 없게 된다. 배포 스크립트가 어떤 Python 으로
+# 돌든 동작해야 하므로 파일을 직접 읽어 들인다.
+_SCHEMA_PATH = (
+    ROOT
+    / "backend"
+    / "src"
+    / "ip_risk_agent"
+    / "persistence"
+    / "core_firestore"
+    / "schema.py"
 )
+
+
+def _load_schema():
+    spec = importlib.util.spec_from_file_location("_iprisk_schema", _SCHEMA_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {_SCHEMA_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    # dataclass 데코레이터가 cls.__module__ 로 모듈을 되짚으므로, 실행 전에
+    # sys.modules 에 등록해 둬야 한다.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+REQUIRED_COMPOSITE_INDEXES = _load_schema().REQUIRED_COMPOSITE_INDEXES
 
 
 def composite_indexes() -> list:
