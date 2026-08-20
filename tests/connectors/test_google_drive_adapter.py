@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -20,7 +20,12 @@ from ip_risk_agent.connectors.google_drive.connection_lookup import (
     DriveConnectionContext,
     InMemoryDriveConnectionLookup,
 )
-from ip_risk_agent.connectors.google_drive.models import DriveChange, DriveChangePage, DriveFile
+from ip_risk_agent.connectors.google_drive.models import (
+    DriveChange,
+    DriveChangePage,
+    DriveFile,
+    DriveWatchChannel,
+)
 from ip_risk_agent.connectors.google_drive.tracking_scope import DriveTrackingScope
 
 
@@ -32,6 +37,7 @@ class FakeDriveProvider:
         self._start_token = start_token
         self.export_called = False
         self.get_start_page_token_called = False
+        self.watch_requests = []
 
     def get_access_token(self):
         return ("fake-token", None)
@@ -48,6 +54,14 @@ class FakeDriveProvider:
 
     def list_changes(self, page_token: str) -> DriveChangePage:
         return self._changes_by_token[page_token]
+
+    def watch_changes(self, **request) -> DriveWatchChannel:
+        self.watch_requests.append(request)
+        return DriveWatchChannel(
+            channel_id=request["channel_id"],
+            resource_id="resource-1",
+            expiration_millis=request["expiration_millis"],
+        )
 
     def read_text(self, file_id: str, mime_type: str) -> str:
         return self._texts[file_id]
@@ -300,6 +314,49 @@ def test_reconcile_persists_cursor_when_final_page():
         saved = await runtime_store.load("conn-1")
         assert saved is not None
         assert saved.change_cursor == "final-cursor"
+
+    asyncio.run(scenario())
+
+
+def test_watch_renewal_persists_channel_and_reconcile_preserves_it():
+    async def scenario():
+        now = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)
+        page = DriveChangePage(
+            changes=[],
+            next_page_token=None,
+            new_start_page_token="cursor-after-reconcile",
+        )
+        provider = FakeDriveProvider(changes_by_token={"start-1": page})
+        adapter, _, _, runtime_store = await _build_adapter(
+            provider,
+            tracked_ids=[],
+        )
+
+        assert await adapter.renew_watch(
+            _mount(),
+            address="https://api.example.com/webhooks/google-drive",
+            channel_token="opaque-channel-token",
+            now=now,
+        )
+        watched = await runtime_store.load("conn-1")
+        assert watched is not None
+        assert watched.watch_resource_id == "resource-1"
+        assert watched.watch_expiry == now + timedelta(days=6)
+        assert provider.watch_requests[0]["page_token"] == "start-1"
+
+        await adapter.reconcile(_mount(), cursor=None)
+        reconciled = await runtime_store.load("conn-1")
+        assert reconciled is not None
+        assert reconciled.change_cursor == "cursor-after-reconcile"
+        assert reconciled.watch_resource_id == "resource-1"
+
+        assert not await adapter.renew_watch(
+            _mount(),
+            address="https://api.example.com/webhooks/google-drive",
+            channel_token="opaque-channel-token",
+            now=now + timedelta(hours=1),
+        )
+        assert len(provider.watch_requests) == 1
 
     asyncio.run(scenario())
 

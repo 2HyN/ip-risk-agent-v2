@@ -160,6 +160,16 @@ def test_real_production_composer_builds_role_specific_complete_containers(monke
     ] == "configured"
     assert api.source_routers.web and api.source_routers.webhooks
     assert api.source_routers.desktop
+    assert {
+        "/internal/scheduler/drive-watch-renewal",
+        "/internal/scheduler/drive-reconciliation",
+        "/internal/scheduler/expired-state-cleanup",
+        "/internal/scheduler/source-health-refresh",
+    } <= {
+        route.path
+        for router in api.extra_api_routers
+        for route in router.routes
+    }
 
     monkeypatch.setattr(production, "GoogleGenAIClient", FakeModelClient)
     worker_settings = _settings(AppRole.WORKER)

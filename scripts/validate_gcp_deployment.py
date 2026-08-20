@@ -36,8 +36,18 @@ ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
 TTL_COLLECTIONS = {
     "source_operational_oauth_states",
-    "source_operational_pending_connections",
     "source_operational_device_challenges",
+}
+SCHEDULER_ROUTES = (
+    "/internal/scheduler/drive-watch-renewal",
+    "/internal/scheduler/drive-reconciliation",
+    "/internal/scheduler/expired-state-cleanup",
+    "/internal/scheduler/source-health-refresh",
+)
+RAG_SOURCE_IDS = {
+    "agpl-3.0-obligations",
+    "lgpl-2.1-obligations",
+    "permissive-notice",
 }
 COMMON_ENVIRONMENT = {
     "APP_ENV",
@@ -94,6 +104,20 @@ def validate(root: Path = ROOT) -> list[str]:
         deploy / "storage-lifecycle.json",
         deploy / "v2-resource-contract.yaml",
         deploy / "iam-policy-contract.yaml",
+        root / "rag-corpus" / "manifest.yaml",
+        root
+        / "backend"
+        / "src"
+        / "ip_risk_agent"
+        / "composition"
+        / "scheduler_routes.py",
+        root
+        / "backend"
+        / "src"
+        / "ip_risk_agent"
+        / "composition"
+        / "production.py",
+        root / "backend" / "src" / "ip_risk_agent" / "gcp" / "cloud_tasks.py",
     )
     for path in required:
         if not path.is_file() or path.stat().st_size == 0:
@@ -101,6 +125,59 @@ def validate(root: Path = ROOT) -> list[str]:
 
     if errors:
         return errors
+
+    scheduler_source = (
+        root
+        / "backend"
+        / "src"
+        / "ip_risk_agent"
+        / "composition"
+        / "scheduler_routes.py"
+    ).read_text("utf-8")
+    scheduler_suffixes = tuple(
+        route.removeprefix("/internal/scheduler") for route in SCHEDULER_ROUTES
+    )
+    if 'prefix="/internal/scheduler"' not in scheduler_source or any(
+        f'@router.post("{suffix}"' not in scheduler_source
+        for suffix in scheduler_suffixes
+    ):
+        errors.append(
+            "production scheduler router does not expose the four canonical routes"
+        )
+    production_source = (
+        root / "backend" / "src" / "ip_risk_agent" / "composition" / "production.py"
+    ).read_text("utf-8")
+    if (
+        "ProductionSchedulerOperations(" not in production_source
+        or "create_scheduler_router(" not in production_source
+        or "extra_api_routers=(scheduler,)" not in production_source
+    ):
+        errors.append("production API composition does not mount SchedulerOperations")
+
+    tasks_source = (
+        root / "backend" / "src" / "ip_risk_agent" / "gcp" / "cloud_tasks.py"
+    ).read_text("utf-8")
+    if (
+        '"/internal/tasks/analyze-change"' not in tasks_source
+        or '{"change_event_id": change_event_id}' not in tasks_source
+    ):
+        errors.append("Cloud Tasks endpoint/payload contract mismatch")
+
+    dockerfile = (root / "Dockerfile").read_text("utf-8")
+    dockerignore = (root / ".dockerignore").read_text("utf-8").splitlines()
+    required_docker_tokens = (
+        "COPY --from=web /workspace/frontend/dist frontend/dist",
+        "COPY backend backend",
+        "COPY shared/contracts/python shared/contracts/python",
+        "USER 10001:10001",
+        "ip_risk_agent.main:create_app",
+    )
+    if any(token not in dockerfile for token in required_docker_tokens):
+        errors.append("Dockerfile is missing a shared-image production invariant")
+    if ".venv" not in dockerignore or ".env.*" not in dockerignore:
+        errors.append("Docker build context must exclude virtualenv and environment files")
+    if any(line.startswith("!") and ".env" in line for line in dockerignore):
+        errors.append("Docker build context must not re-include environment files")
 
     indexes = json.loads((deploy / "firestore.indexes.json").read_text("utf-8"))
     actual = {
@@ -121,16 +198,22 @@ def validate(root: Path = ROOT) -> list[str]:
             ("record.owner", "record.repo"),
         )
     )
-    missing_indexes = sorted(expected - actual)
-    if missing_indexes:
-        errors.append(f"missing canonical composite indexes: {missing_indexes}")
+    if actual != expected or len(actual) != 8 or len(indexes["indexes"]) != 8:
+        errors.append(
+            "composite index contract mismatch: expected exactly 8 canonical indexes"
+        )
 
     ttl = {
         item["collectionGroup"]
         for item in indexes["fieldOverrides"]
         if item.get("fieldPath") == "expires_at" and item.get("ttl") is True
     }
-    if ttl != TTL_COLLECTIONS:
+    ttl_entries = [
+        item
+        for item in indexes["fieldOverrides"]
+        if item.get("fieldPath") == "expires_at" and item.get("ttl") is True
+    ]
+    if ttl != TTL_COLLECTIONS or len(ttl_entries) != 2:
         errors.append(f"TTL collection mismatch: expected {sorted(TTL_COLLECTIONS)}")
 
     for name in (
@@ -160,7 +243,34 @@ def validate(root: Path = ROOT) -> list[str]:
                 f"expected {sorted(expected_names)}, got {sorted(actual_names)}"
             )
 
+    optional_environment = cloud_run.get("optionalEnvironment", {})
+    expected_optional = {
+        "common": {"LOG_LEVEL"},
+        "worker": {
+            "GEMINI_MODEL_ID",
+            "RAG_REGION",
+            "RAG_CORPUS_ID",
+            "RAG_CORPUS_VERSION",
+        },
+    }
+    for role, expected_names in expected_optional.items():
+        actual_names = set(optional_environment.get(role, ()))
+        if actual_names != expected_names:
+            errors.append(f"Cloud Run {role} optional environment mismatch")
+
     _validate_v2_namespace(deploy, cloud_run, errors)
+
+    rag_manifest = yaml.safe_load(
+        (root / "rag-corpus" / "manifest.yaml").read_text("utf-8")
+    )
+    rag_sources = rag_manifest.get("sources", [])
+    if (
+        rag_manifest.get("corpus_version") != "2026-08-14.1"
+        or {source.get("source_id") for source in rag_sources} != RAG_SOURCE_IDS
+        or len(rag_sources) != 3
+        or any(source.get("approved_for_rag") is not True for source in rag_sources)
+    ):
+        errors.append("RAG corpus must contain exactly the three approved v2 sources")
 
     lifecycle = json.loads((deploy / "storage-lifecycle.json").read_text("utf-8"))
     rules = lifecycle.get("lifecycle", {}).get("rule", [])
@@ -215,7 +325,7 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
     services = cloud_run.get("services", {})
     expected_image = (
         f"{REGION}-docker.pkg.dev/{PROJECT_ID}/{ARTIFACT_REPOSITORY}/"
-        f"{IMAGE_NAME}:${{IMAGE_TAG}}"
+        f"{IMAGE_NAME}@${{IMAGE_DIGEST}}"
     )
     expected_services = {
         "api": (API_SERVICE, API_SERVICE_ACCOUNT, True),
@@ -231,6 +341,10 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
             errors.append(f"Cloud Run {role} must use canonical v2 application image")
         if service.get("allowUnauthenticated") is not unauthenticated:
             errors.append(f"Cloud Run {role} authentication policy mismatch")
+    if services.get("worker", {}).get("ingress") != "internal":
+        errors.append("Cloud Run Worker must use internal ingress")
+    if services.get("api", {}).get("ingress") != "all":
+        errors.append("Cloud Run API ingress contract mismatch")
     if services.get("api", {}).get("image") != services.get("worker", {}).get("image"):
         errors.append("API and Worker must use the same immutable image contract")
 
@@ -290,6 +404,34 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
         errors.append("Cloud Build must not use the legacy Artifact Registry repository")
     if substitutions.get("_IMAGE") != IMAGE_NAME:
         errors.append("Cloud Build image name contract mismatch")
+    expected_build_identity = (
+        f"projects/{PROJECT_ID}/serviceAccounts/{DEPLOY_SERVICE_ACCOUNT}"
+    )
+    if cloudbuild.get("serviceAccount") != expected_build_identity:
+        errors.append("Cloud Build must execute as the canonical v2 deploy identity")
+    if cloudbuild.get("options", {}).get("logging") != "CLOUD_LOGGING_ONLY":
+        errors.append("user-specified Cloud Build identity requires CLOUD_LOGGING_ONLY")
+    image_prefix = (
+        f"${{_REGION}}-docker.pkg.dev/${{PROJECT_ID}}/"
+        f"${{_REPOSITORY}}/${{_IMAGE}}:"
+    )
+    build_images = cloudbuild.get("images", [])
+    if build_images != [image_prefix + "${SHORT_SHA}"]:
+        errors.append("Cloud Build must publish only the commit-tagged v2 image")
+    steps = {step.get("id"): step for step in cloudbuild.get("steps", ())}
+    expected_smoke_imports = {
+        "smoke-import-api": "from ip_risk_agent.main import create_app",
+        "smoke-import-worker": "from ip_risk_agent.worker import create_app",
+    }
+    for step_id, import_statement in expected_smoke_imports.items():
+        step = steps.get(step_id, {})
+        args = step.get("args", [])
+        if (
+            step.get("name") != "gcr.io/cloud-builders/docker"
+            or args[:4] != ["run", "--rm", "--entrypoint", "python"]
+            or import_statement not in " ".join(str(arg) for arg in args)
+        ):
+            errors.append(f"Cloud Build {step_id} must run the locally built image")
 
     queue = yaml.safe_load((deploy / "cloud-tasks-queue.yaml").read_text("utf-8"))[
         "queue"
@@ -300,6 +442,14 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
     scheduler = yaml.safe_load((deploy / "scheduler-jobs.yaml").read_text("utf-8"))
     if tuple(job.get("name") for job in scheduler.get("jobs", ())) != SCHEDULER_JOBS:
         errors.append("Cloud Scheduler jobs violate the v2 namespace")
+    if tuple(job.get("path") for job in scheduler.get("jobs", ())) != SCHEDULER_ROUTES:
+        errors.append("Cloud Scheduler jobs do not match the four production routes")
+    if any(
+        job.get("body")
+        != {"cursor": None, "limit": (500 if index == 2 else 100)}
+        for index, job in enumerate(scheduler.get("jobs", ()))
+    ):
+        errors.append("Cloud Scheduler request bodies violate the bounded cursor contract")
     defaults = scheduler.get("defaults", {})
     if defaults.get("serviceAccountEmail") != "${SCHEDULER_SERVICE_ACCOUNT}":
         errors.append("Cloud Scheduler caller service account contract mismatch")
@@ -395,18 +545,42 @@ def _validate_iam_contract(iam: dict, errors: list[str]) -> None:
         errors.append("fixed Secret Manager access matrix violates the v2 role contract")
 
     runtime_roles = {
-        binding.get("role") for binding in bindings.values() if isinstance(binding, dict)
+        binding.get("role")
+        for group in (bindings, iam.get("buildBindings", {}))
+        for binding in group.values()
+        if isinstance(binding, dict)
     }
     forbidden = {"roles/owner", "roles/editor", "roles/secretmanager.admin"}
     if runtime_roles & forbidden:
         errors.append("IAM contract grants a forbidden broad runtime role")
+
+    expected_build_bindings = {
+        "buildLogs": {
+            "role": "roles/logging.logWriter",
+            "member": DEPLOY_SERVICE_ACCOUNT,
+            "resource": f"projects/{PROJECT_ID}",
+        },
+        "buildServiceAgentToken": {
+            "role": "roles/iam.serviceAccountTokenCreator",
+            "member": (
+                f"service-{PROJECT_NUMBER}@gcp-sa-cloudbuild.iam.gserviceaccount.com"
+            ),
+            "resource": (
+                f"projects/{PROJECT_ID}/serviceAccounts/{DEPLOY_SERVICE_ACCOUNT}"
+            ),
+        },
+    }
+    if iam.get("buildBindings") != expected_build_bindings:
+        errors.append("Cloud Build execution/logging IAM contract mismatch")
 
     dynamic = iam.get("dynamicCredentialPermissions", {})
     if dynamic.get("creator", {}).get("permissions") != [
         "secretmanager.secrets.create"
     ]:
         errors.append("dynamic credential creator must use the minimal create permission")
-    expected_prefix = f"projects/{PROJECT_ID}/secrets/{DYNAMIC_CREDENTIAL_SECRET_PREFIX}-"
+    expected_prefix = (
+        f"projects/{PROJECT_NUMBER}/secrets/{DYNAMIC_CREDENTIAL_SECRET_PREFIX}-"
+    )
     for name, permission in (
         ("versionManager", "secretmanager.versions.add"),
         ("accessor", "secretmanager.versions.access"),

@@ -895,9 +895,9 @@ credential을 준비한 뒤 live marker를 별도 재실행한다.
 
 ### 남은 blocker
 
-- **repository**: `SchedulerOperations`의 Drive watch renewal/reconciliation,
-  expired-state cleanup, source health refresh 구현과 API router wiring은 아직 없다.
-  해결 전 `deploy/scheduler-jobs.yaml` job을 enabled 상태로 배포하지 않는다.
+- **repository (당시 상태)**: `SchedulerOperations`의 Drive watch renewal/reconciliation,
+  expired-state cleanup, source health refresh 구현과 API router wiring이 없었다. 아래
+  predeployment readiness 후속 작업에서 해결했다.
 - **external**: 실제 GCP project/IAM/Secret version/index/bucket/queue/image와 provider
   credential이 없어 ADC 권한 및 live E2E는 아직 실행하지 않았다.
 - Firestore emulator와 Docker/Cloud Build image 검증은 해당 runtime이 있는 배포 환경에서
@@ -967,8 +967,8 @@ validator failure로 확인했다.
 
 ### 남은 blocker
 
-- repository: 기존과 동일하게 `SchedulerOperations` 네 maintenance 구현과 API router
-  wiring이 없다. 해결 전 canonical v2 Scheduler jobs도 생성/enable하지 않는다.
+- repository (당시 상태): `SchedulerOperations` 네 maintenance 구현과 API router wiring이
+  없었으며, 아래 predeployment readiness 후속 작업에서 해결했다.
 - external: named Firestore DB, v2 IAM/resource/secret/OAuth client/RAG corpus/image를 실제로
   만들고 ADC/IAM condition/live E2E를 검증해야 한다.
 - dynamic credential secret create permission은 GCP IAM 특성상 project parent scope다.
@@ -978,3 +978,55 @@ validator failure로 확인했다.
 
 현재 Phase 9 gate는 계속 **진행 중**이다. repository 내부 v2 namespace contract는
 수렴했으며 실제 shared project에는 아직 어떤 변경도 적용하지 않았다.
+
+## Phase 9 repository predeployment readiness 완결
+
+### 범위
+
+- 시작 HEAD: `3d307fe`
+- 실제 GCP resource/IAM/build/deploy 작업은 수행하지 않았다.
+- production Scheduler, Cloud Build 실행 identity, index/TTL 및 전체 v2 preflight를
+  repository 내부에서 완결하는 작업이다.
+
+### 구현 결과
+
+1. Drive changes watch를 실제 Google provider의 `changes.watch`에 연결하고 channel/resource/
+   expiry와 change cursor를 기존 durable Drive runtime에 보존한다. renewal은 만료 24시간
+   전 새 channel로 교체하며 중복 delivery는 기존 fingerprint intake로 무해화한다.
+2. production Scheduler는 Drive tracking, GitHub tracking, Local runtime, operational
+   pending/OAuth/device store와 Control facade를 재사용한다. 네 route가 API composition에
+   mount되고 `iprisk-v2-scheduler` OIDC identity만 허용한다.
+3. Drive reconciliation은 mount별 provider page를 끝까지 처리해 content-free SourceChange를
+   기존 sink에 전달한다. source health는 adapter 결과를 canonical connection/workspace/mount
+   status로 idempotent하게 수렴한다.
+4. expired cleanup은 bounded cursor/limit으로 동작하며 OAuth state, device challenge와
+   만료된 `PENDING` connection만 삭제한다. ACTIVE pending record가 durable credential lookup에
+   필요하므로 해당 collection의 TTL을 제거했다.
+5. Firestore composite index는 GitHub owner/repo query를 포함한 정확히 8개, TTL은 정확히
+   2개로 manifest/validator/배포 문서를 동기화했다.
+6. Cloud Build는 `iprisk-v2-deploy` user-specified service account와
+   `CLOUD_LOGGING_ONLY`를 명시한다. 이 identity는 v2 repository Writer와 Logs Writer만,
+   Cloud Build service agent는 해당 identity Token Creator만 요구한다.
+7. Cloud Run API/Worker는 동일 `application@${IMAGE_DIGEST}`를 사용한다. validator는
+   namespace, role env, IAM/secret, Scheduler job-route, build identity, 8-index/2-TTL,
+   Docker context와 승인 RAG 3개 문서를 pure offline gate로 검사한다.
+
+### 검증 상태
+
+- Python compile / pip check: 통과 / broken requirement 없음.
+- 전체 Python non-live: `626 passed, 1 skipped, 10 deselected`.
+- frozen pnpm install, contract generate/diff, typecheck/build/resolution: 통과.
+- Frontend / Desktop: `30 passed` / `70 passed, 2 skipped`.
+- deployment validator: `GCP deployment inputs: valid`.
+- RAG dry-run: 승인 3 documents, checksum/version 일치, external write 없음.
+- API/Worker module import smoke와 `git diff --check`: 통과.
+- Docker CLI가 host에 없어 실제 local image build는 미실행했다. Dockerfile/build context와
+  Cloud Build의 API/Worker smoke step은 repository validator로 정적 검증했다.
+- 실제 shared GCP project에는 어떤 변경도 적용하지 않았다.
+
+### gate 판정
+
+- repository-side predeployment blocker: 없음.
+- external: named database/resource/IAM/secret/OAuth/GitHub App/RAG corpus 생성, Cloud Build,
+  Docker image runtime smoke와 live ADC/provider E2E가 남아 있다.
+- 최종 RC commit SHA와 clean status는 commit 완료 후 이 작업의 완료 보고에 기록한다.

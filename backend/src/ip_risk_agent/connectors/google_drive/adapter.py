@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
+from uuid import uuid4
 
 from iprisk_contracts.common import (
     ArtifactKind,
@@ -100,6 +101,67 @@ class GoogleDriveAdapter:
         except SourceConnectorError:
             status = SourceHealthStatus.DEGRADED
         return SourceHealth(status=status, checked_at=datetime.now(timezone.utc), safe_metadata={})
+
+    async def renew_watch(
+        self,
+        mount: MountRef,
+        *,
+        address: str,
+        channel_token: str,
+        now: datetime,
+        renewal_window: timedelta = timedelta(hours=24),
+        lifetime: timedelta = timedelta(days=6),
+    ) -> bool:
+        """Replace an absent/expiring Drive changes channel.
+
+        Drive permits overlapping channels and does not offer in-place renewal. A
+        retry may therefore leave an extra short-lived channel, but the stored
+        channel remains authoritative and duplicate change intake is fingerprinted.
+        """
+
+        provider, connection = await self._provider_for_mount(mount.mount_id)
+        runtime: DriveRuntime | None = await self._runtime_store.load(
+            connection.connection_id
+        )
+        if (
+            runtime is not None
+            and runtime.watch_channel_id is not None
+            and runtime.watch_resource_id is not None
+            and runtime.watch_expiry is not None
+            and runtime.watch_expiry > now + renewal_window
+        ):
+            await self._persist_refreshed_token(connection, provider)
+            return False
+
+        page_token = runtime.change_cursor if runtime is not None else None
+        if page_token is None:
+            page_token = provider.get_start_page_token()
+        requested_expiry = now + lifetime
+        channel = provider.watch_changes(
+            page_token=page_token,
+            channel_id=str(uuid4()),
+            address=address,
+            channel_token=channel_token,
+            expiration_millis=int(requested_expiry.timestamp() * 1000),
+        )
+        expiry = datetime.fromtimestamp(
+            channel.expiration_millis / 1000,
+            tz=timezone.utc,
+        )
+        next_runtime = runtime or DriveRuntime(connection_id=connection.connection_id)
+        await self._runtime_store.save(
+            connection.connection_id,
+            next_runtime.model_copy(
+                update={
+                    "change_cursor": page_token,
+                    "watch_channel_id": channel.channel_id,
+                    "watch_resource_id": channel.resource_id,
+                    "watch_expiry": expiry,
+                }
+            ),
+        )
+        await self._persist_refreshed_token(connection, provider)
+        return True
 
     async def fetch_snapshot(self, change: SourceChange) -> SourceSnapshot:
         file_id = change.artifact.source_artifact_id
@@ -243,11 +305,12 @@ class GoogleDriveAdapter:
         next_cursor = page.next_page_token or page.new_start_page_token
 
         if not has_more and page.new_start_page_token:
+            runtime = await self._runtime_store.load(connection.connection_id)
+            next_runtime = runtime or DriveRuntime(connection_id=connection.connection_id)
             await self._runtime_store.save(
                 connection.connection_id,
-                DriveRuntime(
-                    connection_id=connection.connection_id,
-                    change_cursor=page.new_start_page_token,
+                next_runtime.model_copy(
+                    update={"change_cursor": page.new_start_page_token}
                 ),
             )
 

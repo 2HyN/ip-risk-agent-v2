@@ -44,6 +44,7 @@ from ip_risk_agent.connectors.local.routes import (
 from ip_risk_agent.core.common import stable_key
 from ip_risk_agent.gcp.identity import GoogleOidcTaskAuthenticator
 from ip_risk_agent.gcp.operational_firestore import (
+    FirestoreMaintenanceStore,
     FirestoreOAuthStateStore,
     FirestorePendingConnectionStore,
     FirestoreRuntimeStore,
@@ -59,6 +60,8 @@ from .container import RuntimeComposition, RuntimeCompositionContext
 from .device_auth import DeviceSourceAuthorizer, DeviceWorkspaceAuthorizer
 from .providers import SourceRouterBundle
 from .runtime import utc_now
+from .scheduler_operations import ProductionSchedulerOperations
+from .scheduler_routes import create_scheduler_router
 from .settings import AppRole, Settings, SettingsError
 from .sinks import ControlSourceChangeSink
 from .source_auth import SessionSourceAuthorizer, SourceResourceScope
@@ -181,6 +184,8 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
     assert settings.drive_client_secret is not None
     assert settings.drive_redirect_uri is not None
     assert settings.drive_watch_channel_token is not None
+    assert settings.drive_webhook_base_url is not None
+    assert settings.scheduler_service_account is not None
     assert settings.github_app_slug is not None
     assert settings.github_webhook_secret_id is not None
 
@@ -213,6 +218,28 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
         foundation.operational_backend
     )
     sink = ControlSourceChangeSink(context.control_facade)
+    scheduler = create_scheduler_router(
+        authenticator=GoogleOidcTaskAuthenticator(
+            audience=settings.public_base_url,
+            service_account_email=settings.scheduler_service_account,
+        ),
+        operations=ProductionSchedulerOperations(
+            maintenance_store=FirestoreMaintenanceStore(
+                foundation.operational_backend
+            ),
+            drive_tracking_store=source.drive_tracking,
+            github_tracking_store=source.github_tracking,
+            local_runtime_store=source.local_runtime,
+            drive_adapter=source.drive_adapter,
+            github_adapter=source.github_adapter,
+            local_adapter=source.local_adapter,
+            control_facade=context.control_facade,
+            change_sink=sink,
+            drive_webhook_url=settings.drive_webhook_base_url,
+            drive_channel_token=settings.drive_watch_channel_token,
+            clock=utc_now,
+        ),
+    )
 
     drive_oauth = create_drive_oauth_router(
         client_id=settings.drive_client_id,
@@ -307,6 +334,7 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
             webhooks=(drive_webhook, github_webhook),
             desktop=(local_desktop,),
         ),
+        extra_api_routers=(scheduler,),
     )
 
 

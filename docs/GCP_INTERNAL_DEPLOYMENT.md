@@ -75,7 +75,8 @@ handoff다.
 | Worker | v2 database, v2 staging objects, Worker fixed secrets, dynamic credential add/access, Vertex AI와 v2 RAG corpus |
 | Tasks caller | v2 Worker service의 `roles/run.invoker`만 |
 | Scheduler caller | v2 API service의 `roles/run.invoker`만 |
-| Deploy | v2 Artifact repository/Run services/queue/jobs/index와 지정 runtime SA act-as만 |
+| Deploy/build | v2 Artifact repository writer와 project Logs Writer만; runtime secret/data 권한 없음 |
+| Cloud Build service agent | `iprisk-v2-deploy`에 대한 Token Creator만 |
 
 runtime identity에는 Owner, Editor, `roles/secretmanager.admin`, unconditional
 `roles/datastore.user`를 부여하지 않는다. API queue 권한은 queue-level
@@ -109,7 +110,7 @@ source fetch 중 access와 refresh 시 add를 사용한다. 현재 runtime 경�
 제한할 수 없다. 유지할 최소 custom role은 API에 project scope의
 `secretmanager.secrets.create` 하나뿐이며, prefix 안전성은 application validation이
 강제한다. `versions.add`와 `versions.access`는 생성된 secret resource 이름이 있으므로
-`projects/.../secrets/iprisk-v2-cred-` prefix condition으로 제한한다. 더 강한 격리가
+`projects/555102774494/secrets/iprisk-v2-cred-` prefix condition으로 제한한다. 더 강한 격리가
 필요하면 runtime secret create를 제거하고 별도 provisioning broker/identity로 분리해야 한다.
 
 ## 6. durable resource와 RAG
@@ -120,10 +121,34 @@ source fetch 중 access와 refresh 시 add를 사용한다. 현재 runtime 경�
 - RAG는 별도 `ip-risk-agent-v2-legal-reference` corpus를 사용하고 기존 corpus를 재사용하지
   않는다. 승인 manifest와 corpus version 계약은 유지한다.
 
-현재 `SchedulerOperations` 네 maintenance 구현과 API router wiring은 별도 repository
-blocker다. 해결 전 v2 Scheduler job을 생성하거나 enable하지 않는다.
+Scheduler의 Drive watch renewal/reconciliation, expired state cleanup, source health refresh는
+durable operational store와 기존 adapter/Control facade를 재사용하는 production 구현으로 API
+composition에 mount된다. Scheduler OIDC audience는 API base URL이며 허용 caller는
+`iprisk-v2-scheduler@...` 하나다. Drive/GitHub/Local health는 canonical source 상태로
+수렴하고 cleanup은 OAuth/device challenge와 만료된 `PENDING` connection만 제거한다.
 
-## 7. Google Auth Platform shared configuration
+Firestore composite index는 `deploy/firestore.indexes.json`의 정확히 8개다. 기존 canonical
+7개에 `source_operational_github_tracking(record.owner, record.repo)`가 포함된다. TTL은 OAuth
+state와 device challenge 두 collection에만 둔다. ACTIVE pending connection은 mount의 durable
+credential lookup에 필요하므로 TTL 대상으로 두지 않고 scheduler가 stale `PENDING`만
+status-aware하게 정리한다.
+
+## 7. Cloud Build 실행 identity와 immutable deploy
+
+`deploy/cloudbuild.yaml`은 다음 user-specified service account를 명시한다.
+
+```text
+projects/proj-aj22-211200020328/serviceAccounts/
+iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+```
+
+이 identity는 v2 Artifact Registry repository의 Writer와 Cloud Logging의 Logs Writer만
+요구한다. Cloud Build service agent에는 이 build identity에 대한 Token Creator만 둔다.
+build log는 `CLOUD_LOGGING_ONLY`이며 default Cloud Build/Compute identity와
+`cloud-run-source-deploy` repository에 의존하지 않는다. build는 commit SHA tag 하나를
+push하고, API/Worker manifest는 같은 `application@${IMAGE_DIGEST}`를 요구한다.
+
+## 8. Google Auth Platform shared configuration
 
 OAuth Login/Drive client는 각각 `ip-risk-agent-v2-login`, `ip-risk-agent-v2-drive`로 새로
 만든다. 다만 Branding, Audience, Data Access, authorized domain은 project-level이라 v1과
@@ -131,7 +156,7 @@ OAuth Login/Drive client는 각각 `ip-risk-agent-v2-login`, `ip-risk-agent-v2-d
 않으며 project-level 변경은 반드시 “v1에도 영향을 줄 수 있는 shared configuration”으로
 검토·승인한다.
 
-## 8. repository gate
+## 9. repository gate
 
 ```powershell
 python scripts/validate_gcp_deployment.py
@@ -140,8 +165,9 @@ python scripts/prepare_rag_ingestion.py
 ```
 
 validator는 v1/default namespace, 역할별 환경 불일치, public Worker, 서로 다른 API/Worker
-artifact, broad IAM contract와 non-v2 secret prefix를 실패시킨다. 외부 resource를 만들지
-않고 `deploy/*`의 정적 계약만 확인한다.
+artifact, broad IAM, non-v2 secret prefix, 8-index/2-TTL, 네 Scheduler route/job, Cloud Build
+identity/logging과 immutable digest 계약을 실패시킨다. 외부 resource를 조회하거나 만들지
+않는 pure repository preflight다.
 
 공식 근거:
 
@@ -150,3 +176,4 @@ artifact, broad IAM contract와 non-v2 secret prefix를 실패시킨다. 외부 
 - [Secret 생성/버전 권한의 평가 resource](https://cloud.google.com/secret-manager/docs/reference/rest/v1/projects.secrets/create)
 - [Cloud Run deterministic URL](https://cloud.google.com/run/docs/triggering/https-request)
 - [Cloud Run service-to-service OIDC audience](https://cloud.google.com/run/docs/authenticating/service-to-service)
+- [Cloud Build user-specified service account](https://cloud.google.com/build/docs/securing-builds/configure-user-specified-service-accounts)

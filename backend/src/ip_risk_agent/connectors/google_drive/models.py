@@ -51,6 +51,13 @@ class DriveChangePage:
     new_start_page_token: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class DriveWatchChannel:
+    channel_id: str
+    resource_id: str
+    expiration_millis: int
+
+
 class DriveProvider(Protocol):
     """실제 client가 구현해야 하는 최소 계약. fake/실제 구현 모두 이 모양만
     맞추면 adapter.py는 어느 쪽이든 그대로 쓸 수 있다 (Agent 2 Spec 47번)."""
@@ -64,6 +71,16 @@ class DriveProvider(Protocol):
     def create_google_doc(self, name: str) -> DriveFile: ...
 
     def list_changes(self, page_token: str) -> DriveChangePage: ...
+
+    def watch_changes(
+        self,
+        *,
+        page_token: str,
+        channel_id: str,
+        address: str,
+        channel_token: str,
+        expiration_millis: int,
+    ) -> DriveWatchChannel: ...
 
     def read_text(self, file_id: str, mime_type: str) -> str: ...
 

@@ -4,7 +4,7 @@ services:
     role: api
     port: 8080
     command: [python, -m, uvicorn, ip_risk_agent.main:create_app, --factory, --host, 0.0.0.0, --port, "8080"]
-    image: asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application:${IMAGE_TAG}
+    image: asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application@${IMAGE_DIGEST}
     serviceAccount: iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
     ingress: all
     allowUnauthenticated: true
@@ -18,7 +18,7 @@ services:
     role: worker
     port: 8080
     command: [python, -m, uvicorn, ip_risk_agent.worker:create_app, --factory, --host, 0.0.0.0, --port, "8080"]
-    image: asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application:${IMAGE_TAG}
+    image: asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application@${IMAGE_DIGEST}
     serviceAccount: iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
     ingress: internal
     allowUnauthenticated: false

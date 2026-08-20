@@ -31,6 +31,9 @@ def test_repository_owned_gcp_inputs_are_self_consistent() -> None:
         "public-worker",
         "split-image",
         "worker-api-setting",
+        "missing-build-identity",
+        "scheduler-route-mismatch",
+        "index-count-mismatch",
     ),
 )
 def test_deployment_validator_rejects_v1_namespace_regressions(
@@ -42,24 +45,55 @@ def test_deployment_validator_rejects_v1_namespace_regressions(
     shutil.copy(ROOT / "Dockerfile", root / "Dockerfile")
     shutil.copy(ROOT / ".dockerignore", root / ".dockerignore")
     shutil.copytree(ROOT / "deploy", root / "deploy")
+    shutil.copytree(ROOT / "rag-corpus", root / "rag-corpus")
+    scheduler_parent = root / "backend" / "src" / "ip_risk_agent" / "composition"
+    scheduler_parent.mkdir(parents=True)
+    shutil.copy(
+        ROOT / "backend" / "src" / "ip_risk_agent" / "composition" / "scheduler_routes.py",
+        scheduler_parent / "scheduler_routes.py",
+    )
+    shutil.copy(
+        ROOT / "backend" / "src" / "ip_risk_agent" / "composition" / "production.py",
+        scheduler_parent / "production.py",
+    )
+    tasks_parent = root / "backend" / "src" / "ip_risk_agent" / "gcp"
+    tasks_parent.mkdir(parents=True)
+    shutil.copy(
+        ROOT / "backend" / "src" / "ip_risk_agent" / "gcp" / "cloud_tasks.py",
+        tasks_parent / "cloud_tasks.py",
+    )
     _inject_namespace_violation(root / "deploy", violation)
     errors = validate(root)
     assert errors, f"validator accepted {violation}"
 
 
 def _inject_namespace_violation(deploy: Path, violation: str) -> None:
-    if violation == "legacy-artifact-repository":
+    if violation in {"legacy-artifact-repository", "missing-build-identity"}:
         path = deploy / "cloudbuild.yaml"
         document = yaml.safe_load(path.read_text("utf-8"))
-        document["substitutions"]["_REPOSITORY"] = "cloud-run-source-deploy"
+        if violation == "legacy-artifact-repository":
+            document["substitutions"]["_REPOSITORY"] = "cloud-run-source-deploy"
+        else:
+            document.pop("serviceAccount")
+    elif violation == "index-count-mismatch":
+        path = deploy / "firestore.indexes.json"
+        import json
+
+        document = json.loads(path.read_text("utf-8"))
+        document["indexes"].pop()
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return
     elif violation == "legacy-task-queue":
         path = deploy / "cloud-tasks-queue.yaml"
         document = yaml.safe_load(path.read_text("utf-8"))
         document["queue"]["name"] = "analysis-changes"
-    elif violation == "legacy-scheduler-job":
+    elif violation in {"legacy-scheduler-job", "scheduler-route-mismatch"}:
         path = deploy / "scheduler-jobs.yaml"
         document = yaml.safe_load(path.read_text("utf-8"))
-        document["jobs"][0]["name"] = "ip-risk-agent-drive-poll"
+        if violation == "legacy-scheduler-job":
+            document["jobs"][0]["name"] = "ip-risk-agent-drive-poll"
+        else:
+            document["jobs"][0]["path"] = "/internal/scheduler/not-production"
     else:
         path = deploy / "cloud-run-services.yaml"
         document = yaml.safe_load(path.read_text("utf-8"))

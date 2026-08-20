@@ -38,6 +38,15 @@ runtimeBindings:
     member: iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
     project: proj-aj22-211200020328
     corpusDisplayName: ip-risk-agent-v2-legal-reference
+buildBindings:
+  buildLogs:
+    role: roles/logging.logWriter
+    member: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328
+  buildServiceAgentToken:
+    role: roles/iam.serviceAccountTokenCreator
+    member: service-555102774494@gcp-sa-cloudbuild.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
 fixedSecretAccess:
   iprisk-v2-session-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
   iprisk-v2-google-login-client-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
@@ -62,16 +71,16 @@ dynamicCredentialPermissions:
     members:
       - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
       - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
-    conditionPrefix: projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-
-    conditionExpression: resource.name.startsWith("projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-")
+    conditionPrefix: projects/555102774494/secrets/iprisk-v2-cred-
+    conditionExpression: resource.name.startsWith("projects/555102774494/secrets/iprisk-v2-cred-")
     permissions:
       - secretmanager.versions.add
   accessor:
     members:
       - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
       - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
-    conditionPrefix: projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-
-    conditionExpression: resource.name.startsWith("projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-")
+    conditionPrefix: projects/555102774494/secrets/iprisk-v2-cred-
+    conditionExpression: resource.name.startsWith("projects/555102774494/secrets/iprisk-v2-cred-")
     permissions:
       - secretmanager.versions.access
   disable:

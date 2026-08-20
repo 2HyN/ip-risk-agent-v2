@@ -133,7 +133,7 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 | `iprisk-v2-worker` | Worker Cloud Run | v2 DB 조건부 Firestore User, v2 bucket object 권한, Worker secret, Vertex/RAG |
 | `iprisk-v2-tasks` | Cloud Tasks OIDC | v2 Worker service의 Cloud Run Invoker만 |
 | `iprisk-v2-scheduler` | Scheduler OIDC | v2 API service의 Cloud Run Invoker만 |
-| `iprisk-v2-deploy` | build/deploy | v2 repository/Run/queue/scheduler/index와 지정 runtime SA act-as만 |
+| `iprisk-v2-deploy` | Cloud Build 실행/image push | v2 repository Writer와 project Logs Writer만 |
 
 세부 적용 순서:
 
@@ -150,7 +150,9 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
    guard가 필수다. runtime에서 쓰지 않는 disable과 Secret Manager Admin은 부여하지 않는다.
 8. Worker 배포 후 `iprisk-v2-tasks`에 **v2 Worker service만** Invoker를 부여한다.
 9. API 배포 후 `iprisk-v2-scheduler`에 **v2 API service만** Invoker를 부여한다.
-10. deploy identity의 `roles/iam.serviceAccountUser`는 API/Worker runtime SA에만 한정한다.
+10. Cloud Build service agent `service-555102774494@gcp-sa-cloudbuild.iam.gserviceaccount.com`에는
+    `iprisk-v2-deploy`에 대한 `roles/iam.serviceAccountTokenCreator`만 부여한다. build 제출자는
+    이 account를 사용할 수 있는 제한된 권한을 별도 승인받는다.
 
 `roles/cloudtasks.serviceAgent` 같은 service-agent role은 사용자 계정이나 위 5개 계정에
 직접 부여하지 않는다.
@@ -167,7 +169,9 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 3. repository 이름은 반드시 `ip-risk-agent-v2`이며 기존
    `cloud-run-source-deploy`에는 v2 권한이나 image를 추가하지 않는다.
 4. **Cloud Build → Triggers**를 새로 만들지 않아도 된다. 승인된 Cloud Shell/CI에서
-   `deploy/cloudbuild.yaml`을 지정해 RC SHA를 build한다.
+   `deploy/cloudbuild.yaml`을 지정해 RC SHA를 build한다. 이 config는
+   `iprisk-v2-deploy@...`를 user-specified build service account로 명시하며 default Cloud
+   Build/Compute service account에 fallback하지 않는다.
 5. build의 `smoke-import-api`, `smoke-import-worker`가 모두 성공했는지 확인한다.
 6. Artifact Registry image 상세 화면에서 생성된 immutable digest를 복사해 입력표에
    `.../application@sha256:...` 형식으로 기록한다. 이후 두 서비스 모두 이 digest를 쓴다.
@@ -182,7 +186,7 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 1. **Firestore → Databases → Create database**에서 `ip-risk-agent-v2` named Native mode
    database를 만든다. 기존 `(default)`는 열람·index/TTL/IAM 변경 대상이 아니다.
 2. location은 확정한 application region과 맞추고, 생성 후 변경 불가 특성을 재확인한다.
-3. `deploy/firestore.indexes.json`을 기준으로 아래 composite index 7개를 생성한다.
+3. `deploy/firestore.indexes.json`을 기준으로 아래 composite index 8개를 생성한다.
 
 | collection group | field 순서 |
 |---|---|
@@ -193,19 +197,21 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 | `workspace_mounts` | `record_kind`, `risk_workspace_id`, `mounted_by_user_id` |
 | `risks` | `record_kind`, `artifact_id`, `analysis_type`, `lifecycle_state` |
 | `risks` | `record_kind`, `risk_workspace_id` |
+| `source_operational_github_tracking` | `record.owner`, `record.repo` |
 
 모든 field direction은 deploy JSON의 `ASCENDING`, query scope는 `COLLECTION`이다.
 이어 **Databases → 해당 database → Time-to-live**에서 다음 collection group의
 `expires_at`에 TTL policy를 둔다.
 
 - `source_operational_oauth_states`
-- `source_operational_pending_connections`
 - `source_operational_device_challenges`
 
-TTL 삭제는 즉시성을 보장하지 않으므로 application의 만료 검사는 그대로 유지한다.
+TTL 삭제는 즉시성을 보장하지 않으므로 application의 만료 검사는 그대로 유지한다. ACTIVE
+pending connection은 mount의 credential/binding lookup에 계속 필요하므로 TTL을 설정하지
+않는다. production Scheduler cleanup이 만료된 `PENDING` 상태만 삭제한다.
 
-- [ ] 7개 index가 Building이 아니라 Enabled/Ready다.
-- [ ] 3개 TTL policy가 Active다.
+- [ ] 8개 index가 Building이 아니라 Enabled/Ready다.
+- [ ] 2개 TTL policy가 Active다.
 - [ ] `FIRESTORE_DATABASE=ip-risk-agent-v2`이며 `(default)`가 아님을 확인했다.
 - [ ] staging 데이터와 production 데이터가 같은 database를 공유하지 않는다.
 
@@ -292,11 +298,8 @@ version을 추가하고 runtime에는 필요한
 
 ## 11. API 배포와 Scheduler
 
-> 현재 남은 repository blocker: production API startup composition은 연결됐지만
-> `SchedulerOperations`의 네 maintenance 동작과 router wiring은 아직 구현되지 않았다.
-> 이 blocker가 별도 commit으로 해결되고 관련 test가 통과하기 전에는 아래 Scheduler
-> job을 생성하거나 enabled 상태로 두지 않는다. API/Worker smoke와 Tasks 검증은 먼저
-> 진행할 수 있다.
+repository preflight는 네 maintenance route가 production API composition에 실제 mount되고
+각 job path와 exact-match함을 검증한다. Scheduler caller OIDC 외에는 route가 거부된다.
 
 1. `ip-risk-agent-v2-api`를 같은 image digest, `iprisk-v2-api` service account로 배포한다.
 2. ingress는 All, authentication은 Allow unauthenticated로 두되 제품 route는 application
@@ -337,6 +340,10 @@ version을 추가하고 runtime에는 필요한
 - [ ] private source 원문 ingestion이 없음을 확인했다.
 
 ## 13. Google OAuth, Drive와 Picker
+
+**READ/REVIEW FIRST:** Branding, Audience, Data Access, authorized domain과 API enablement는
+project-level shared configuration이다. 현재 값을 먼저 읽고 v1 영향 검토를 기록하며,
+변경이 필요할 때만 별도 승인을 받는다.
 
 최종 API HTTPS origin이 확정된 뒤 **Google Auth Platform / APIs & Services**에서
 v2 전용 OAuth client `ip-risk-agent-v2-login`, `ip-risk-agent-v2-drive`를 만든다. Branding,

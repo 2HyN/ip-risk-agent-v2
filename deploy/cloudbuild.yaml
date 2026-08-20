@@ -2,6 +2,7 @@ substitutions:
   _REGION: asia-northeast3
   _REPOSITORY: ip-risk-agent-v2
   _IMAGE: application
+serviceAccount: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
 steps:
   - id: build
     name: gcr.io/cloud-builders/docker
@@ -9,19 +10,28 @@ steps:
       - build
       - --tag
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
-      - --tag
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:latest
       - .
   - id: smoke-import-api
-    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
-    entrypoint: python
-    args: ["-c", "from ip_risk_agent.main import create_app; print('api import ok')"]
+    name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - --rm
+      - --entrypoint
+      - python
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+      - -c
+      - "from ip_risk_agent.main import create_app; print('api import ok')"
   - id: smoke-import-worker
-    name: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
-    entrypoint: python
-    args: ["-c", "from ip_risk_agent.worker import create_app; print('worker import ok')"]
+    name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - --rm
+      - --entrypoint
+      - python
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+      - -c
+      - "from ip_risk_agent.worker import create_app; print('worker import ok')"
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
-  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:latest
 options:
   logging: CLOUD_LOGGING_ONLY

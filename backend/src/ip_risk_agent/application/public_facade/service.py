@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from iprisk_contracts import (
@@ -11,6 +11,8 @@ from iprisk_contracts import (
     MountRef,
     SourceArtifactRef,
     SourceChange,
+    SourceHealth,
+    SourceHealthStatus,
     SourceSnapshot,
 )
 
@@ -340,6 +342,54 @@ class ControlPlaneFacade:
             evidence_count=accepted.evidence_count,
         )
 
+    async def record_source_health(self, mount_id: str, health: SourceHealth) -> None:
+        """Converge provider health into canonical source status idempotently."""
+
+        occurred_at = normalize_utc(health.checked_at, "source_health.checked_at")
+        async with self._unit_of_work_factory() as uow:
+            mount = await uow.mounts.get(mount_id)
+            if mount is None:
+                raise RecordNotFoundError(f"mount was not found: {mount_id!r}")
+            source_workspace = await uow.source_metadata.get_source_workspace(
+                mount.source_workspace_id
+            )
+            connection = await uow.source_metadata.get_connection(
+                mount.source_connection_id
+            )
+            if source_workspace is None or connection is None:
+                raise DomainInvariantError("mount canonical source context is inconsistent")
+            if (
+                mount.status is MountStatus.DISABLED
+                or source_workspace.status is SourceWorkspaceStatus.DISABLED
+                or connection.status is SourceConnectionStatus.DISABLED
+            ):
+                return
+
+            connection_status, workspace_status, mount_status = _health_statuses(
+                health.status
+            )
+            if connection.status is not connection_status:
+                await uow.source_metadata.save_connection(
+                    replace(
+                        connection,
+                        status=connection_status,
+                        updated_at=occurred_at,
+                    )
+                )
+            if source_workspace.status is not workspace_status:
+                await uow.source_metadata.save_source_workspace(
+                    replace(
+                        source_workspace,
+                        status=workspace_status,
+                        updated_at=occurred_at,
+                    )
+                )
+            if mount.status is not mount_status:
+                await uow.mounts.save(
+                    replace(mount, status=mount_status, updated_at=occurred_at)
+                )
+            await uow.commit()
+
     async def get_mount_ref(self, mount_id: str) -> MountRef:
         async with self._unit_of_work_factory() as uow:
             mount = await uow.mounts.get(mount_id)
@@ -663,6 +713,37 @@ def _require_source_workspace_match(
         or source_workspace.tracking_config_safe != command.tracking_config_safe
     ):
         raise DomainInvariantError("source workspace registration key collision")
+
+
+def _health_statuses(
+    status: SourceHealthStatus,
+) -> tuple[SourceConnectionStatus, SourceWorkspaceStatus, MountStatus]:
+    if status is SourceHealthStatus.HEALTHY:
+        return (
+            SourceConnectionStatus.ACTIVE,
+            SourceWorkspaceStatus.ACTIVE,
+            MountStatus.ACTIVE,
+        )
+    if status in {
+        SourceHealthStatus.REAUTH_REQUIRED,
+        SourceHealthStatus.PERMISSION_DENIED,
+    }:
+        return (
+            SourceConnectionStatus.REAUTH_REQUIRED,
+            SourceWorkspaceStatus.REAUTH_REQUIRED,
+            MountStatus.REAUTH_REQUIRED,
+        )
+    if status in {SourceHealthStatus.OFFLINE, SourceHealthStatus.DEGRADED}:
+        return (
+            SourceConnectionStatus.DISCONNECTED,
+            SourceWorkspaceStatus.SOURCE_OFFLINE,
+            MountStatus.SOURCE_OFFLINE,
+        )
+    return (
+        SourceConnectionStatus.DISABLED,
+        SourceWorkspaceStatus.DISABLED,
+        MountStatus.DISABLED,
+    )
 
 
 def _require_mount_match(

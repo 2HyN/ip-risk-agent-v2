@@ -40,6 +40,7 @@ from ip_risk_agent.gcp import (
     SecretManagerCredentialVault,
     SecretManagerRuntimeSecretReader,
 )
+from ip_risk_agent.gcp.operational_firestore import OperationalDocument
 from ip_risk_agent.gcp_contract import DYNAMIC_CREDENTIAL_SECRET_PREFIX
 
 
@@ -83,6 +84,25 @@ class MemoryOperationalBackend:
             return None
         document["consumed_at"] = now
         return dict(document)
+
+    async def scan_page(self, collection, *, cursor, limit):
+        matches = sorted(
+            (
+                document_id,
+                document,
+            )
+            for (candidate, document_id), document in self.documents.items()
+            if candidate == collection and (cursor is None or document_id > cursor)
+        )
+        selected = matches[:limit]
+        next_cursor = selected[-1][0] if len(matches) > limit else None
+        return (
+            tuple(
+                OperationalDocument(document_id, dict(document))
+                for document_id, document in selected
+            ),
+            next_cursor,
+        )
 
 
 def run(awaitable):
@@ -186,6 +206,7 @@ def test_firestore_runtime_store_supports_bounded_operational_lookup() -> None:
         assert await store.find_many({"owner": "owner", "repo": "repo"}) == (
             scope,
         )
+        assert await store.page(cursor=None, limit=10) == ((scope,), None)
 
     run(scenario())
 

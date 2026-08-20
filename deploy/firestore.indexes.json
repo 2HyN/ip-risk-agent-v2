@@ -77,12 +77,6 @@
       "indexes": []
     },
     {
-      "collectionGroup": "source_operational_pending_connections",
-      "fieldPath": "expires_at",
-      "ttl": true,
-      "indexes": []
-    },
-    {
       "collectionGroup": "source_operational_device_challenges",
       "fieldPath": "expires_at",
       "ttl": true,

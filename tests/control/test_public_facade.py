@@ -24,6 +24,8 @@ from iprisk_contracts import (
     SourceAccessType,
     SourceArtifactRef,
     SourceChange,
+    SourceHealth,
+    SourceHealthStatus,
     SourceSnapshot,
     SourceType,
     TextSegment,
@@ -46,6 +48,11 @@ from ip_risk_agent.core.memberships import (
     MembershipStatus,
     VwsAction,
     membership_id_for,
+)
+from ip_risk_agent.core.mounts import (
+    MountStatus,
+    SourceConnectionStatus,
+    SourceWorkspaceStatus,
 )
 from ip_risk_agent.core.risk import RiskLifecycleState
 from ip_risk_agent.core.workspaces import RiskWorkspace
@@ -220,6 +227,42 @@ def test_public_authorization_actions_match_canonical_actions() -> None:
     assert {action.value for action in PublicVwsAction} == {
         action.value for action in VwsAction
     }
+
+
+def test_source_health_refresh_converges_canonical_source_status() -> None:
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        checked_at = NOW + timedelta(minutes=1)
+
+        await facade.record_source_health(
+            source.mount_id,
+            SourceHealth(
+                status=SourceHealthStatus.REAUTH_REQUIRED,
+                checked_at=checked_at,
+                safe_metadata={},
+            ),
+        )
+
+        async with store() as uow:
+            mount = await uow.mounts.get(source.mount_id)
+            workspace = await uow.source_metadata.get_source_workspace(
+                source.source_workspace_id
+            )
+            connection = await uow.source_metadata.get_connection(
+                source.connection_id
+            )
+        assert mount is not None and mount.status is MountStatus.REAUTH_REQUIRED
+        assert workspace is not None
+        assert workspace.status is SourceWorkspaceStatus.REAUTH_REQUIRED
+        assert connection is not None
+        assert connection.status is SourceConnectionStatus.REAUTH_REQUIRED
+
+    run(scenario())
 
 
 def test_claim_preserves_source_change_and_reclaims_without_reenqueue() -> None:

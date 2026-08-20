@@ -2,7 +2,12 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`는 Phase 8 release candidate를 기준으로 Phase 9에 진입했다. 세 Plane, 고정 dependency/toolchain, P0 경계, API/Worker composition, Web/Electron 제품 흐름과 GCP 내부 배포 기반이 통합되어 전체 non-live regression을 통과했다. Firestore operational store, Secret Manager/GCS/Cloud Tasks/OIDC adapter, same-origin 정적 hosting, non-root image와 Cloud Build/Run/Tasks/Scheduler/TTL 입력물은 저장소 안에서 검증된다. 실제 GCP resource/IAM/credential 생성과 provider live 검증은 외부 project·권한·credential 입력을 기다리고 있다.
+현재 `integration-v2`는 Phase 9의 repository-side predeployment 준비 단계다. 세 Plane,
+API/Worker durable GCP composition, production Scheduler maintenance, v2 namespace/IAM/build
+계약과 Web/Electron 제품 흐름이 통합되어 있다. Firestore operational store,
+Secret Manager/GCS/Cloud Tasks/OIDC adapter, 네 Scheduler route, 8개 composite index·2개 TTL,
+user-specified Cloud Build identity와 immutable shared image 계약은 repository preflight로
+검증한다. 실제 GCP resource/IAM/credential 생성과 provider live 검증은 외부 작업으로 남는다.
 
 ## 통합 상태
 
@@ -95,6 +100,15 @@ python -m pip check
 ```
 
 Windows가 아닌 환경에서는 가상환경을 `source .venv/bin/activate`로 활성화한다.
+Windows Git Bash에서는 다음 경로를 사용한다.
+
+```bash
+source .venv/Scripts/activate
+```
+
+아래 gate는 반드시 이 project venv가 활성화된 shell에서 실행한다. system Python에서
+`ModuleNotFoundError: fastapi`, `yaml`, `google` 또는 `Unknown config option: asyncio_mode`가
+나오면 application 결함으로 판단하기 전에 venv 활성화와 `.[dev]`/lock 설치를 확인한다.
 
 CI 또는 재현 가능한 설치에서는 transitive version까지 고정한 lock을 먼저 적용한다.
 

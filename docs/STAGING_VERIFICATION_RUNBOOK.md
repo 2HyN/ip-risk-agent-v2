@@ -20,6 +20,11 @@ provider credential과 비용 발생 resource가 준비된 staging 환경에서 
 
 ## 2. 배포 전 repository 검증
 
+project venv를 먼저 활성화한다. Windows Git Bash는 `source .venv/Scripts/activate`,
+PowerShell은 `.\.venv\Scripts\Activate.ps1`을 사용한다. `fastapi`, `yaml`, `google` import
+실패나 pytest의 `asyncio_mode` 미인식은 system Python 실행 신호이므로 dependency를 우회하지
+말고 venv/lock 설치부터 복구한다.
+
 ```powershell
 python -m compileall -q backend/src shared/contracts/python scripts
 python -m pip check
@@ -81,7 +86,8 @@ python -m pytest tests/intelligence/test_live_providers.py -m live -vv
 
 - Firestore: client가 `ip-risk-agent-v2` named database에 연결됐고 `(default)`에 v2
   document/index/TTL/IAM 변경이 없음을 먼저 확인한 뒤 transaction contention/retry,
-  required query, TTL과 operational namespace를 검증한다.
+  정확히 8개 composite index, OAuth/device challenge 2개 TTL과 operational namespace를
+  검증한다. ACTIVE pending connection에는 TTL이 없어야 한다.
 - Secret Manager: 새 version 추가 후 adapter read/refresh, 이전 version rollback window를 확인한다.
 - GCS: private upload/read/delete와 lifecycle, public ACL/signed URL 부재를 확인한다.
 - Cloud Tasks: exact OIDC audience/email, retry/backoff, concurrency와 duplicate task name을 확인한다.
@@ -132,7 +138,7 @@ schema는 backward-compatible reader를 먼저 유지한다.
 | image digest | |
 | project/application/RAG region | |
 | API/Worker revision | |
-| Firestore index/TTL 확인 | |
+| Firestore index/TTL 확인 | 8 indexes / 2 TTL policies |
 | queue/bucket/lifecycle 확인 | |
 | provider/RAG live 결과 | |
 | negative security 결과 | |

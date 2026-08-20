@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Mapping
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Generic, Protocol, TypeVar
 
@@ -47,6 +47,20 @@ RUNTIME_COLLECTIONS = frozenset(
         "source_operational_local_runtime",
     }
 )
+MAINTENANCE_COLLECTIONS = frozenset(
+    {
+        OAUTH_STATES,
+        PENDING_CONNECTIONS,
+        DEVICE_CHALLENGES,
+        *RUNTIME_COLLECTIONS,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OperationalDocument:
+    document_id: str
+    data: dict
 
 
 class OperationalFirestoreBackend(Protocol):
@@ -64,6 +78,13 @@ class OperationalFirestoreBackend(Protocol):
     async def consume_unexpired(
         self, collection: str, document_id: str, now: datetime
     ) -> dict | None: ...
+    async def scan_page(
+        self,
+        collection: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[tuple[OperationalDocument, ...], str | None]: ...
 
 
 class GoogleOperationalFirestoreBackend:
@@ -130,6 +151,34 @@ class GoogleOperationalFirestoreBackend:
             return data
 
         return await consume(transaction)
+
+    async def scan_page(
+        self,
+        collection: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[tuple[OperationalDocument, ...], str | None]:
+        if limit < 1 or limit > 500:
+            raise ValueError("operational scan limit must be between 1 and 500")
+        collection_ref = self._client.collection(collection)
+        query = collection_ref.order_by("__name__")
+        if cursor is not None:
+            query = query.where(
+                filter=FieldFilter("__name__", ">", collection_ref.document(cursor))
+            )
+        snapshots = []
+        async for snapshot in query.limit(limit + 1).stream():
+            snapshots.append(snapshot)
+        has_more = len(snapshots) > limit
+        selected = snapshots[:limit]
+        documents = tuple(
+            OperationalDocument(snapshot.id, document)
+            for snapshot in selected
+            if (document := _document(snapshot)) is not None
+        )
+        next_cursor = selected[-1].id if has_more and selected else None
+        return documents, next_cursor
 
     def _reference(self, collection: str, document_id: str):
         return self._client.collection(collection).document(document_id)
@@ -232,6 +281,48 @@ class FirestoreRuntimeStore(Generic[RuntimeRecord]):
             self._model.model_validate(document["record"])
             for document in documents
         )
+
+    async def page(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[tuple[RuntimeRecord, ...], str | None]:
+        documents, next_cursor = await self._backend.scan_page(
+            self._collection,
+            cursor=cursor,
+            limit=limit,
+        )
+        return (
+            tuple(
+                self._model.model_validate(document.data["record"])
+                for document in documents
+            ),
+            next_cursor,
+        )
+
+
+class FirestoreMaintenanceStore:
+    """Bounded access to operational records owned by scheduler maintenance."""
+
+    def __init__(self, backend: OperationalFirestoreBackend) -> None:
+        self._backend = backend
+
+    async def page(
+        self,
+        collection: str,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[tuple[OperationalDocument, ...], str | None]:
+        if collection not in MAINTENANCE_COLLECTIONS:
+            raise ValueError("maintenance collection is not allow-listed")
+        return await self._backend.scan_page(collection, cursor=cursor, limit=limit)
+
+    async def delete(self, collection: str, document_id: str) -> None:
+        if collection not in MAINTENANCE_COLLECTIONS:
+            raise ValueError("maintenance collection is not allow-listed")
+        await self._backend.delete(collection, document_id)
 
 
 class FirestorePendingConnectionStore:
@@ -411,13 +502,16 @@ def _json_safe_context(context: dict) -> dict:
 __all__ = [
     "DEVICE_CHALLENGES",
     "MOUNT_BINDINGS",
+    "MAINTENANCE_COLLECTIONS",
     "OAUTH_STATES",
     "PENDING_CONNECTIONS",
     "RUNTIME_COLLECTIONS",
     "FirestoreDeviceAuthStore",
+    "FirestoreMaintenanceStore",
     "FirestoreOAuthStateStore",
     "FirestorePendingConnectionStore",
     "FirestoreRuntimeStore",
     "GoogleOperationalFirestoreBackend",
+    "OperationalDocument",
     "OperationalFirestoreBackend",
 ]

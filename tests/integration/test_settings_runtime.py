@@ -148,6 +148,12 @@ def test_production_v2_rejects_default_database_and_non_v2_namespace() -> None:
     }
     with pytest.raises(SettingsError, match="FIRESTORE_DATABASE='ip-risk-agent-v2'"):
         Settings.from_env({**values, "FIRESTORE_DATABASE": "(default)"})
+    with pytest.raises(SettingsError, match="FIRESTORE_DATABASE='ip-risk-agent-v2'"):
+        Settings.from_env({**values, "FIRESTORE_DATABASE": "ip-risk-agent-v3"})
+    with pytest.raises(SettingsError, match="FIRESTORE_EMULATOR_HOST"):
+        Settings.from_env(
+            {**values, "FIRESTORE_EMULATOR_HOST": "127.0.0.1:8080"}
+        )
     with pytest.raises(SettingsError, match="GCP_PROJECT_ID"):
         Settings.from_env({**values, "GCP_PROJECT_ID": "legacy-project"})
     with pytest.raises(SettingsError, match="GITHUB_APP_PRIVATE_KEY_SECRET_ID"):
@@ -178,5 +184,42 @@ def test_production_worker_is_deployable_without_api_or_task_publisher_settings(
                 **values,
                 "ANALYSIS_WORKER_URL": WORKER_BASE_URL,
                 "CLOUD_TASKS_SERVICE_ACCOUNT": TASKS_SERVICE_ACCOUNT,
+            }
+        )
+
+
+def test_production_rejects_role_reversal_and_partial_rag_configuration() -> None:
+    worker_values = {
+        **_production_common(),
+        "APP_ROLE": "worker",
+        "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": REGION,
+        "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
+        "PACKAGE_METADATA_BASE_URL": "https://api.deps.dev/v3",
+    }
+    with pytest.raises(SettingsError, match="RAG.*all set"):
+        Settings.from_env({**worker_values, "RAG_REGION": REGION})
+    with pytest.raises(SettingsError, match="Worker-only"):
+        Settings.from_env(
+            {
+                **worker_values,
+                "APP_ROLE": "api",
+                "SESSION_SECRET": "s" * 32,
+                "FRONTEND_DIST_DIR": "/app/frontend/dist",
+                "GOOGLE_LOGIN_CLIENT_ID": "login-client",
+                "GOOGLE_LOGIN_CLIENT_SECRET": "login-secret",
+                "GOOGLE_LOGIN_REDIRECT_URI": "https://api.example.com/api/v1/auth/google/callback",
+                "GOOGLE_DRIVE_REDIRECT_URI": "https://api.example.com/api/v1/source-connections/google-drive/callback",
+                "GOOGLE_DRIVE_WEBHOOK_BASE_URL": "https://api.example.com/webhooks/google-drive",
+                "DRIVE_WATCH_CHANNEL_TOKEN": "channel-token",
+                "GOOGLE_PICKER_API_KEY": "picker-key",
+                "GOOGLE_CLOUD_PROJECT_NUMBER": PROJECT_NUMBER,
+                "GITHUB_APP_SLUG": "ip-risk-agent-v2",
+                "GITHUB_WEBHOOK_SECRET_ID": FIXED_SECRET_IDS["github_webhook"],
+                "GITHUB_APP_CALLBACK_URL": "https://api.example.com/api/v1/source-connections/github/install/callback",
+                "CLOUD_TASKS_LOCATION": REGION,
+                "CLOUD_TASKS_QUEUE": TASK_QUEUE,
+                "ANALYSIS_WORKER_URL": WORKER_BASE_URL,
+                "CLOUD_TASKS_SERVICE_ACCOUNT": TASKS_SERVICE_ACCOUNT,
+                "SCHEDULER_SERVICE_ACCOUNT": SCHEDULER_SERVICE_ACCOUNT,
             }
         )

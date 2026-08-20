@@ -20,6 +20,7 @@ from .models import (
     DriveChange,
     DriveChangePage,
     DriveFile,
+    DriveWatchChannel,
 )
 
 
@@ -101,6 +102,35 @@ class GoogleDriveProvider:
             changes=changes,
             next_page_token=response.get("nextPageToken"),
             new_start_page_token=response.get("newStartPageToken"),
+        )
+
+    def watch_changes(
+        self,
+        *,
+        page_token: str,
+        channel_id: str,
+        address: str,
+        channel_token: str,
+        expiration_millis: int,
+    ) -> DriveWatchChannel:
+        response = (
+            self._service.changes()
+            .watch(
+                pageToken=page_token,
+                body={
+                    "id": channel_id,
+                    "type": "web_hook",
+                    "address": address,
+                    "token": channel_token,
+                    "expiration": str(expiration_millis),
+                },
+            )
+            .execute()
+        )
+        return DriveWatchChannel(
+            channel_id=response["id"],
+            resource_id=response["resourceId"],
+            expiration_millis=int(response["expiration"]),
         )
 
     def read_text(self, file_id: str, mime_type: str) -> str:
