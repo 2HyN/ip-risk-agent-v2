@@ -12,7 +12,8 @@ from urllib.parse import urlencode
 
 import httpx
 
-from ..common.errors import AuthRequiredError
+from ..common.retry import with_retry
+from .error_mapping import map_drive_status_code
 
 GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -37,28 +38,33 @@ class DriveOAuthClient(Protocol):
 
 
 class HttpxDriveOAuthClient:
+    """error_mapping.py의 기존 8종 분류를 그대로 써서, 5xx(일시적 서버
+    문제)만 재시도한다 — 400(잘못되거나 만료된 code)은 다시 불러도
+    똑같이 실패할 뿐이라 재시도 대상이 아니다."""
+
     def __init__(self, *, client_id: str, client_secret: str, redirect_uri: str) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
 
     async def exchange_code(self, code: str) -> dict:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                GOOGLE_OAUTH_TOKEN_URL,
-                data={
-                    "client_id": self._client_id,
-                    "client_secret": self._client_secret,
-                    "redirect_uri": self._redirect_uri,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                },
-            )
-        if resp.status_code >= 400:
-            raise AuthRequiredError(
-                provider="google_drive", safe_message="failed to exchange authorization code"
-            )
-        return resp.json()
+        async def _call() -> dict:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    GOOGLE_OAUTH_TOKEN_URL,
+                    data={
+                        "client_id": self._client_id,
+                        "client_secret": self._client_secret,
+                        "redirect_uri": self._redirect_uri,
+                        "code": code,
+                        "grant_type": "authorization_code",
+                    },
+                )
+            if resp.status_code >= 400:
+                raise map_drive_status_code(resp.status_code, "failed to exchange authorization code")
+            return resp.json()
+
+        return await with_retry(_call)
 
 
 def decode_identity_from_id_token(id_token: str) -> tuple[str, str]:
