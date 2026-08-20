@@ -1,0 +1,84 @@
+runtimeBindings:
+  firestore:
+    role: roles/datastore.user
+    members:
+      - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+      - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+    condition:
+      title: iprisk-v2-firestore-only
+      expression: resource.name == "projects/proj-aj22-211200020328/databases/ip-risk-agent-v2"
+  taskEnqueue:
+    role: roles/cloudtasks.enqueuer
+    member: iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328/locations/asia-northeast3/queues/ip-risk-agent-v2-analysis-changes
+  taskCallerActAs:
+    role: roles/iam.serviceAccountUser
+    member: iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-tasks@proj-aj22-211200020328.iam.gserviceaccount.com
+  workerInvoke:
+    role: roles/run.invoker
+    member: iprisk-v2-tasks@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328/locations/asia-northeast3/services/ip-risk-agent-v2-worker
+  schedulerInvoke:
+    role: roles/run.invoker
+    member: iprisk-v2-scheduler@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328/locations/asia-northeast3/services/ip-risk-agent-v2-api
+  stagingObjects:
+    role: roles/storage.objectUser
+    members:
+      - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+      - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/_/buckets/proj-aj22-211200020328-iprisk-v2-staging
+  artifactRepository:
+    role: roles/artifactregistry.writer
+    member: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328/locations/asia-northeast3/repositories/ip-risk-agent-v2
+  vertexRag:
+    role: roles/aiplatform.user
+    member: iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+    project: proj-aj22-211200020328
+    corpusDisplayName: ip-risk-agent-v2-legal-reference
+fixedSecretAccess:
+  iprisk-v2-session-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
+  iprisk-v2-google-login-client-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
+  iprisk-v2-drive-client-secret:
+    - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+    - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+  iprisk-v2-drive-channel-token: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
+  iprisk-v2-github-private-key:
+    - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+    - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+  iprisk-v2-github-webhook-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
+  iprisk-v2-kipris-access-key: [iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com]
+dynamicCredentialPermissions:
+  creator:
+    members:
+      - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+    scope: projects/proj-aj22-211200020328
+    permissions:
+      - secretmanager.secrets.create
+    codeEnforcedPrefix: iprisk-v2-cred-
+  versionManager:
+    members:
+      - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+      - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+    conditionPrefix: projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-
+    conditionExpression: resource.name.startsWith("projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-")
+    permissions:
+      - secretmanager.versions.add
+  accessor:
+    members:
+      - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+      - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+    conditionPrefix: projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-
+    conditionExpression: resource.name.startsWith("projects/proj-aj22-211200020328/secrets/iprisk-v2-cred-")
+    permissions:
+      - secretmanager.versions.access
+  disable:
+    members: []
+    permissions: []
+forbiddenRuntimeRoles:
+  - roles/owner
+  - roles/editor
+  - roles/secretmanager.admin
+  - unconditional roles/datastore.user

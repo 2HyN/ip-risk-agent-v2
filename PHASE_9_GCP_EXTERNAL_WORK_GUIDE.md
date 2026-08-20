@@ -19,7 +19,9 @@
 
 ## 0. 반드시 지킬 원칙
 
-1. 첫 배포는 production이 아닌 **전용 staging project**에서 수행한다.
+1. v1과 공유하는 `proj-aj22-211200020328`만 사용하되 모든 application resource는
+   `deploy/v2-resource-contract.yaml`의 v2 namespace로 격리한다. v1 resource에는 IAM
+   binding도 추가하지 않는다.
 2. 현재 RC SHA에서 image를 만들고 **tag가 아닌 digest**로 API와 Worker를 배포한다.
 3. 서비스 계정 JSON key를 만들지 않는다. Cloud Run attached service account와 OIDC를
    사용한다.
@@ -37,19 +39,19 @@ secret **값은 절대 적지 않고** 이름과 version 번호만 기록한다.
 | 항목 | 확정값 |
 |---|---|
 | 실행 승인자 / 승인 시각 | |
-| staging `PROJECT_ID` / project number | |
+| shared `PROJECT_ID` / project number | `proj-aj22-211200020328` / `555102774494` |
 | billing account 연결 확인 | |
-| application region | `asia-northeast3` 또는 확정값: |
+| application region | `asia-northeast3` |
 | Vertex RAG 지원 region | |
-| Firestore database ID | |
-| Artifact Registry repository | `ip-risk-agent` 또는 확정값: |
+| Firestore database ID | `ip-risk-agent-v2` |
+| Artifact Registry repository | `ip-risk-agent-v2` |
 | RC SHA | production composition blocker 해결 commit SHA: |
 | image URI@digest | |
 | API / Worker service account | |
 | Tasks / Scheduler caller service account | |
 | Deploy service account | |
-| staging bucket | |
-| Cloud Tasks queue / location | `analysis-changes` / |
+| staging bucket | `proj-aj22-211200020328-iprisk-v2-staging` |
+| Cloud Tasks queue / location | `ip-risk-agent-v2-analysis-changes` / `asia-northeast3` |
 | Worker URL / revision | |
 | API URL / revision | |
 | custom domain | |
@@ -60,7 +62,7 @@ secret **값은 절대 적지 않고** 이름과 version 번호만 기록한다.
 
 ### 외부 작업 시작 전 필수 입력
 
-- [ ] staging project와 billing이 승인됐다.
+- [ ] shared project 사용과 v1 보호 정책이 승인됐다.
 - [ ] Console 작업자에게 필요한 관리자 권한이 시간 제한 또는 staging 범위로 부여됐다.
 - [ ] OAuth test user, GitHub test organization/repository, KIPRIS staging key가 준비됐다.
 - [ ] 공개 HTTPS domain 또는 우선 사용할 Cloud Run `run.app` URL 정책을 확정했다.
@@ -97,7 +99,8 @@ python scripts/prepare_rag_ingestion.py
 
 ## 3. project와 API 준비
 
-Console에서 project selector로 staging project를 고정하고 **Billing**에서 연결 상태를
+Console에서 project selector를 shared project `proj-aj22-211200020328`로 고정하고
+**Billing**에서 연결 상태를
 확인한다. 이어서 **APIs & Services → Library**에서 아래 API를 검색해 활성화한다.
 
 - Artifact Registry API: `artifactregistry.googleapis.com`
@@ -126,26 +129,27 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 
 | 권장 ID | 사용 위치 | 부여할 최소 권한 |
 |---|---|---|
-| `iprisk-api` | API Cloud Run | Firestore User, queue 한정 Cloud Tasks Enqueuer, staging bucket Storage Object User, 필요한 Secret 접근/버전 관리 |
-| `iprisk-worker` | Worker Cloud Run | Firestore User, staging bucket Storage Object User, Vertex AI User, 필요한 Secret Accessor |
-| `iprisk-tasks` | Cloud Tasks OIDC | Worker service의 Cloud Run Invoker만 |
-| `iprisk-scheduler` | Scheduler OIDC | API service의 Cloud Run Invoker만 |
-| `iprisk-deploy` | build/deploy | Artifact Registry write, Cloud Build 실행, Cloud Run/queue/scheduler/index 배포와 위 runtime SA에 대한 제한된 act-as |
+| `iprisk-v2-api` | API Cloud Run | v2 DB 조건부 Firestore User, v2 queue Enqueuer, v2 bucket object 권한, API secret/credential 최소 권한 |
+| `iprisk-v2-worker` | Worker Cloud Run | v2 DB 조건부 Firestore User, v2 bucket object 권한, Worker secret, Vertex/RAG |
+| `iprisk-v2-tasks` | Cloud Tasks OIDC | v2 Worker service의 Cloud Run Invoker만 |
+| `iprisk-v2-scheduler` | Scheduler OIDC | v2 API service의 Cloud Run Invoker만 |
+| `iprisk-v2-deploy` | build/deploy | v2 repository/Run/queue/scheduler/index와 지정 runtime SA act-as만 |
 
 세부 적용 순서:
 
-1. API/Worker에 project 범위 `roles/datastore.user`를 부여한다.
-2. API에 `roles/cloudtasks.enqueuer`를 가능하면 `analysis-changes` queue 범위로 부여한다.
-3. API에 `iprisk-tasks` 계정에 대한 `roles/iam.serviceAccountUser`를 부여한다.
-4. API/Worker에 staging bucket 범위 `roles/storage.objectUser`를 부여한다.
+1. API/Worker의 `roles/datastore.user`는 `resource.name ==
+   projects/proj-aj22-211200020328/databases/ip-risk-agent-v2` IAM Condition으로 제한한다.
+2. API에 v2 queue 범위 `roles/cloudtasks.enqueuer`만 부여한다.
+3. API에 `iprisk-v2-tasks` 계정에 대한 제한된 act-as 권한을 부여한다.
+4. API/Worker에 v2 staging bucket 범위 object 권한만 부여한다.
 5. Worker에 `roles/aiplatform.user`를 부여한다.
-6. secret별로 API/Worker에 `roles/secretmanager.secretAccessor`를 부여한다.
-7. API가 Source credential version을 추가·폐기해야 하는 secret에는
-   `roles/secretmanager.secretVersionAdder`와 필요한 version 관리 권한을 secret 범위로
-   부여한다. app이 새 secret 자체를 만드는 배포를 선택하면 staging project에만 적용한
-   최소 custom role을 우선하고, 불가피할 때만 `roles/secretmanager.admin`을 사용한다.
-8. Worker 배포 후 `iprisk-tasks`에 **그 Worker service만** `roles/run.invoker`를 부여한다.
-9. API 배포 후 `iprisk-scheduler`에 **그 API service만** `roles/run.invoker`를 부여한다.
+6. fixed secret은 표의 role에 개별 secret accessor만 부여한다.
+7. dynamic credential은 API에 project parent의 `secretmanager.secrets.create`만 담은 custom
+   role, API/Worker에 `iprisk-v2-cred-` resource-name condition의 versions.add/access만
+   부여한다. create 권한은 parent에서 평가되어 prefix IAM 제한이 불가능하므로 코드 prefix
+   guard가 필수다. runtime에서 쓰지 않는 disable과 Secret Manager Admin은 부여하지 않는다.
+8. Worker 배포 후 `iprisk-v2-tasks`에 **v2 Worker service만** Invoker를 부여한다.
+9. API 배포 후 `iprisk-v2-scheduler`에 **v2 API service만** Invoker를 부여한다.
 10. deploy identity의 `roles/iam.serviceAccountUser`는 API/Worker runtime SA에만 한정한다.
 
 `roles/cloudtasks.serviceAgent` 같은 service-agent role은 사용자 계정이나 위 5개 계정에
@@ -160,7 +164,8 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 
 1. **Artifact Registry → Repositories → Create repository**로 이동한다.
 2. Format은 Docker, mode는 Standard, location은 application region으로 고정한다.
-3. repository 이름은 입력표와 `deploy/cloudbuild.yaml`의 `_REPOSITORY`가 일치해야 한다.
+3. repository 이름은 반드시 `ip-risk-agent-v2`이며 기존
+   `cloud-run-source-deploy`에는 v2 권한이나 image를 추가하지 않는다.
 4. **Cloud Build → Triggers**를 새로 만들지 않아도 된다. 승인된 Cloud Shell/CI에서
    `deploy/cloudbuild.yaml`을 지정해 RC SHA를 build한다.
 5. build의 `smoke-import-api`, `smoke-import-worker`가 모두 성공했는지 확인한다.
@@ -174,7 +179,8 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 
 ## 6. Firestore database, index와 TTL
 
-1. **Firestore → Databases → Create database**에서 Native mode database를 만든다.
+1. **Firestore → Databases → Create database**에서 `ip-risk-agent-v2` named Native mode
+   database를 만든다. 기존 `(default)`는 열람·index/TTL/IAM 변경 대상이 아니다.
 2. location은 확정한 application region과 맞추고, 생성 후 변경 불가 특성을 재확인한다.
 3. `deploy/firestore.indexes.json`을 기준으로 아래 composite index 7개를 생성한다.
 
@@ -200,12 +206,14 @@ TTL 삭제는 즉시성을 보장하지 않으므로 application의 만료 검�
 
 - [ ] 7개 index가 Building이 아니라 Enabled/Ready다.
 - [ ] 3개 TTL policy가 Active다.
-- [ ] 실제 database ID를 `FIRESTORE_DATABASE`로 기록했다.
+- [ ] `FIRESTORE_DATABASE=ip-risk-agent-v2`이며 `(default)`가 아님을 확인했다.
 - [ ] staging 데이터와 production 데이터가 같은 database를 공유하지 않는다.
 
 ## 7. private staging bucket
 
-1. **Cloud Storage → Buckets → Create**에서 전역 고유 이름과 application region을 정한다.
+1. **Cloud Storage → Buckets → Create**에서
+   `proj-aj22-211200020328-iprisk-v2-staging`과 application region을 사용한다. 기존 bucket에는
+   lifecycle이나 IAM을 추가하지 않는다.
 2. Public access prevention을 Enforced로, uniform bucket-level access를 Enabled로 둔다.
 3. object versioning은 필요성 없이 켜지 않는다.
 4. **Lifecycle**에서 `deploy/storage-lifecycle.json`과 동일하게 설정한다.
@@ -221,20 +229,22 @@ TTL 삭제는 즉시성을 보장하지 않으므로 application의 만료 검�
 ## 8. Secret Manager
 
 **Security → Secret Manager → Create secret**에서 다음 logical secret을 만든다. 실제
-조직 naming policy에 따라 ID를 바꿔도 되지만 Cloud Run environment mapping과 일치시킨다.
+아래 canonical ID 그대로 만든다. 기존 `ipra-*` secret은 열람 외 사용·binding 변경 대상이
+아니다.
 
 | 용도 | 권장 secret ID | Cloud Run environment |
 |---|---|---|
-| session signing | `iprisk-session-secret` | `SESSION_SECRET` |
-| Google login client secret | `iprisk-google-login-client-secret` | `GOOGLE_LOGIN_CLIENT_SECRET` |
-| Drive client secret | `iprisk-drive-client-secret` | `GOOGLE_DRIVE_CLIENT_SECRET` |
-| Drive channel token | `iprisk-drive-channel-token` | `DRIVE_WATCH_CHANNEL_TOKEN` |
-| GitHub App private key | `iprisk-github-private-key` | `GITHUB_APP_PRIVATE_KEY_SECRET_ID`에는 secret ID만 전달 |
-| GitHub webhook secret | `iprisk-github-webhook-secret` | `GITHUB_WEBHOOK_SECRET_ID`에는 secret ID만 전달 |
-| KIPRIS key | `iprisk-kipris-access-key` | `KIPRIS_API_KEY_SECRET_ID`에는 secret ID만 전달 |
+| session signing | `iprisk-v2-session-secret` | `SESSION_SECRET` |
+| Google login client secret | `iprisk-v2-google-login-client-secret` | `GOOGLE_LOGIN_CLIENT_SECRET` |
+| Drive client secret | `iprisk-v2-drive-client-secret` | `GOOGLE_DRIVE_CLIENT_SECRET` |
+| Drive channel token | `iprisk-v2-drive-channel-token` | `DRIVE_WATCH_CHANNEL_TOKEN` |
+| GitHub App private key | `iprisk-v2-github-private-key` | `GITHUB_APP_PRIVATE_KEY_SECRET_ID`에는 secret ID만 전달 |
+| GitHub webhook secret | `iprisk-v2-github-webhook-secret` | `GITHUB_WEBHOOK_SECRET_ID`에는 secret ID만 전달 |
+| KIPRIS key | `iprisk-v2-kipris-access-key` | `KIPRIS_API_KEY_SECRET_ID`에는 secret ID만 전달 |
 
-OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 실제 값이나 ID
-규칙을 수기로 만들지 않는다. 각 secret에 initial version을 추가하고 runtime에는 필요한
+OAuth Source credential secret은 app이 `iprisk-v2-cred-{provider}-{digest}`로만 관리한다.
+`ipra-*`, `iprisk-google_drive-*`와 다른 non-v2 ref는 거부된다. 각 fixed secret에 initial
+version을 추가하고 runtime에는 필요한
 최소 secret만 노출한다. Secret value를 일반 environment value로 직접 붙여 넣지 않는다.
 
 - [ ] 모든 secret에 enabled initial version이 있다.
@@ -244,8 +254,8 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
 
 ## 9. Worker를 먼저 배포
 
-1. **Cloud Run → Create service**에서 service 이름을 `ip-risk-agent-worker`로 둔다.
-2. §5의 image digest를 지정하고 `iprisk-worker` service account를 attach한다.
+1. **Cloud Run → Create service**에서 service 이름을 `ip-risk-agent-v2-worker`로 둔다.
+2. §5의 image digest를 지정하고 `iprisk-v2-worker` service account를 attach한다.
 3. Authentication은 Require authentication, ingress는 Internal로 둔다.
 4. `deploy/cloud-run-services.yaml`의 Worker CPU/memory/concurrency/min/max와 command를
    그대로 반영한다.
@@ -253,8 +263,10 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
    worker required environment만 설정한다. Worker에는 Google Login/Picker/Scheduler,
    Drive callback/webhook/channel 또는 queue location/name을 주입하지 않는다. RAG 세 값은
    함께 설정하거나 모두 생략하고 실제 secret은 Secret Manager ID/mapping을 쓴다.
-6. `ANALYSIS_WORKER_URL`은 task endpoint가 아니라 Worker **base URL**로 둔다. app이
-   `/internal/tasks/analyze-change`를 붙인다.
+6. Worker의 `APP_PUBLIC_BASE_URL`을 deterministic
+   `https://ip-risk-agent-v2-worker-555102774494.asia-northeast3.run.app`로 두고 배포 결과의
+   service URL과 일치하는지 확인한다. Worker에는 `ANALYSIS_WORKER_URL`과
+   `CLOUD_TASKS_SERVICE_ACCOUNT`를 주입하지 않는다.
 7. 첫 revision은 traffic 100%를 주기 전 readiness와 로그 redaction을 확인한다.
 
 - [ ] unauthenticated 호출이 401/403이다.
@@ -267,9 +279,9 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
 
 1. **Cloud Tasks → Create queue**에서 `deploy/cloud-tasks-queue.yaml`과 동일한 이름,
    location, rate, concurrency, retry/backoff를 설정한다.
-2. `iprisk-tasks` caller에 Worker service의 Cloud Run Invoker만 부여한다.
-3. API SA에는 queue의 Cloud Tasks Enqueuer와 `iprisk-tasks` act-as만 부여한다.
-4. OIDC audience는 Worker base URL, service account email은 `iprisk-tasks`로 설정한다.
+2. `iprisk-v2-tasks` caller에 v2 Worker service의 Cloud Run Invoker만 부여한다.
+3. API SA에는 v2 queue의 Enqueuer와 `iprisk-v2-tasks` act-as만 부여한다.
+4. OIDC audience는 Worker base URL, service account email은 `iprisk-v2-tasks`로 설정한다.
 5. 직접 test task를 보낼 때 body는 `{"change_event_id":"<staging-id>"}`만 사용하고
    원문이나 credential을 넣지 않는다.
 
@@ -286,18 +298,18 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
 > job을 생성하거나 enabled 상태로 두지 않는다. API/Worker smoke와 Tasks 검증은 먼저
 > 진행할 수 있다.
 
-1. `ip-risk-agent-api`를 같은 image digest, `iprisk-api` service account로 배포한다.
+1. `ip-risk-agent-v2-api`를 같은 image digest, `iprisk-v2-api` service account로 배포한다.
 2. ingress는 All, authentication은 Allow unauthenticated로 두되 제품 route는 application
    session/CSRF 정책으로 보호한다.
 3. `APP_ENV=production`, `APP_ROLE=api`, `FRONTEND_DIST_DIR=/app/frontend/dist`와 manifest의
    common/API required environment를 설정한다. API에는 Intelligence/RAG 변수를 주입하지
    않는다. `APP_PUBLIC_BASE_URL`은 최종 HTTPS API origin이다.
 4. `/health/live`, `/health/ready`, `/app` static asset 제공을 확인한다.
-5. `iprisk-scheduler`에 API service의 Cloud Run Invoker만 부여한다.
+5. `iprisk-v2-scheduler`에 v2 API service의 Cloud Run Invoker만 부여한다.
 6. **Cloud Scheduler → Create job**에서 `deploy/scheduler-jobs.yaml`의 네 job을 만든다.
    URL은 API base URL + path, method는 POST, body는 해당 JSON, time zone은
    `Asia/Seoul`, attempt deadline은 300초다.
-7. Auth header는 Add OIDC token, service account는 `iprisk-scheduler`, audience는 query나
+7. Auth header는 Add OIDC token, service account는 `iprisk-v2-scheduler`, audience는 query나
    path를 붙이지 않은 API base URL로 고정한다.
 
 - [ ] API와 Worker가 같은 image digest를 쓴다.
@@ -308,7 +320,8 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
 ## 12. RAG corpus
 
 1. local/배포 host에서 `python scripts/prepare_rag_ingestion.py`를 다시 실행한다.
-2. **Vertex AI → RAG Engine**에서 확정한 RAG region에 staging corpus를 만든다.
+2. **Vertex AI → RAG Engine**에서 확정한 RAG region에
+   `ip-risk-agent-v2-legal-reference` corpus를 새로 만든다. 기존 corpus는 재사용하지 않는다.
 3. `rag-corpus/manifest.yaml`의 `approved_for_rag: true`이고 checksum이 일치하는 아래
    세 파일만 import한다.
    - `agpl-3.0-obligations.md`
@@ -326,7 +339,10 @@ OAuth Source credential secret은 app이 opaque ID로 관리하므로 여기서 
 ## 13. Google OAuth, Drive와 Picker
 
 최종 API HTTPS origin이 확정된 뒤 **Google Auth Platform / APIs & Services**에서
-consent screen과 web client를 구성한다. staging에서는 test user만 허용한다.
+v2 전용 OAuth client `ip-risk-agent-v2-login`, `ip-risk-agent-v2-drive`를 만든다. Branding,
+Audience, Data Access와 authorized domain은 v1과 공유되는 project-level configuration이다.
+이를 변경해야 한다면 “v1에도 영향을 줄 수 있는 shared configuration”으로 별도 승인하고,
+기존 v1 client/consent 설정을 수정하거나 삭제하지 않는다.
 
 정확히 등록할 URI:
 
@@ -342,7 +358,8 @@ scheme, host, port, 대소문자, path와 trailing slash까지 runtime environme
 필요 API와 가능한 application restriction으로 제한한다. Drive watch 생성 후 전달되는
 `X-Goog-*` header와 channel token 검증, 만료 전 renewal을 확인한다.
 
-- [ ] consent screen branding/scope/test user가 staging용으로 제한됐다.
+- [ ] project-level consent 변경이 v1에 미치는 영향을 검토·승인했다.
+- [ ] v2 login/Drive client가 기존 v1 client와 별개다.
 - [ ] login/Drive redirect URI가 runtime 값과 exact match다.
 - [ ] Picker key restriction이 적용됐다.
 - [ ] Drive webhook HTTPS, channel token, renewal/reconciliation이 통과했다.

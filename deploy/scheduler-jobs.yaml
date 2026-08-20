@@ -1,17 +1,17 @@
 jobs:
-  - name: drive-watch-renewal
+  - name: ip-risk-agent-v2-drive-watch-renewal
     schedule: "0 */6 * * *"
     path: /internal/scheduler/drive-watch-renewal
     body: { cursor: null, limit: 100 }
-  - name: drive-reconciliation
+  - name: ip-risk-agent-v2-drive-reconciliation
     schedule: "*/15 * * * *"
     path: /internal/scheduler/drive-reconciliation
     body: { cursor: null, limit: 100 }
-  - name: expired-state-cleanup
+  - name: ip-risk-agent-v2-expired-state-cleanup
     schedule: "15 * * * *"
     path: /internal/scheduler/expired-state-cleanup
     body: { cursor: null, limit: 500 }
-  - name: source-health-refresh
+  - name: ip-risk-agent-v2-source-health-refresh
     schedule: "*/10 * * * *"
     path: /internal/scheduler/source-health-refresh
     body: { cursor: null, limit: 100 }

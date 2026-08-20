@@ -20,6 +20,11 @@ IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 �
 | 구 Agent 원본 제거와 release candidate 고정 | 완료 |
 | GCP 외부 resource/IAM/live 배포 | Phase 9 착수, 외부 입력 대기 |
 
+Production v2는 기존 v1과 `proj-aj22-211200020328` project를 공유하므로 project 경계가
+아니라 `deploy/v2-resource-contract.yaml`의 v2 namespace로 격리한다. `(default)`
+Firestore, v1 Run/Scheduler/identity/secret/bucket/repository의 재사용이나 IAM 변경은
+금지되며 repository validator와 production startup이 이를 fail-closed한다.
+
 세부 상태와 검증 증거는 `INTEGRATION_V2_PROGRESS_LOG.md`에 기록한다. 이 로그는 통합 작업용 비규범 문서이며, 설계와 의존성 결정은 `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 `INTEGRATION_V2_EXECUTION_PLAN.md`가 우선한다.
 
 ## 시스템 구성
@@ -121,16 +126,27 @@ Production Cloud Run 변수 계약은 role별로 나뉜다.
 
 | Role | 필수 변수 |
 |---|---|
-| API/Worker 공통 | `APP_ENV`, `APP_ROLE`, `APP_PUBLIC_BASE_URL`, `GCP_PROJECT_ID`, `GCP_REGION`, `FIRESTORE_DATABASE`, `LOCAL_STAGING_BUCKET`, `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_SECRET_ID` |
+| API/Worker 공통 | `APP_ENV`, `APP_ROLE`, `APP_PUBLIC_BASE_URL`, `GCP_PROJECT_ID`, `GCP_REGION`, `FIRESTORE_DATABASE`, `LOCAL_STAGING_BUCKET`, `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_SECRET_ID`, `SOURCE_CREDENTIAL_SECRET_PREFIX` |
 | API | `SESSION_SECRET`, `FRONTEND_DIST_DIR`, Google login 3개, Drive redirect/webhook/channel 3개, Picker 2개, GitHub slug/webhook/callback 3개, `CLOUD_TASKS_LOCATION`, `CLOUD_TASKS_QUEUE`, `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT`, `SCHEDULER_SERVICE_ACCOUNT` |
-| Worker | `ANALYSIS_WORKER_URL`, `CLOUD_TASKS_SERVICE_ACCOUNT`, `VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG`, `KIPRIS_API_KEY_SECRET_ID`, `PACKAGE_METADATA_BASE_URL` |
+| Worker | `VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG`, `KIPRIS_API_KEY_SECRET_ID`, `PACKAGE_METADATA_BASE_URL` |
 | Worker 선택 RAG group | `RAG_REGION`, `RAG_CORPUS_ID`, `RAG_CORPUS_VERSION` 전체 또는 모두 생략 |
 | local/Desktop | `IPRISK_SERVER_BASE_URL`, `IPRISK_DESKTOP_RENDERER_URL`; 필요 시 provider group |
 | test only | `FIRESTORE_EMULATOR_HOST` |
 
-`GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. `FIRESTORE_EMULATOR_HOST`는 test 전용이며 production에서 설정하지 않는다. API는 Cloud Tasks queue publisher 설정을 사용하고 Worker는 `ANALYSIS_WORKER_URL`과 caller service account로 inbound OIDC만 검증한다. Worker는 queue location/name 또는 Scheduler/Google Login/Picker 설정을 요구하지 않는다. Google Picker는 browser API key와 Cloud project number를 함께 설정해야 하며 API production 시작 시 두 값이 모두 필요하다.
+`GEMINI_MODEL_ID`의 production 기준값은 `gemini-3.6-flash`다. production은
+`FIRESTORE_DATABASE=ip-risk-agent-v2`와 canonical project/region/bucket/secret prefix만
+허용하고 `(default)` 및 `FIRESTORE_EMULATOR_HOST`를 거부한다. API만 Cloud Tasks publisher와
+Tasks caller act-as 설정을 사용한다. Worker는 자신의 `APP_PUBLIC_BASE_URL`을 inbound OIDC
+audience로 사용하고 canonical v2 Tasks caller email을 코드 계약에서 얻으므로
+`ANALYSIS_WORKER_URL`이나 Tasks publisher/caller 설정을 받지 않는다. Google Picker는 browser
+API key와 project number `555102774494`를 함께 설정해야 한다.
 
-Production secret은 Secret Manager reference 또는 Cloud Run Secret Manager mapping으로 해석해야 한다. GitHub App private key와 KIPRIS key는 secret ID만 환경에 두고 composition root가 attached service identity로 latest enabled version을 읽는다. 서비스 계정 key file은 사용하지 않는다. `.env.example`에 비밀 값이나 예시 private key를 추가하지 않는다. Google Picker browser key는 secret이 아니지만 허용 origin과 Picker API로 제한해야 하며, project number와 함께 설정하거나 둘 다 비워야 한다.
+Production fixed secret은 `iprisk-v2-*` ID와 Cloud Run Secret Manager mapping만 사용한다.
+GitHub App private key와 KIPRIS key는 canonical secret ID만 환경에 두고 composition root가
+attached service identity로 latest enabled version을 읽는다. Source credential은
+`iprisk-v2-cred-{provider}-{digest}`만 생성·수락하고 v1/non-v2 reference를 거부한다.
+서비스 계정 key file은 사용하지 않는다. 전체 naming/IAM matrix는
+`docs/GCP_INTERNAL_DEPLOYMENT.md`와 `deploy/v2-resource-contract.yaml`을 따른다.
 
 ## Contract 생성과 검증
 

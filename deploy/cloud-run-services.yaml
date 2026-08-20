@@ -1,10 +1,11 @@
 services:
   api:
-    name: ip-risk-agent-api
+    name: ip-risk-agent-v2-api
     role: api
     port: 8080
     command: [python, -m, uvicorn, ip_risk_agent.main:create_app, --factory, --host, 0.0.0.0, --port, "8080"]
-    serviceAccount: ${API_SERVICE_ACCOUNT}
+    image: asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application:${IMAGE_TAG}
+    serviceAccount: iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
     ingress: all
     allowUnauthenticated: true
     minInstances: 0
@@ -13,11 +14,12 @@ services:
     cpu: "1"
     memory: 1Gi
   worker:
-    name: ip-risk-agent-worker
+    name: ip-risk-agent-v2-worker
     role: worker
     port: 8080
     command: [python, -m, uvicorn, ip_risk_agent.worker:create_app, --factory, --host, 0.0.0.0, --port, "8080"]
-    serviceAccount: ${WORKER_SERVICE_ACCOUNT}
+    image: asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application:${IMAGE_TAG}
+    serviceAccount: iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
     ingress: internal
     allowUnauthenticated: false
     minInstances: 0
@@ -38,6 +40,7 @@ requiredEnvironment:
     - GOOGLE_DRIVE_CLIENT_SECRET
     - GITHUB_APP_ID
     - GITHUB_APP_PRIVATE_KEY_SECRET_ID
+    - SOURCE_CREDENTIAL_SECRET_PREFIX
   api:
     - SESSION_SECRET
     - FRONTEND_DIST_DIR
@@ -58,8 +61,6 @@ requiredEnvironment:
     - CLOUD_TASKS_SERVICE_ACCOUNT
     - SCHEDULER_SERVICE_ACCOUNT
   worker:
-    - ANALYSIS_WORKER_URL
-    - CLOUD_TASKS_SERVICE_ACCOUNT
     - VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG
     - KIPRIS_API_KEY_SECRET_ID
     - PACKAGE_METADATA_BASE_URL
@@ -71,3 +72,33 @@ optionalEnvironment:
     - RAG_REGION
     - RAG_CORPUS_ID
     - RAG_CORPUS_VERSION
+canonicalEnvironment:
+  common:
+    APP_ENV: production
+    GCP_PROJECT_ID: proj-aj22-211200020328
+    GCP_REGION: asia-northeast3
+    FIRESTORE_DATABASE: ip-risk-agent-v2
+    LOCAL_STAGING_BUCKET: proj-aj22-211200020328-iprisk-v2-staging
+    GITHUB_APP_PRIVATE_KEY_SECRET_ID: iprisk-v2-github-private-key
+    SOURCE_CREDENTIAL_SECRET_PREFIX: iprisk-v2-cred
+  api:
+    APP_ROLE: api
+    GOOGLE_CLOUD_PROJECT_NUMBER: "555102774494"
+    GITHUB_WEBHOOK_SECRET_ID: iprisk-v2-github-webhook-secret
+    CLOUD_TASKS_LOCATION: asia-northeast3
+    CLOUD_TASKS_QUEUE: ip-risk-agent-v2-analysis-changes
+    CLOUD_TASKS_SERVICE_ACCOUNT: iprisk-v2-tasks@proj-aj22-211200020328.iam.gserviceaccount.com
+    ANALYSIS_WORKER_URL: https://ip-risk-agent-v2-worker-555102774494.asia-northeast3.run.app
+    SCHEDULER_SERVICE_ACCOUNT: iprisk-v2-scheduler@proj-aj22-211200020328.iam.gserviceaccount.com
+  worker:
+    APP_ROLE: worker
+    APP_PUBLIC_BASE_URL: https://ip-risk-agent-v2-worker-555102774494.asia-northeast3.run.app
+    KIPRIS_API_KEY_SECRET_ID: iprisk-v2-kipris-access-key
+secretEnvironment:
+  api:
+    SESSION_SECRET: iprisk-v2-session-secret
+    GOOGLE_LOGIN_CLIENT_SECRET: iprisk-v2-google-login-client-secret
+    GOOGLE_DRIVE_CLIENT_SECRET: iprisk-v2-drive-client-secret
+    DRIVE_WATCH_CHANNEL_TOKEN: iprisk-v2-drive-channel-token
+  worker:
+    GOOGLE_DRIVE_CLIENT_SECRET: iprisk-v2-drive-client-secret

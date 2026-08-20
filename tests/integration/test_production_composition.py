@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from iprisk_contracts import AnalysisType, SourceType
 
 import ip_risk_agent.composition.production as production
+import ip_risk_agent.gcp.foundation as foundation_module
 import ip_risk_agent.main as api_entrypoint
 import ip_risk_agent.worker as worker_entrypoint
 from ip_risk_agent.composition.container import (
@@ -21,14 +22,27 @@ from ip_risk_agent.gcp.foundation import (
     build_google_cloud_foundation,
 )
 from ip_risk_agent.gcp.identity import GoogleOidcTaskAuthenticator
+from ip_risk_agent.gcp_contract import (
+    DYNAMIC_CREDENTIAL_SECRET_PREFIX,
+    FIRESTORE_DATABASE,
+    FIXED_SECRET_IDS,
+    PROJECT_ID,
+    PROJECT_NUMBER,
+    REGION,
+    SCHEDULER_SERVICE_ACCOUNT,
+    STAGING_BUCKET,
+    TASK_QUEUE,
+    TASKS_SERVICE_ACCOUNT,
+    WORKER_BASE_URL,
+)
 
 
 class FakeSecretReader:
     def access(self, secret_id: str) -> str:
         return {
-            "github-private-key": "test-private-key",
-            "github-webhook": "test-webhook-secret",
-            "kipris-key": "test-kipris-key",
+            FIXED_SECRET_IDS["github_private_key"]: "test-private-key",
+            FIXED_SECRET_IDS["github_webhook"]: "test-webhook-secret",
+            FIXED_SECRET_IDS["kipris"]: "test-kipris-key",
         }[secret_id]
 
 
@@ -63,17 +77,20 @@ def _settings(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist") -
     common = {
         "APP_ENV": "production",
         "APP_ROLE": role.value,
-        "APP_PUBLIC_BASE_URL": "https://api.example.com",
-        "GCP_PROJECT_ID": "project-1",
-        "GCP_REGION": "asia-northeast3",
-        "FIRESTORE_DATABASE": "(default)",
-        "LOCAL_STAGING_BUCKET": "staging-bucket",
+        "APP_PUBLIC_BASE_URL": (
+            "https://api.example.com" if role is AppRole.API else WORKER_BASE_URL
+        ),
+        "GCP_PROJECT_ID": PROJECT_ID,
+        "GCP_REGION": REGION,
+        "FIRESTORE_DATABASE": FIRESTORE_DATABASE,
+        "LOCAL_STAGING_BUCKET": STAGING_BUCKET,
         "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
         "GOOGLE_DRIVE_CLIENT_SECRET": "drive-secret",
         "GITHUB_APP_ID": "app-1",
-        "GITHUB_APP_PRIVATE_KEY_SECRET_ID": "github-private-key",
-        "ANALYSIS_WORKER_URL": "https://worker.example.com",
-        "CLOUD_TASKS_SERVICE_ACCOUNT": "tasks@example.iam.gserviceaccount.com",
+        "GITHUB_APP_PRIVATE_KEY_SECRET_ID": FIXED_SECRET_IDS[
+            "github_private_key"
+        ],
+        "SOURCE_CREDENTIAL_SECRET_PREFIX": DYNAMIC_CREDENTIAL_SECRET_PREFIX,
     }
     if role is AppRole.API:
         common.update(
@@ -87,20 +104,22 @@ def _settings(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist") -
                 "GOOGLE_DRIVE_WEBHOOK_BASE_URL": "https://api.example.com/webhooks/google-drive",
                 "DRIVE_WATCH_CHANNEL_TOKEN": "channel-token",
                 "GOOGLE_PICKER_API_KEY": "picker-key",
-                "GOOGLE_CLOUD_PROJECT_NUMBER": "123456789012",
-                "GITHUB_APP_SLUG": "ip-risk-agent",
-                "GITHUB_WEBHOOK_SECRET_ID": "github-webhook",
+                "GOOGLE_CLOUD_PROJECT_NUMBER": PROJECT_NUMBER,
+                "GITHUB_APP_SLUG": "ip-risk-agent-v2",
+                "GITHUB_WEBHOOK_SECRET_ID": FIXED_SECRET_IDS["github_webhook"],
                 "GITHUB_APP_CALLBACK_URL": "https://api.example.com/api/v1/source-connections/github/install/callback",
-                "CLOUD_TASKS_LOCATION": "asia-northeast3",
-                "CLOUD_TASKS_QUEUE": "analysis-changes",
-                "SCHEDULER_SERVICE_ACCOUNT": "scheduler@example.iam.gserviceaccount.com",
+                "CLOUD_TASKS_LOCATION": REGION,
+                "CLOUD_TASKS_QUEUE": TASK_QUEUE,
+                "ANALYSIS_WORKER_URL": WORKER_BASE_URL,
+                "CLOUD_TASKS_SERVICE_ACCOUNT": TASKS_SERVICE_ACCOUNT,
+                "SCHEDULER_SERVICE_ACCOUNT": SCHEDULER_SERVICE_ACCOUNT,
             }
         )
     else:
         common.update(
             {
-                "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": "asia-northeast3",
-                "KIPRIS_API_KEY_SECRET_ID": "kipris-key",
+                "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": REGION,
+                "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
                 "PACKAGE_METADATA_BASE_URL": "https://api.deps.dev/v3",
             }
         )
@@ -159,6 +178,8 @@ def test_real_production_composer_builds_role_specific_complete_containers(monke
         "task_queue"
     ] == "not_applicable"
     assert isinstance(worker.task_authenticator, GoogleOidcTaskAuthenticator)
+    assert worker.task_authenticator._audience == WORKER_BASE_URL
+    assert worker.task_authenticator._service_account == TASKS_SERVICE_ACCOUNT
     assert worker_foundation.task_enqueuer is None
 
 
@@ -191,6 +212,44 @@ def test_google_cloud_foundation_creates_cloud_tasks_only_for_api() -> None:
         ),
     )
     assert worker.task_enqueuer is None
+
+
+def test_google_cloud_clients_use_explicit_v2_named_database_for_worker(
+    monkeypatch,
+) -> None:
+    firestore_calls: list[dict] = []
+    monkeypatch.setattr(
+        foundation_module.firestore,
+        "AsyncClient",
+        lambda **kwargs: firestore_calls.append(kwargs) or object(),
+    )
+    monkeypatch.setattr(
+        foundation_module.secretmanager,
+        "SecretManagerServiceAsyncClient",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        foundation_module.secretmanager,
+        "SecretManagerServiceClient",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        foundation_module.storage,
+        "Client",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        foundation_module.tasks_v2,
+        "CloudTasksAsyncClient",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("Worker must not create a Cloud Tasks client")
+        ),
+    )
+    clients = GoogleCloudClients.create(_settings(AppRole.WORKER))
+    assert firestore_calls == [
+        {"project": PROJECT_ID, "database": FIRESTORE_DATABASE}
+    ]
+    assert clients.cloud_tasks is None
 
 
 def test_production_entrypoints_use_foundation_and_runtime_composer(
@@ -311,8 +370,7 @@ def _environment(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist"
         "GOOGLE_DRIVE_CLIENT_SECRET": settings.drive_client_secret or "",
         "GITHUB_APP_ID": settings.github_app_id or "",
         "GITHUB_APP_PRIVATE_KEY_SECRET_ID": settings.github_private_key_secret_id or "",
-        "ANALYSIS_WORKER_URL": settings.analysis_worker_url or "",
-        "CLOUD_TASKS_SERVICE_ACCOUNT": settings.cloud_tasks_service_account or "",
+        "SOURCE_CREDENTIAL_SECRET_PREFIX": settings.source_credential_secret_prefix,
     }
     role_values = {
         field: value
@@ -332,6 +390,8 @@ def _environment(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist"
             "GITHUB_APP_CALLBACK_URL": settings.github_app_callback_url,
             "CLOUD_TASKS_LOCATION": settings.cloud_tasks_location,
             "CLOUD_TASKS_QUEUE": settings.cloud_tasks_queue,
+            "ANALYSIS_WORKER_URL": settings.analysis_worker_url,
+            "CLOUD_TASKS_SERVICE_ACCOUNT": settings.cloud_tasks_service_account,
             "SCHEDULER_SERVICE_ACCOUNT": settings.scheduler_service_account,
             "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": settings.vertex_config,
             "KIPRIS_API_KEY_SECRET_ID": settings.kipris_api_key_secret_id,

@@ -1,6 +1,6 @@
 substitutions:
   _REGION: asia-northeast3
-  _REPOSITORY: ip-risk-agent
+  _REPOSITORY: ip-risk-agent-v2
   _IMAGE: application
 steps:
   - id: build

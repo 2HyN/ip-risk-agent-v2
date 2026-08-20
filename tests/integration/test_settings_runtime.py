@@ -9,6 +9,37 @@ from ip_risk_agent.composition.settings import (
     Settings,
     SettingsError,
 )
+from ip_risk_agent.gcp_contract import (
+    DYNAMIC_CREDENTIAL_SECRET_PREFIX,
+    FIRESTORE_DATABASE,
+    FIXED_SECRET_IDS,
+    PROJECT_ID,
+    PROJECT_NUMBER,
+    REGION,
+    SCHEDULER_SERVICE_ACCOUNT,
+    STAGING_BUCKET,
+    TASK_QUEUE,
+    TASKS_SERVICE_ACCOUNT,
+    WORKER_BASE_URL,
+)
+
+
+def _production_common() -> dict[str, str]:
+    return {
+        "APP_ENV": "production",
+        "APP_PUBLIC_BASE_URL": WORKER_BASE_URL,
+        "GCP_PROJECT_ID": PROJECT_ID,
+        "GCP_REGION": REGION,
+        "FIRESTORE_DATABASE": FIRESTORE_DATABASE,
+        "LOCAL_STAGING_BUCKET": STAGING_BUCKET,
+        "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
+        "GOOGLE_DRIVE_CLIENT_SECRET": "drive-secret",
+        "GITHUB_APP_ID": "app-1",
+        "GITHUB_APP_PRIVATE_KEY_SECRET_ID": FIXED_SECRET_IDS[
+            "github_private_key"
+        ],
+        "SOURCE_CREDENTIAL_SECRET_PREFIX": DYNAMIC_CREDENTIAL_SECRET_PREFIX,
+    }
 
 
 def test_settings_reject_partial_groups_and_short_api_session_secret() -> None:
@@ -49,64 +80,27 @@ def test_local_worker_allows_absent_external_groups_but_production_never_falls_b
     assert local.profile is RuntimeProfile.LOCAL
     assert not local.drive_enabled and not local.github_enabled
 
-    production = Settings(
-        profile=RuntimeProfile.PRODUCTION,
-        role=AppRole.WORKER,
-        log_level="INFO",
-        public_base_url="https://worker.example.com",
-        session_secret="",
-        gcp_project_id="project-1",
-        gcp_region="asia-northeast3",
-        firestore_database="(default)",
-        google_login_client_id="login-client",
-        google_login_client_secret="login-secret",
-        google_login_redirect_uri="https://api.example.com/api/v1/auth/google/callback",
-        drive_client_id="drive-client",
-        drive_client_secret="drive-secret",
-        drive_redirect_uri="https://api.example.com/drive/callback",
-        drive_webhook_base_url="https://api.example.com/webhooks/google-drive",
-        drive_watch_channel_token="channel-token",
-        google_picker_api_key="restricted-browser-key",
-        google_cloud_project_number="123456789012",
-        github_app_id="app-1",
-        github_app_slug="ip-risk-agent",
-        github_private_key_secret_id="github-key",
-        github_webhook_secret_id="github-webhook",
-        github_app_callback_url="https://api.example.com/github/callback",
-        local_staging_bucket="staging-bucket",
-        cloud_tasks_location="asia-northeast3",
-        cloud_tasks_queue="analysis",
-        analysis_worker_url="https://worker.example.com/internal/tasks/analyze-change",
-        cloud_tasks_service_account="worker-invoker@example.iam.gserviceaccount.com",
-        vertex_config="asia-northeast3",
-        kipris_api_key_secret_id="kipris-key",
-        package_metadata_base_url="https://packages.example.com",
+    production = Settings.from_env(
+        {
+            **_production_common(),
+            "APP_ROLE": "worker",
+            "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": REGION,
+            "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
+            "PACKAGE_METADATA_BASE_URL": "https://packages.example.com",
+        }
     )
     with pytest.raises(SettingsError, match="explicit Firestore adapter"):
         build_container(production)
 
 
 def test_production_settings_are_role_scoped() -> None:
-    common = {
-        "APP_ENV": "production",
-        "APP_PUBLIC_BASE_URL": "https://api.example.com",
-        "GCP_PROJECT_ID": "project-1",
-        "GCP_REGION": "asia-northeast3",
-        "FIRESTORE_DATABASE": "(default)",
-        "LOCAL_STAGING_BUCKET": "staging-bucket",
-        "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
-        "GOOGLE_DRIVE_CLIENT_SECRET": "drive-secret",
-        "GITHUB_APP_ID": "app-1",
-        "GITHUB_APP_PRIVATE_KEY_SECRET_ID": "github-key",
-        "ANALYSIS_WORKER_URL": "https://worker.example.com",
-        "CLOUD_TASKS_SERVICE_ACCOUNT": "tasks@example.iam.gserviceaccount.com",
-    }
+    common = _production_common()
     worker = Settings.from_env(
         {
             **common,
             "APP_ROLE": "worker",
-            "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": "asia-northeast3",
-            "KIPRIS_API_KEY_SECRET_ID": "kipris-key",
+            "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": REGION,
+            "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
             "PACKAGE_METADATA_BASE_URL": "https://api.deps.dev/v3",
         }
     )
@@ -128,15 +122,61 @@ def test_production_settings_are_role_scoped() -> None:
             "GOOGLE_DRIVE_WEBHOOK_BASE_URL": "https://api.example.com/webhooks/google-drive",
             "DRIVE_WATCH_CHANNEL_TOKEN": "channel-token",
             "GOOGLE_PICKER_API_KEY": "picker-key",
-            "GOOGLE_CLOUD_PROJECT_NUMBER": "123456789012",
-            "GITHUB_APP_SLUG": "ip-risk-agent",
-            "GITHUB_WEBHOOK_SECRET_ID": "github-webhook",
+            "GOOGLE_CLOUD_PROJECT_NUMBER": PROJECT_NUMBER,
+            "GITHUB_APP_SLUG": "ip-risk-agent-v2",
+            "GITHUB_WEBHOOK_SECRET_ID": FIXED_SECRET_IDS["github_webhook"],
             "GITHUB_APP_CALLBACK_URL": "https://api.example.com/api/v1/source-connections/github/install/callback",
-            "CLOUD_TASKS_LOCATION": "asia-northeast3",
-            "CLOUD_TASKS_QUEUE": "analysis-changes",
-            "SCHEDULER_SERVICE_ACCOUNT": "scheduler@example.iam.gserviceaccount.com",
+            "CLOUD_TASKS_LOCATION": REGION,
+            "CLOUD_TASKS_QUEUE": TASK_QUEUE,
+            "ANALYSIS_WORKER_URL": WORKER_BASE_URL,
+            "CLOUD_TASKS_SERVICE_ACCOUNT": TASKS_SERVICE_ACCOUNT,
+            "SCHEDULER_SERVICE_ACCOUNT": SCHEDULER_SERVICE_ACCOUNT,
         }
     )
     assert api.role is AppRole.API
     assert api.vertex_config is None
     assert api.kipris_api_key_secret_id is None
+
+
+def test_production_v2_rejects_default_database_and_non_v2_namespace() -> None:
+    values = {
+        **_production_common(),
+        "APP_ROLE": "worker",
+        "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": REGION,
+        "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
+        "PACKAGE_METADATA_BASE_URL": "https://api.deps.dev/v3",
+    }
+    with pytest.raises(SettingsError, match="FIRESTORE_DATABASE='ip-risk-agent-v2'"):
+        Settings.from_env({**values, "FIRESTORE_DATABASE": "(default)"})
+    with pytest.raises(SettingsError, match="GCP_PROJECT_ID"):
+        Settings.from_env({**values, "GCP_PROJECT_ID": "legacy-project"})
+    with pytest.raises(SettingsError, match="GITHUB_APP_PRIVATE_KEY_SECRET_ID"):
+        Settings.from_env(
+            {**values, "GITHUB_APP_PRIVATE_KEY_SECRET_ID": "ipra-github-key"}
+        )
+    with pytest.raises(SettingsError, match="SOURCE_CREDENTIAL_SECRET_PREFIX"):
+        Settings.from_env(
+            {**values, "SOURCE_CREDENTIAL_SECRET_PREFIX": "iprisk-google-drive"}
+        )
+
+
+def test_production_worker_is_deployable_without_api_or_task_publisher_settings() -> None:
+    values = {
+        **_production_common(),
+        "APP_ROLE": "worker",
+        "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG": REGION,
+        "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
+        "PACKAGE_METADATA_BASE_URL": "https://api.deps.dev/v3",
+    }
+    worker = Settings.from_env(values)
+    assert worker.analysis_worker_url is None
+    assert worker.cloud_tasks_service_account is None
+    assert worker.cloud_tasks_queue is None
+    with pytest.raises(SettingsError, match="API-only"):
+        Settings.from_env(
+            {
+                **values,
+                "ANALYSIS_WORKER_URL": WORKER_BASE_URL,
+                "CLOUD_TASKS_SERVICE_ACCOUNT": TASKS_SERVICE_ACCOUNT,
+            }
+        )

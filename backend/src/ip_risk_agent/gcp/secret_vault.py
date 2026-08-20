@@ -15,9 +15,12 @@ from ip_risk_agent.connectors.common.errors import NotFoundError
 
 
 class SecretManagerCredentialVault:
-    def __init__(self, *, client, project_id: str) -> None:
+    def __init__(self, *, client, project_id: str, secret_prefix: str) -> None:
+        if re.fullmatch(r"[a-z][a-z0-9-]{2,63}", secret_prefix) is None:
+            raise ValueError("credential secret prefix is invalid")
         self._client = client
         self._parent = f"projects/{project_id}"
+        self._secret_prefix = secret_prefix
 
     async def put(self, scope: CredentialScope, secret: str) -> CredentialRef:
         secret_name = self._secret_resource(scope)
@@ -28,7 +31,11 @@ class SecretManagerCredentialVault:
                 secret_id=secret_id,
                 secret={
                     "replication": {"automatic": {}},
-                    "labels": {"owner": "ip-risk-agent", "provider": scope.provider.value.lower()},
+                    "labels": {
+                        "owner": "ip-risk-agent-v2",
+                        "environment": "v2",
+                        "provider": scope.provider.value.lower(),
+                    },
                 },
             )
         except google_exceptions.AlreadyExists:
@@ -79,10 +86,16 @@ class SecretManagerCredentialVault:
                 (scope.provider.value, scope.connection_id, scope.secret_name)
             ).encode("utf-8")
         ).hexdigest()[:40]
-        return f"{self._parent}/secrets/iprisk-{scope.provider.value.lower()}-{digest}"
+        return (
+            f"{self._parent}/secrets/{self._secret_prefix}-"
+            f"{scope.provider.value.lower()}-{digest}"
+        )
 
     def _validate_ref(self, ref: CredentialRef) -> str:
-        prefix = f"{self._parent}/secrets/iprisk-{ref.provider.value.lower()}-"
+        prefix = (
+            f"{self._parent}/secrets/{self._secret_prefix}-"
+            f"{ref.provider.value.lower()}-"
+        )
         if re.fullmatch(re.escape(prefix) + r"[0-9a-f]{40}", ref.key_id) is None:
             raise ValueError("credential reference is outside the configured project")
         return ref.key_id

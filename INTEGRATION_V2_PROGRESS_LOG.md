@@ -905,3 +905,76 @@ credential을 준비한 뒤 live marker를 별도 재실행한다.
 
 현재 Phase 9 gate는 계속 **진행 중**이다. API/Worker production startup composition
 blocker는 해결됐지만 Scheduler repository blocker와 기존 외부 입력 gate가 남아 있다.
+
+## Phase 9 shared-project v2 namespace isolation
+
+### 범위와 시작 상태
+
+- 시작 HEAD: `4ec2b9e`
+- shared GCP project: `proj-aj22-211200020328` / project number `555102774494`
+- 목표: 기존 v1 resource를 수정·삭제·재사용하거나 IAM binding 대상으로 삼지 못하도록
+  production startup, deploy contract, validator와 외부 작업 문서를 v2 namespace로 수렴한다.
+- 이 작업에서는 `gcloud`, Console, 실제 resource/IAM/secret 변경을 실행하지 않았다.
+
+### 구현 결과
+
+1. `gcp_contract.py`와 `deploy/v2-resource-contract.yaml`에 project/region, named Firestore,
+   Run services, Tasks queue, repository/image, five service accounts, Scheduler jobs, bucket,
+   fixed/dynamic secrets와 RAG corpus의 canonical 이름을 고정했다.
+2. production `Settings.validate()`는 project/region/database/bucket/secret prefix와 role별
+   fixed secret/task identity를 exact-match하며 `(default)`, emulator, legacy/non-v2 값과
+   role 반대편 설정을 거부한다.
+3. Worker는 API-only `ANALYSIS_WORKER_URL`, Tasks caller/publisher, OAuth/session/Scheduler
+   설정을 받지 않는다. deterministic v2 Run URL을 `APP_PUBLIC_BASE_URL`과 inbound OIDC
+   audience로 사용하고 canonical Tasks caller identity를 코드 계약에서 얻어 Worker-first
+   deployment가 가능하다.
+4. Source credential vault는 `iprisk-v2-cred-{provider}-{digest}`만 생성·수락하고 secret에
+   `owner=ip-risk-agent-v2`, `environment=v2` label을 둔다. `ipra-*`, 기존
+   `iprisk-google_drive-*` 및 다른 prefix ref는 fail-closed한다.
+5. Run/Build/Tasks/Scheduler manifest를 모두 canonical v2 이름으로 바꾸고 API/Worker가 같은
+   `ip-risk-agent-v2/application` artifact를 사용하며 Worker unauthenticated가 false임을
+   validator가 검사한다.
+6. `deploy/iam-policy-contract.yaml`에 v2 database condition, queue/bucket/repository/service
+   단위 binding, fixed secret role matrix와 dynamic credential 최소 permission을 기록했다.
+   runtime Owner/Editor/Secret Manager Admin/unconditional Datastore User는 금지한다.
+7. Secret 생성은 `secretmanager.secrets.create`가 project parent에서 평가되어 미래 secret
+   ID prefix로 IAM 제한할 수 없음을 명시했다. API custom role은 이 permission 하나만
+   유지하고 versions.add/access는 v2 prefix condition으로 제한하며 disable은 현재 미부여다.
+8. Google Auth Platform project-level Branding/Audience/Data Access/authorized domain은 v1과
+   shared configuration으로 표시했다. v2 Login/Drive client와 v2 RAG corpus는 별도 생성하되
+   v1 client/consent/corpus를 수정·삭제·재사용하지 않는다.
+
+### 회귀 검증
+
+| 검증 | 결과 |
+|---|---|
+| namespace/settings/composition/GCP adapter/deploy focused | `32 passed` |
+| 전체 integration non-live | `46 passed` |
+| 전체 Python non-live | `591 passed, 1 skipped, 10 deselected` |
+| Python compile / pip check | 통과 / broken requirement 없음 |
+| deploy v2 namespace/IAM validator | `GCP deployment inputs: valid` |
+| RAG dry-run | 3 documents, checksum 일치, external write 없음 |
+| pnpm frozen offline install | lock 변경 없이 통과 |
+| TypeScript typecheck/build/resolution | 통과 |
+| Frontend / Desktop | `30 passed` / `70 passed, 2 skipped` |
+| Frozen Contract regenerate/diff | 변경 없음 |
+| `git diff --check` | 통과 |
+
+Python skip/deselection과 Desktop skip 사유는 이전 gate와 동일하게 Firestore emulator,
+explicit live provider, Windows symlink 권한이다. v1/default/non-v2 이름, public Worker,
+서로 다른 image와 Worker API-setting 유입을 주입한 10개 negative deployment case는 모두
+validator failure로 확인했다.
+
+### 남은 blocker
+
+- repository: 기존과 동일하게 `SchedulerOperations` 네 maintenance 구현과 API router
+  wiring이 없다. 해결 전 canonical v2 Scheduler jobs도 생성/enable하지 않는다.
+- external: named Firestore DB, v2 IAM/resource/secret/OAuth client/RAG corpus/image를 실제로
+  만들고 ADC/IAM condition/live E2E를 검증해야 한다.
+- dynamic credential secret create permission은 GCP IAM 특성상 project parent scope다.
+  현재 코드 prefix guard와 create-only custom role이 v1 수정을 막지만, compromised runtime의
+  임의 새 secret 생성을 IAM 자체로 prefix 제한해야 한다면 별도 provisioning broker로
+  secret creation을 분리하는 후속 hardening이 필요하다.
+
+현재 Phase 9 gate는 계속 **진행 중**이다. repository 내부 v2 namespace contract는
+수렴했으며 실제 shared project에는 아직 어떤 변경도 적용하지 않았다.

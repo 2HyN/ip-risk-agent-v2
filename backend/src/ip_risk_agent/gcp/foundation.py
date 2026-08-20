@@ -174,6 +174,7 @@ def build_google_cloud_foundation(
         credential_vault=SecretManagerCredentialVault(
             client=clients.secret_manager,
             project_id=settings.gcp_project_id,
+            secret_prefix=settings.source_credential_secret_prefix,
         ),
         staging_store=CloudStorageLocalStagingStore(
             client=clients.storage,

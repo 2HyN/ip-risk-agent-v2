@@ -1,5 +1,5 @@
 queue:
-  name: analysis-changes
+  name: ip-risk-agent-v2-analysis-changes
   location: asia-northeast3
   rateLimits:
     maxDispatchesPerSecond: 10

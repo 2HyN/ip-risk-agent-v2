@@ -53,6 +53,7 @@ from ip_risk_agent.intelligence.license.package_metadata import HttpPackageMetad
 from ip_risk_agent.intelligence.patent.kipris import KiprisClient
 from ip_risk_agent.intelligence.public import IntelligenceFacade, create_analyzer_registry
 from ip_risk_agent.intelligence.rag.engine import RagEngineConfig, RagEngineRetriever
+from ip_risk_agent.gcp_contract import TASKS_SERVICE_ACCOUNT
 
 from .container import RuntimeComposition, RuntimeCompositionContext
 from .device_auth import DeviceSourceAuthorizer, DeviceWorkspaceAuthorizer
@@ -311,8 +312,6 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
 
 def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeComposition:
     settings = context.settings
-    assert settings.analysis_worker_url is not None
-    assert settings.cloud_tasks_service_account is not None
     assert settings.vertex_config is not None
     assert settings.kipris_api_key_secret_id is not None
     assert settings.package_metadata_base_url is not None
@@ -361,8 +360,8 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
         ),
         intelligence=intelligence,
         task_authenticator=GoogleOidcTaskAuthenticator(
-            audience=settings.analysis_worker_url,
-            service_account_email=settings.cloud_tasks_service_account,
+            audience=settings.public_base_url,
+            service_account_email=TASKS_SERVICE_ACCOUNT,
         ),
         close_callbacks=tuple(close_callbacks),
     )

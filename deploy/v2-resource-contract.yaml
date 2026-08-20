@@ -1,0 +1,40 @@
+contractVersion: 2
+project:
+  id: proj-aj22-211200020328
+  number: "555102774494"
+  region: asia-northeast3
+firestore:
+  database: ip-risk-agent-v2
+cloudRun:
+  api: ip-risk-agent-v2-api
+  worker: ip-risk-agent-v2-worker
+cloudTasks:
+  queue: ip-risk-agent-v2-analysis-changes
+artifactRegistry:
+  repository: ip-risk-agent-v2
+  image: application
+serviceAccounts:
+  api: iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+  worker: iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+  tasks: iprisk-v2-tasks@proj-aj22-211200020328.iam.gserviceaccount.com
+  scheduler: iprisk-v2-scheduler@proj-aj22-211200020328.iam.gserviceaccount.com
+  deploy: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+schedulerJobs:
+  - ip-risk-agent-v2-drive-watch-renewal
+  - ip-risk-agent-v2-drive-reconciliation
+  - ip-risk-agent-v2-expired-state-cleanup
+  - ip-risk-agent-v2-source-health-refresh
+storage:
+  stagingBucket: proj-aj22-211200020328-iprisk-v2-staging
+secrets:
+  fixed:
+    session: iprisk-v2-session-secret
+    googleLoginClient: iprisk-v2-google-login-client-secret
+    driveClient: iprisk-v2-drive-client-secret
+    driveChannel: iprisk-v2-drive-channel-token
+    githubPrivateKey: iprisk-v2-github-private-key
+    githubWebhook: iprisk-v2-github-webhook-secret
+    kipris: iprisk-v2-kipris-access-key
+  dynamicCredentialPrefix: iprisk-v2-cred
+rag:
+  corpusDisplayName: ip-risk-agent-v2-legal-reference

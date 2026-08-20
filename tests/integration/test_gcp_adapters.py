@@ -40,6 +40,7 @@ from ip_risk_agent.gcp import (
     SecretManagerCredentialVault,
     SecretManagerRuntimeSecretReader,
 )
+from ip_risk_agent.gcp_contract import DYNAMIC_CREDENTIAL_SECRET_PREFIX
 
 
 class MemoryOperationalBackend:
@@ -255,12 +256,14 @@ class FakeSecretClient:
         self.secrets: set[str] = set()
         self.versions: dict[str, list[bytes]] = {}
         self.disabled: list[str] = []
+        self.created: list[dict] = []
 
     async def create_secret(self, *, parent, secret_id, secret):
         name = f"{parent}/secrets/{secret_id}"
         if name in self.secrets:
             raise google_exceptions.AlreadyExists("exists")
         self.secrets.add(name)
+        self.created.append(secret)
 
     async def add_secret_version(self, *, parent, payload):
         self.versions.setdefault(parent, []).append(payload["data"])
@@ -287,7 +290,11 @@ class FakeRuntimeSecretClient:
 def test_secret_manager_vault_uses_opaque_project_scoped_reference() -> None:
     async def scenario() -> None:
         client = FakeSecretClient()
-        vault = SecretManagerCredentialVault(client=client, project_id="project-1")
+        vault = SecretManagerCredentialVault(
+            client=client,
+            project_id="project-1",
+            secret_prefix=DYNAMIC_CREDENTIAL_SECRET_PREFIX,
+        )
         scope = CredentialScope(
             provider=SourceType.GOOGLE_DRIVE,
             connection_id="connection-with-private-identity",
@@ -295,11 +302,41 @@ def test_secret_manager_vault_uses_opaque_project_scoped_reference() -> None:
         )
         ref = await vault.put(scope, "token-a")
         assert "connection-with-private-identity" not in ref.key_id
+        assert f"/secrets/{DYNAMIC_CREDENTIAL_SECRET_PREFIX}-google_drive-" in ref.key_id
+        assert client.created[0]["labels"] == {
+            "owner": "ip-risk-agent-v2",
+            "environment": "v2",
+            "provider": "google_drive",
+        }
         assert await vault.get(ref) == "token-a"
         await vault.update(ref, "token-b")
         assert await vault.get(ref) == "token-b"
         await vault.delete(ref)
         assert client.disabled == [f"{ref.key_id}/versions/latest"]
+
+    run(scenario())
+
+
+def test_secret_manager_vault_rejects_v1_and_non_v2_references() -> None:
+    async def scenario() -> None:
+        vault = SecretManagerCredentialVault(
+            client=FakeSecretClient(),
+            project_id="project-1",
+            secret_prefix=DYNAMIC_CREDENTIAL_SECRET_PREFIX,
+        )
+        for secret_id in (
+            "ipra-drive-token",
+            "iprisk-google_drive-" + "a" * 40,
+            "iprisk-v2-other-google_drive-" + "a" * 40,
+        ):
+            ref = CredentialRef(
+                provider=SourceType.GOOGLE_DRIVE,
+                connection_id="connection-1",
+                secret_name="oauth-token",
+                key_id=f"projects/project-1/secrets/{secret_id}",
+            )
+            with pytest.raises(ValueError, match="outside"):
+                await vault.get(ref)
 
     run(scenario())
 

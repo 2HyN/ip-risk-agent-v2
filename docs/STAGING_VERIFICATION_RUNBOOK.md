@@ -13,6 +13,8 @@ provider credential과 비용 발생 resource가 준비된 staging 환경에서 
 - Secret 값은 저장소와 build log에 없고 Secret Manager 또는 secret-mapped environment로만 주입된다.
 - callback/webhook URL, Firestore database ID, queue/bucket/RAG region이 확정됐다.
 - rollback 대상의 직전 안정 Cloud Run revision과 secret version이 기록됐다.
+- shared project가 `proj-aj22-211200020328`이고 `deploy/v2-resource-contract.yaml`의 모든
+  canonical v2 이름이 확정됐다. v1 resource에는 변경 계획이 없다.
 
 하나라도 충족하지 못하면 외부 작업을 시작하지 않는다.
 
@@ -39,7 +41,7 @@ tag만으로 release evidence를 남기지 않는다.
 
 ## 3. resource 순서
 
-1. API enablement와 Artifact Registry
+1. shared project와 v1 보호 목록 재확인, API enablement와 v2 Artifact Registry
 2. API/Worker/Tasks/Scheduler/Deploy service account와 최소 IAM binding
 3. Firestore database, `deploy/firestore.indexes.json` index/TTL
 4. uniform bucket-level access staging bucket와 `deploy/storage-lifecycle.json`
@@ -56,8 +58,8 @@ tag만으로 release evidence를 남기지 않는다.
 
 ## 4. live test opt-in
 
-기본 test command는 `live`를 제외한다. 실제 provider test는 전용 staging project와
-최소 권한 test account에서만 명시적으로 선택한다.
+기본 test command는 `live`를 제외한다. 실제 provider test는 shared project 안의 v2
+resource와 최소 권한 test account에서만 명시적으로 선택한다.
 
 ```powershell
 python -m pytest tests/intelligence/test_live_providers.py -m live -vv
@@ -77,14 +79,20 @@ python -m pytest tests/intelligence/test_live_providers.py -m live -vv
 
 ## 5. managed resource 확인
 
-- Firestore: transaction contention/retry, 모든 required query, TTL field와 operational
-  namespace를 확인한다. emulator 결과와 실제 index 결과를 구분해 기록한다.
+- Firestore: client가 `ip-risk-agent-v2` named database에 연결됐고 `(default)`에 v2
+  document/index/TTL/IAM 변경이 없음을 먼저 확인한 뒤 transaction contention/retry,
+  required query, TTL과 operational namespace를 검증한다.
 - Secret Manager: 새 version 추가 후 adapter read/refresh, 이전 version rollback window를 확인한다.
 - GCS: private upload/read/delete와 lifecycle, public ACL/signed URL 부재를 확인한다.
 - Cloud Tasks: exact OIDC audience/email, retry/backoff, concurrency와 duplicate task name을 확인한다.
 - Cloud Run: `/health/live`, `/health/ready`, API public/Worker private ingress와 non-root
   process를 확인한다.
 - Scheduler: 네 endpoint가 caller identity 없이는 401/403이고 batch limit 500을 넘지 않는지 확인한다.
+- Namespace: v1 Run service/job/service account, `ipra-*` secret, 기존 bucket 및
+  `cloud-run-source-deploy` repository의 IAM/update timestamp가 작업 전후 동일한지 확인한다.
+- OAuth: v2 client는 별도지만 Branding/Audience/Data Access/authorized domain은 project-level
+  shared configuration이므로 v1 영향 검토 기록 없이는 변경하지 않는다.
+- RAG: `ip-risk-agent-v2-legal-reference` corpus만 사용하고 기존 corpus는 재사용하지 않는다.
 
 ## 6. 관측·보안 증거
 
@@ -106,6 +114,7 @@ staging cleanup failure alert를 각각 한 번 test signal로 확인한다.
 revision으로 되돌린다.
 
 - readiness 실패 또는 production in-memory adapter 발견
+- `(default)` Firestore 또는 v1/non-v2 resource에 v2 read/write/IAM 변경 발견
 - 권한 없는 Source/Worker/Scheduler 요청이 성공
 - raw content/credential/path가 task, Firestore operational document 또는 log에 노출
 - duplicate가 duplicate Risk를 생성하거나 failed/partial 분석이 기존 Risk를 자동 해소
