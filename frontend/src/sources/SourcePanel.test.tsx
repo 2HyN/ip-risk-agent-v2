@@ -66,14 +66,14 @@ function googlePicker(selected: DrivePickerFile[]): GoogleDrivePickerAdapter {
     setSelectFolderEnabled() { return this; }
   }
   class PickerBuilder {
-    private callback: ((data: Record<string, unknown>) => void) | null = null;
+    private callback: ((data: unknown) => void) | null = null;
     addView() { return this; }
     enableFeature() { return this; }
     setOAuthToken() { return this; }
     setDeveloperKey() { return this; }
     setAppId() { return this; }
     setOrigin() { return this; }
-    setCallback(value: (data: Record<string, unknown>) => void) {
+    setCallback(value: (data: unknown) => void) {
       this.callback = value;
       return this;
     }

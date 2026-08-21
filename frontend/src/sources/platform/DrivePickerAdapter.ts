@@ -14,8 +14,6 @@ export interface DrivePickerAdapter {
 type RuntimeConfigProvider = () => Promise<DrivePickerRuntimeConfig>;
 
 type PickerDocument = Record<string, unknown>;
-type PickerCallbackData = Record<string, unknown>;
-
 interface PickerInstance {
   setVisible(visible: boolean): void;
 }
@@ -27,7 +25,7 @@ interface PickerBuilderInstance {
   setDeveloperKey(key: string): PickerBuilderInstance;
   setAppId(appId: string): PickerBuilderInstance;
   setOrigin(origin: string): PickerBuilderInstance;
-  setCallback(callback: (data: PickerCallbackData) => void): PickerBuilderInstance;
+  setCallback(callback: (data: unknown) => void): PickerBuilderInstance;
   build(): PickerInstance;
 }
 
@@ -85,30 +83,32 @@ export class GoogleDrivePickerAdapter implements DrivePickerAdapter {
           .setAppId(config.cloudProjectNumber!)
           .setOrigin(window.location.origin)
           .setCallback((data) => {
-            const action = data[picker.Response.ACTION];
+            const callbackData = asRecord(data);
+            const action = callbackData?.[picker.Response.ACTION];
+            reportPickerCallbackDiagnostic(data, action, picker);
             if (action === picker.Action.CANCEL) {
               resolve([]);
               return;
             }
             if (action === picker.Action.ERROR) {
-              reportPickerDiagnostic("picker_error");
+              reportPickerFailure("picker_error");
               reject(new Error("Google Drive Picker reported an error"));
               return;
             }
             if (action !== picker.Action.PICKED) {
-              reportPickerDiagnostic("invalid_action");
-              reject(new Error("Google Drive Picker returned an invalid action"));
+              // Runtime callbacks that are not one of Picker's documented terminal
+              // actions must not settle the selection before PICKED/CANCEL/ERROR.
               return;
             }
             try {
               resolve(
                 validateDocuments(
-                  data[picker.Response.DOCUMENTS],
+                  callbackData?.[picker.Response.DOCUMENTS],
                   picker.Document,
                 ),
               );
             } catch {
-              reportPickerDiagnostic("invalid_documents");
+              reportPickerFailure("invalid_documents");
               reject(new Error("Google Drive Picker returned invalid documents"));
             }
           })
@@ -175,6 +175,27 @@ function validateDocuments(
   });
 }
 
-function reportPickerDiagnostic(code: string): void {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function reportPickerCallbackDiagnostic(
+  payload: unknown,
+  action: unknown,
+  picker: GooglePickerRuntime,
+): void {
+  const record = asRecord(payload);
+  console.info("[DrivePicker] callback diagnostic", {
+    payloadType: typeof payload,
+    keys: record === null ? [] : Object.keys(record),
+    action: typeof action === "string" ? action : null,
+    responseActionKey: picker.Response.ACTION,
+    pickedAction: picker.Action.PICKED,
+  });
+}
+
+function reportPickerFailure(code: string): void {
   console.error(`[DrivePicker] callback rejected: ${code}`);
 }

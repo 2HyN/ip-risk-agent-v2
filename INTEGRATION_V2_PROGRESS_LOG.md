@@ -1114,3 +1114,33 @@ validator failure로 확인했다.
 - 관련 backend Drive mount/pending boundary: `9 passed`.
 - backend/API, Drive scope, GCP resource/IAM/OAuth client 계약은 변경하지 않았다.
 - 실제 GCP 명령은 실행하지 않았다.
+
+## Phase 9 staging Drive Picker callback sequence diagnostic
+
+### 추가 live evidence
+
+- runtime enum은 `picker.Response.ACTION === "action"`,
+  `picker.Action.PICKED === "picked"`였지만 Picker Select 전에 adapter가
+  `invalid_action`으로 Promise를 reject했다.
+- Google 공식 Action enum은 `PICKED`, `CANCEL`, `ERROR` 세 terminal action만 문서화하며
+  intermediate action은 명시하지 않는다. 그러나 live runtime에서 non-terminal callback이
+  먼저 관찰됐으므로 unknown callback을 terminal failure로 간주하지 않는다.
+
+### 변경 계약
+
+1. 모든 callback은 `typeof payload`, `Object.keys`, action 값, Response action key,
+   PICKED enum 값만 temporary diagnostic으로 기록한다. token, callback/docs 본문, file
+   metadata와 raw Drive response는 기록하지 않는다.
+2. `CANCEL`만 `[]`로 resolve하고, `ERROR`만 reject하며, `PICKED`만 documents 검증 후
+   resolve한다.
+3. unknown action 또는 non-object/malformed 선행 payload는 diagnostic 후 무시하고 다음
+   terminal callback을 기다린다. `PICKED`에 documents가 없거나 invalid한 경우는 terminal
+   payload 오류이므로 reject한다.
+
+### 검증 상태
+
+- PICKED, CANCEL, ERROR, unknown → PICKED, malformed → PICKED, PICKED-without-documents:
+  통과.
+- diagnostic allowlist 및 token/raw metadata 비노출: 통과.
+- frontend 전체 test: `40 passed`; typecheck/build: 통과.
+- 실제 GCP 명령은 실행하지 않았다.
