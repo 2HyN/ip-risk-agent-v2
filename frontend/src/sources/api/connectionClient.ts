@@ -40,6 +40,9 @@ export class HttpConnectionApiClient implements ConnectionApiClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ risk_workspace_id: riskWorkspaceId }),
+      // 이 라우트는 Control 의 VWS Role 검사를 거친다. 세션 쿠키를 함께
+      // 보내지 않으면 401 로 막히고, 화면에는 "연결 실패"로만 보인다.
+      credentials: "include",
     });
     if (!response.ok) {
       throw new Error(`failed to start connection at ${path}: ${response.status}`);

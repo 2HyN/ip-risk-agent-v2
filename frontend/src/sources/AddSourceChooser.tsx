@@ -36,8 +36,17 @@ export function AddSourceChooser({
     try {
       const { authorizeUrl } = await connectionApiClient.startDriveConnection(riskWorkspaceId);
       window.location.href = authorizeUrl;
-    } catch {
-      setError("Google Drive 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } catch (cause) {
+      // 원인을 삼키면 "잠시 후 다시" 라는 안내가 영원히 맞지 않는 상황에서도
+      // 사용자가 그대로 기다리게 된다. 상태 코드는 드러낸다.
+      const reason = cause instanceof Error ? cause.message : "";
+      setError(
+        reason.includes("401")
+          ? "로그인이 필요합니다. 다시 로그인한 뒤 시도해 주세요."
+          : reason.includes("403")
+            ? "이 워크스페이스에 Source 를 연결할 권한이 없습니다."
+            : "Google Drive 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요."
+      );
     }
   };
 
@@ -47,8 +56,17 @@ export function AddSourceChooser({
     try {
       const { authorizeUrl } = await connectionApiClient.startGithubConnection(riskWorkspaceId);
       window.location.href = authorizeUrl;
-    } catch {
-      setError("GitHub 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } catch (cause) {
+      // 원인을 삼키면 "잠시 후 다시" 라는 안내가 영원히 맞지 않는 상황에서도
+      // 사용자가 그대로 기다리게 된다. 상태 코드는 드러낸다.
+      const reason = cause instanceof Error ? cause.message : "";
+      setError(
+        reason.includes("401")
+          ? "로그인이 필요합니다. 다시 로그인한 뒤 시도해 주세요."
+          : reason.includes("403")
+            ? "이 워크스페이스에 Source 를 연결할 권한이 없습니다."
+            : "GitHub 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요."
+      );
     }
   };
 

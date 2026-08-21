@@ -69,3 +69,26 @@ test("throws when the server responds with an error status", async () => {
 
   await assert.rejects(() => client.startDriveConnection("rw1"));
 });
+
+test("연결 시작 요청은 세션 쿠키를 함께 보낸다", async () => {
+  // 이 라우트는 Control 의 VWS Role 검사를 거친다. credentials 를 빼면 401 이
+  // 나는데 화면에는 "연결 실패"로만 보여 원인을 찾기 어렵다.
+  const captured: RequestInit[] = [];
+  const fetchImpl = (async (_input: string | URL, init?: RequestInit) => {
+    captured.push(init ?? {});
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ authorize_url: "https://example.invalid", state: "s" }),
+    } as Response;
+  }) as FetchLike;
+
+  const client = new HttpConnectionApiClient("", fetchImpl);
+  await client.startGithubConnection("rw1");
+  await client.startDriveConnection("rw1");
+
+  assert.equal(captured.length, 2);
+  for (const init of captured) {
+    assert.equal(init.credentials, "include");
+  }
+});
