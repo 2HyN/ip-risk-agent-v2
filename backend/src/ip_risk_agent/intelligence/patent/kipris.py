@@ -21,12 +21,19 @@ from defusedxml.ElementTree import ParseError, fromstring
 
 from ..common.errors import FailureCategory, ProviderFailureError
 
-BASE_URL = "https://plus.kipris.or.kr/openapi/rest"
+# 실측으로 확정한 경로다. 이전 값(`/openapi/rest/KpaGeneralSearchService/anySearch`)
+# 은 이 access key 로 `AccessKey&ServiceID Is Not Registerd Error` 를 돌려주었고,
+# 그 응답이 HTTP 200 이라 검색이 조용히 0 건으로 처리됐다.
+BASE_URL = "https://plus.kipris.or.kr/kipo-api/kipi"
 
-# 세 서비스로 나뉘어 있다. 검색 응답에는 초록이 없어 따로 조회해야 한다.
-SEARCH_PATH = "KpaGeneralSearchService/anySearch"
-BIBLIOGRAPHIC_PATH = "KpaBibliographicService/bibliographicInfo"
-KOREAN_ABSTRACT_PATH = "KorAbstractInfoService/korAbstractInfo"
+SEARCH_PATH = "patUtiModInfoSearchSevice/getWordSearch"
+DETAIL_PATH = "patUtiModInfoSearchSevice/getBibliographyDetailInfoSearch"
+
+# 이 base 는 키 파라미터 이름이 `ServiceKey` 다. `accessKey` 는 인증되지 않는다.
+KEY_PARAM = "ServiceKey"
+
+# 실측한 성공 응답의 코드. 오류는 30(등록/키), 11(필수 파라미터) 등이다.
+SUCCESS_RESULT_CODE = "00"
 
 PROVIDER = "KIPRIS"
 _TIMEOUT_SECONDS = 20.0
@@ -84,30 +91,28 @@ def _require_successful_result(root: Element) -> None:
         <resultCode>30</resultCode>
         <resultMsg>AccessKey&ServiceID Is Not Registerd Error</resultMsg>
 
-    이것을 그대로 파싱하면 ``searchResult`` 가 0 개라 "검색은 정상이고 결과가
-    없었다" 로 처리된다. 그러면 특허 분석이 coverage=COMPLETE 로 끝나며 **없는
-    권위를 주장한다.** 운영에서 실제로 그랬다 — 모든 질의가 hit_total=0,
+    이것을 그대로 파싱하면 결과 항목이 0 개라 "검색은 정상이고 결과가 없었다" 로
+    처리된다. 그러면 특허 분석이 coverage=COMPLETE 로 끝나며 **없는 권위를
+    주장한다.** 운영에서 실제로 그랬다 — 모든 질의가 hit_total=0,
     search_failures=0 이었고 실은 한 번도 검색되지 않았다.
 
-    성공 응답의 정확한 코드 값은 문서화되어 있지 않으므로 ``resultMsg`` 가 비어
-    있지 않으면 실패로 본다. 판정이 한쪽으로 틀린다면 **거짓 실패**여야 한다.
-    거짓 성공은 "Risk 없음" 으로 읽히고, 거짓 실패는 coverage 를 낮출 뿐이다.
+    실측한 성공 응답은 ``resultCode=00`` / ``resultMsg=NORMAL SERVICE.`` 다.
+    메시지는 성공에도 채워지므로 **코드로 판정한다.**
     """
-    # 두 값은 <header> 아래에 중첩되어 온다. 직계 자식만 보면 놓친다.
-    message = (root.findtext(".//resultMsg") or "").strip()
-    if not message:
-        return
     code = (root.findtext(".//resultCode") or "").strip()
-    lowered = message.casefold()
+    if not code or code == SUCCESS_RESULT_CODE:
+        return
+    message = (root.findtext(".//resultMsg") or "").strip().casefold()
     category = (
         FailureCategory.AUTH
-        if any(token in lowered for token in ("accesskey", "serviceid", "not registerd", "unauthorized"))
+        if any(
+            token in message
+            for token in ("accesskey", "serviceid", "not registerd", "unauthorized")
+        )
         else FailureCategory.UNAVAILABLE
     )
     raise ProviderFailureError(
-        PROVIDER,
-        category,
-        f"KIPRIS rejected the request (resultCode={code or 'unknown'})",
+        PROVIDER, category, f"KIPRIS rejected the request (resultCode={code})"
     )
 
 
@@ -155,61 +160,68 @@ class KiprisClient:
     async def search(self, query: str, *, rows: int = 5) -> list[PatentSearchHit]:
         root = await self._get(
             SEARCH_PATH,
-            {"searchAny": query, "docsCount": str(rows), "currentPage": "1"},
+            {
+                "word": query,
+                "year": "0",
+                "patent": "true",
+                "utility": "true",
+                "docsStart": "1",
+                "docsCount": str(rows),
+            },
         )
         hits: list[PatentSearchHit] = []
-        # 실제 응답 기준. 항목 태그는 <item> 이 아니라 <searchResult> 이고,
-        # 필드도 applicationNumber/inventionTitle 이 아니라 아래 이름을 쓴다.
-        for element in root.iter("searchResult"):
-            number = normalize_application_number(_text(element, "applicationNo"))
+        for element in root.iter("item"):
+            number = normalize_application_number(_text(element, "applicationNumber"))
             if not number:
                 continue
             hits.append(
                 PatentSearchHit(
                     application_number=number,
-                    title=_text(element, "inventionName"),
+                    title=_text(element, "inventionTitle"),
                     query=query,
                     metadata={
                         "applicationDate": _text(element, "applicationDate"),
-                        "registerDate": _text(element, "registerDate"),
-                        "ipc": _text(element, "ipc"),
+                        "openDate": _text(element, "openDate"),
+                        "ipc": _text(element, "ipcNumber"),
                     },
                 )
             )
         return hits
 
     async def fetch_detail(self, application_number: str) -> PatentDocument:
-        """서지 정보와 국문 초록을 합친다.
+        """서지·초록·청구항을 한 번에 가져온다.
 
-        검사 대상 문서는 대개 한국어다. 국문 초록이 있으면 그것을 대조에 쓰고,
-        없을 때만 영문 초록을 쓴다. 언어가 다르면 겹치는 표현을 찾기 어렵다.
+        이전 구현은 서지와 국문 초록을 각각 다른 서비스에서 조회했다. 현재 경로는
+        한 응답에 모두 담겨 있고 **청구항도 포함한다** — 초록만 제공된다는 기존
+        제약(Agent 3 Spec 17)은 이 경로에서는 사실이 아니다. 청구항이 있으면
+        대조 근거의 질이 올라간다.
         """
-        bibliographic = await self._get(
-            BIBLIOGRAPHIC_PATH, {"applicationNumber": application_number}
-        )
-        english_abstract = (bibliographic.findtext(".//astrtCont") or "").strip()
-        english_title = (bibliographic.findtext(".//inventionTitle") or "").strip()
+        root = await self._get(DETAIL_PATH, {"applicationNumber": application_number})
 
-        korean_abstract = korean_title = ""
-        try:
-            korean = await self._get(
-                KOREAN_ABSTRACT_PATH, {"applicationNumber": application_number}
-            )
-            korean_abstract = (korean.findtext(".//korAbstract") or "").strip()
-            korean_title = (korean.findtext(".//inventionName") or "").strip()
-        except ProviderFailureError:
-            # 국문 조회는 보조 경로다. 실패해도 영문으로 대조할 수 있다.
-            pass
+        title = ""
+        summary = next(root.iter("biblioSummaryInfo"), None)
+        if summary is not None:
+            title = _text(summary, "inventionTitle") or _text(summary, "inventionTitleEng")
 
-        abstract = korean_abstract or english_abstract
+        abstract = ""
+        for node in root.iter("abstractInfo"):
+            abstract = _text(node, "astrtCont")
+            if abstract:
+                break
+
+        claims = [
+            text
+            for node in root.iter("claimInfo")
+            for text in (_text(node, "claim"),)
+            if text
+        ]
+
         return PatentDocument(
             application_number=application_number,
-            title=korean_title or english_title,
+            title=title,
             abstract=abstract,
-            metadata={
-                "abstract_language": "ko" if korean_abstract else "en",
-                "english_title": english_title,
-            },
+            claims=claims,
+            metadata={"claim_count": str(len(claims))},
         )
 
     # ------------------------------------------------------------ 내부
@@ -219,7 +231,7 @@ class KiprisClient:
         async with self._gate:
             try:
                 response = await self._client.get(
-                    url, params={**params, "accessKey": self._access_key}
+                    url, params={**params, KEY_PARAM: self._access_key}
                 )
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:

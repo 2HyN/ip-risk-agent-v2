@@ -397,7 +397,11 @@ def test_kipris_error_body_is_a_provider_failure_not_an_empty_result():
 
 
 def test_kipris_success_without_hits_is_still_an_empty_result():
-    """진짜 0 건 검색은 실패가 아니다. 둘을 섞으면 안 된다."""
+    """진짜 0 건 검색은 실패가 아니다. 둘을 섞으면 안 된다.
+
+    실측한 성공 응답은 resultMsg 가 "NORMAL SERVICE." 로 채워져 온다. 메시지
+    유무로 판정하면 정상 응답을 실패로 만든다 — 처음 구현이 실제로 그랬다.
+    """
     import asyncio
 
     import httpx
@@ -405,14 +409,89 @@ def test_kipris_success_without_hits_is_still_an_empty_result():
     from ip_risk_agent.intelligence.patent.kipris import KiprisClient
 
     body = (
-        b"<response><header><resultCode>00</resultCode><resultMsg></resultMsg></header>"
-        b"<body><totalSearchCount>0</totalSearchCount></body></response>"
+        b"<response><header><successYN>Y</successYN><resultCode>00</resultCode>"
+        b"<resultMsg>NORMAL SERVICE.</resultMsg></header>"
+        b"<body></body><count><totalCount>0</totalCount></count></response>"
     )
     transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body))
     client = KiprisClient("unused-key", client=httpx.AsyncClient(transport=transport))
 
     async def scenario():
         assert await client.search("음성") == []
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_kipris_search_parses_the_documented_item_shape():
+    """실측한 응답 형태를 고정한다.
+
+    이전 구현은 `<searchResult>` 와 `applicationNo`/`inventionName` 을 기대했다.
+    현재 서비스는 `<item>` 과 `applicationNumber`/`inventionTitle` 을 쓴다.
+    """
+    import asyncio
+
+    import httpx
+
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    body = (
+        "<response><header><resultCode>00</resultCode>"
+        "<resultMsg>NORMAL SERVICE.</resultMsg></header><body>"
+        "<item><applicationNumber>1020170094969</applicationNumber>"
+        "<inventionTitle>화자 인식 장치</inventionTitle>"
+        "<applicationDate>20170727</applicationDate>"
+        "<ipcNumber>G10L 17/04</ipcNumber></item>"
+        "</body></response>"
+    ).encode("utf-8")
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body))
+    client = KiprisClient("unused-key", client=httpx.AsyncClient(transport=transport))
+
+    async def scenario():
+        hits = await client.search("화자 인식")
+        assert len(hits) == 1
+        assert hits[0].application_number == "1020170094969"
+        assert hits[0].title == "화자 인식 장치"
+        assert hits[0].metadata["ipc"] == "G10L 17/04"
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_kipris_detail_includes_claims_not_only_the_abstract():
+    """현재 경로는 청구항을 함께 제공한다.
+
+    "KIPRIS 는 초록만 제공한다" 는 기존 제약은 이 경로에서는 사실이 아니다.
+    청구항이 있으면 대조 근거의 질이 달라진다.
+    """
+    import asyncio
+
+    import httpx
+
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    body = (
+        "<response><header><resultCode>00</resultCode>"
+        "<resultMsg>NORMAL SERVICE.</resultMsg></header><body><item>"
+        "<biblioSummaryInfoArray><biblioSummaryInfo>"
+        "<inventionTitle>화자 인식</inventionTitle>"
+        "</biblioSummaryInfo></biblioSummaryInfoArray>"
+        "<abstractInfoArray><abstractInfo><astrtCont>요약</astrtCont>"
+        "</abstractInfo></abstractInfoArray>"
+        "<claimInfoArray><claimInfo><claim>청구항 1</claim></claimInfo>"
+        "<claimInfo><claim>청구항 2</claim></claimInfo></claimInfoArray>"
+        "</item></body></response>"
+    ).encode("utf-8")
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body))
+    client = KiprisClient("unused-key", client=httpx.AsyncClient(transport=transport))
+
+    async def scenario():
+        document = await client.fetch_detail("1020170094969")
+        assert document.title == "화자 인식"
+        assert document.abstract == "요약"
+        assert document.claims == ["청구항 1", "청구항 2"]
+        assert document.has_content
+        assert document.metadata["claim_count"] == "2"
         await client.aclose()
 
     asyncio.run(scenario())
