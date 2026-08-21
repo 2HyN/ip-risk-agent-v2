@@ -63,6 +63,14 @@ type RepositoriesApiResponse = {
   }>;
 };
 
+export type TrackedFiles = {
+  mountId: string;
+  sourceType: string;
+  /** GitHub 처럼 파일 단위가 아닌 감시 범위의 서술. */
+  descriptor: string | null;
+  files: Array<{ id: string; path: string }>;
+};
+
 export type DrivePickerSession = {
   accessToken: string;
   /** 없으면 이 배포에서 Picker 를 열 수 없다. 화면이 그 사실을 말해야 한다. */
@@ -80,6 +88,7 @@ export interface SourcesApi {
     repo: string;
   }): Promise<{ mountId: string }>;
   createDrivePickerSession(connectionId: string): Promise<DrivePickerSession>;
+  listTrackedFiles(mountId: string): Promise<TrackedFiles>;
   createDriveMount(input: {
     connectionId: string;
     riskWorkspaceId: string;
@@ -143,6 +152,23 @@ export class HttpSourcesApi implements SourcesApi {
       }
     );
     return { mountId: data.server_mount_id };
+  }
+
+  async listTrackedFiles(mountId: string): Promise<TrackedFiles> {
+    const data = await this.request<{
+      mount_id: string;
+      source_type: string;
+      descriptor?: string | null;
+      files: Array<{ id: string; path: string }>;
+    }>(
+      `/api/v1/source-connections/mounts/${encodeURIComponent(mountId)}/tracked-files`
+    );
+    return {
+      mountId: data.mount_id,
+      sourceType: data.source_type,
+      descriptor: data.descriptor ?? null,
+      files: data.files,
+    };
   }
 
   async createDrivePickerSession(connectionId: string): Promise<DrivePickerSession> {

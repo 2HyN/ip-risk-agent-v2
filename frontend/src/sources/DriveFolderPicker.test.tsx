@@ -16,6 +16,12 @@ function api(overrides: Partial<SourcesApi> = {}): SourcesApi {
       appId: "913961882221",
     })),
     createDriveMount: vi.fn(async () => ({ mountId: "mount-d1" })),
+    listTrackedFiles: vi.fn(async () => ({
+      mountId: "m",
+      sourceType: "GOOGLE_DRIVE",
+      descriptor: null,
+      files: [],
+    })),
     ...overrides,
   };
 }

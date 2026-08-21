@@ -1,3 +1,7 @@
+import {
+  HighlightedExcerpt,
+  highlightTokens,
+} from "./evidence-highlight";
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../auth/session";
@@ -139,7 +143,11 @@ export function RiskDetailPage() {
                       <Badge tone="info">{evidence.evidence_type}</Badge>
                       <small>Revision {evidence.source_revision}</small>
                     </div>
-                    <blockquote>{evidence.excerpt}</blockquote>
+                    <HighlightedExcerpt
+                      text={evidence.excerpt}
+                      tokens={highlightTokens(risk.summary)}
+                      priority={risk.review_priority}
+                    />
                     <p>
                       <strong>Reference:</strong> {evidence.reference}
                     </p>

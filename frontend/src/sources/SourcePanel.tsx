@@ -195,6 +195,7 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
         loading={loading}
         error={listError}
         onRemove={removeMount}
+        loadFiles={(mount) => sourcesApi.listTrackedFiles(mount.id)}
       />
       {removeError && <p style={{ color: "red" }}>{removeError}</p>}
 

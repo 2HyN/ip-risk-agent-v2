@@ -1038,3 +1038,48 @@ td small {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* ------------------------------------------------ evidence highlight
+ * 근거 발췌 안의 위반 지점. 우선순위가 곧 색이다 (v1 의 tier 색과 같은 감각).
+ */
+.evidence-mark {
+  padding: 0 0.25em;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.evidence-mark--high {
+  background: #fdd8d8;
+  color: #8a1f1f;
+}
+.evidence-mark--medium {
+  background: #fdeeC8;
+  color: #7a5200;
+}
+.evidence-mark--low {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+/* ------------------------------------------------ tracked files listing */
+.tracked-files__list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  columns: 2;
+  column-gap: 2rem;
+}
+.tracked-files__list li {
+  margin: 0.15rem 0;
+  break-inside: avoid;
+}
+.tracked-files__count,
+.tracked-files__descriptor {
+  margin: 0.5rem 0 0;
+  color: #475569;
+}
+.watched-files__mount {
+  margin-top: 0.75rem;
+}
+.watched-files__mount summary {
+  cursor: pointer;
+}

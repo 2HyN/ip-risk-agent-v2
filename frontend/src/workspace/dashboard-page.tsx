@@ -8,6 +8,7 @@ import {
   LoadingState,
   PageHeader,
 } from "../shared/ui";
+import { WatchedFilesCard } from "./watched-files-card";
 import { useWorkspace } from "./workspace-context";
 
 export function DashboardPage() {
@@ -60,6 +61,7 @@ export function DashboardPage() {
           </Card>
         ))}
       </div>
+      <WatchedFilesCard />
       <div className="dashboard-grid">
         <Card>
           <div className="section-heading">

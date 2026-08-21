@@ -265,6 +265,28 @@ def _mount_source_routers(
     _mount_drive(app, container, mounted, skipped, spa=spa)
     _mount_github(app, container, mounted, skipped, spa=spa)
 
+    # 감시 파일 목록 조회. 추적 스코프는 Integration 소유라 Control API 에는
+    # 없다 — 없으면 "무엇이 감시되는지" 화면이 보여줄 방법이 없다.
+    from .tracked_files import create_tracked_files_router  # noqa: PLC0415
+
+    facade = container.facade
+    app.include_router(
+        create_tracked_files_router(
+            mount_ref_resolver=facade.get_mount_ref,
+            authz_dependency=authz.mount_scoped(
+                facade.authorize_vws_action,
+                PublicVwsAction.SOURCE_MOUNT,
+                facade.get_mount_ref,
+            ),
+            drive_scope_store=(
+                container.drive.tracking_scope_store if container.drive else None
+            ),
+            github_scope_store=(
+                container.github.tracking_scope_store if container.github else None
+            ),
+        )
+    )
+
     return {"mounted": mounted, "skipped": skipped}
 
 
