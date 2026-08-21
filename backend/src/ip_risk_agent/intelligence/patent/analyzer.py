@@ -10,6 +10,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 import asyncio
 
 from iprisk_contracts import AnalysisArtifact
@@ -32,6 +35,29 @@ from .candidate_rank import DEFAULT_CANDIDATE_CAP, RankedCandidate, rank_candida
 from .extraction import TechnicalExtractor, render_segments
 from .kipris import PatentDocument, PatentSearchProvider
 from .query_builder import run_searches
+
+logger = logging.getLogger(__name__)
+
+
+def _diagnostic(**counts: int) -> None:
+    """특허 검색 단계의 개수만 남긴다.
+
+    후보 0건은 여러 이유로 생긴다 — 검색어를 못 만들었거나, KIPRIS 히트가 0이거나,
+    대조에서 전부 탈락했거나. 최종 결과 수만 보면 이 셋을 구별할 수 없어 튜닝의
+    출발점이 없다.
+
+    검색어와 문서 본문은 남기지 않는다. 검색어는 문서에서 파생된 값이므로 개수만
+    기록한다.
+    """
+    logger.info(
+        json.dumps(
+            {"schema_version": 1, "event": "patent_search_diagnostic", **counts},
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
 
 ANALYZER_VERSION = "patent-analyzer-1.0.0"
 COMPARE_PROMPT = "patent_compare_v1"
@@ -96,6 +122,13 @@ class PatentAnalyzer:
             return builder.failed(**versions)
 
         candidates = rank_candidates(outcome.hits_by_query, cap=self._cap)
+        _diagnostic(
+            query_count=len(extraction.search_queries),
+            queries_answered=len(outcome.hits_by_query),
+            hit_total=sum(len(hits) for hits in outcome.hits_by_query.values()),
+            ranked_candidates=len(candidates),
+            search_failures=len(outcome.failures),
+        )
         if not candidates:
             # 검색은 정상이고 결과가 없었다. 이것은 성공이다.
             coverage = (
@@ -128,6 +161,12 @@ class PatentAnalyzer:
                 if evaluated.matched_elements:
                     results.append(evaluated.candidate)
 
+        _diagnostic(
+            ranked_candidates=len(candidates),
+            documents_fetched=len(documents),
+            assessed=assessed,
+            matched=len(results),
+        )
         # 후보를 다 보지 못했으면 범위가 완전하지 않다.
         complete = outcome.is_complete and assessed == len(candidates)
         return builder.succeeded(

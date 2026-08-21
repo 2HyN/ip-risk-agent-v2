@@ -68,3 +68,27 @@ def test_compound_expression_matches_any_covered_identifier() -> None:
 def test_unparseable_expression_yields_no_identifiers() -> None:
     assert reference_gate.expression_identifiers("UNKNOWN") == frozenset() or True
     assert not reference_gate.is_relevant("permissive-notice", "!!!")
+
+
+def test_patent_search_diagnostic_reports_counts_without_content(caplog) -> None:
+    """후보 0건의 이유를 구별할 수 있어야 튜닝이 시작된다.
+
+    최종 결과 수만 보면 '검색어 없음' / 'KIPRIS 히트 0' / '대조 탈락' 을 구별할 수
+    없다. 검색어와 문서 본문은 남기지 않고 개수만 남긴다.
+    """
+    import json
+    import logging
+
+    from ip_risk_agent.intelligence.patent import analyzer as patent_analyzer
+
+    with caplog.at_level(logging.INFO, logger=patent_analyzer.logger.name):
+        patent_analyzer._diagnostic(
+            query_count=3, queries_answered=3, hit_total=0, ranked_candidates=0,
+            search_failures=0,
+        )
+
+    record = json.loads(caplog.records[-1].getMessage())
+    assert record["event"] == "patent_search_diagnostic"
+    assert record["query_count"] == 3
+    assert record["hit_total"] == 0
+    assert record["ranked_candidates"] == 0
