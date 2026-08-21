@@ -135,3 +135,16 @@ def test_hashed_assets_stay_cacheable(web_client: TestClient) -> None:
     assert "no-store" not in web_client.get(
         "/assets/index-abc.js"
     ).headers.get("cache-control", "")
+
+
+def test_oauth_callback_returns_to_the_app_when_the_ui_is_served(dist) -> None:
+    """provider 는 브라우저를 콜백으로 보낸다.
+
+    JSON 만 돌려주면 사용자가 원시 응답 화면에 갇힌다. Web UI 가 있으면
+    Sources 화면으로 돌려보내야 한다.
+    """
+    from ip_risk_agent.composition.static import sources_path
+
+    assert sources_path("workspace_abc") == "/w/workspace_abc/sources"
+    # 경로 구분자가 섞이면 엉뚱한 화면으로 간다.
+    assert sources_path("a/b") == "/w/a%2Fb/sources"

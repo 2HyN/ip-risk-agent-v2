@@ -14,6 +14,7 @@ API 호출이 404 대신 HTML 을 받아, 프론트엔드에서 "JSON 파싱 실
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
@@ -46,6 +47,15 @@ def is_reserved(path: str) -> bool:
         normalized == prefix.rstrip("/") or normalized.startswith(prefix)
         for prefix in RESERVED_PREFIXES
     )
+
+
+def sources_path(risk_workspace_id: str) -> str:
+    """Source 연결을 마친 뒤 브라우저를 돌려보낼 SPA 경로.
+
+    workspace id 를 그대로 끼워 넣으면 경로 구분자가 섞일 수 있으므로
+    인코딩한다.
+    """
+    return f"/w/{quote(risk_workspace_id, safe='')}/sources"
 
 
 def install_frontend(app: FastAPI, dist_dir: Path) -> bool:
@@ -84,4 +94,10 @@ def install_frontend(app: FastAPI, dist_dir: Path) -> bool:
     return True
 
 
-__all__ = ["NO_STORE", "RESERVED_PREFIXES", "install_frontend", "is_reserved"]
+__all__ = [
+    "NO_STORE",
+    "RESERVED_PREFIXES",
+    "install_frontend",
+    "is_reserved",
+    "sources_path",
+]

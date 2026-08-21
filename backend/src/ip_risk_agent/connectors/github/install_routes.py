@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ..common.authz import AuthzDependency, allow_all_authz
@@ -41,6 +43,7 @@ def create_github_install_router(
     state_store: OAuthStateStore,
     connection_creation_callback: GitHubConnectionCreationCallback,
     authz_dependency: AuthzDependency = allow_all_authz,
+    success_redirect: Callable[[str], str] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -60,7 +63,9 @@ def create_github_install_router(
     @router.get(
         "/api/v1/source-connections/github/install/callback", response_model=GitHubInstallCallbackResponse
     )
-    async def callback(request: Request, installation_id: str, state: str) -> GitHubInstallCallbackResponse:
+    async def callback(
+        request: Request, installation_id: str, state: str
+    ) -> GitHubInstallCallbackResponse | RedirectResponse:
         context = await state_store.consume(state)
         if context is None:
             raise HTTPException(status_code=400, detail="invalid or expired oauth state")
@@ -70,6 +75,13 @@ def create_github_install_router(
             risk_workspace_id=context["risk_workspace_id"],
             installation_id=installation_id,
         )
+
+        if success_redirect is not None:
+            # provider 가 브라우저를 여기로 보낸다. JSON 을 그대로 두면
+            # 사용자가 원시 응답 화면에 갇힌다.
+            return RedirectResponse(
+                success_redirect(context["risk_workspace_id"]), status_code=303
+            )
 
         return GitHubInstallCallbackResponse(
             connection_id=connection_id, installation_id=installation_id, status="connected"

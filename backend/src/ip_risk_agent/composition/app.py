@@ -34,7 +34,7 @@ from ip_risk_agent.connectors.local.routes import create_local_desktop_router
 
 from . import authz
 from .container import Container, build_container
-from .static import install_frontend
+from .static import install_frontend, sources_path
 
 # 어떤 provider 라우터가 왜 빠졌는지 사람이 읽을 수 있게 남긴다.
 SKIP_REASONS = {
@@ -80,7 +80,12 @@ def _mount_local(app: FastAPI, container: Container) -> None:
 
 
 def _mount_drive(
-    app: FastAPI, container: Container, mounted: list[str], skipped: dict[str, str]
+    app: FastAPI,
+    container: Container,
+    mounted: list[str],
+    skipped: dict[str, str],
+    *,
+    spa: bool,
 ) -> None:
     source = container.settings.source
     if not source.drive_configured:
@@ -108,6 +113,10 @@ def _mount_drive(
             authz_dependency=authz.workspace_scoped(
                 authorize, PublicVwsAction.SOURCE_MOUNT
             ),
+            # provider 가 브라우저를 콜백으로 보낸다. Web UI 가 있으면
+            # 원시 JSON 대신 Sources 화면으로 돌려보낸다. 번들이 없는
+            # 배포에서는 돌려보낼 화면이 없으므로 JSON 을 유지한다.
+            success_redirect=sources_path if spa else None,
         )
     )
     mounted.append("google_drive:oauth")
@@ -156,7 +165,12 @@ def _mount_drive(
 
 
 def _mount_github(
-    app: FastAPI, container: Container, mounted: list[str], skipped: dict[str, str]
+    app: FastAPI,
+    container: Container,
+    mounted: list[str],
+    skipped: dict[str, str],
+    *,
+    spa: bool,
 ) -> None:
     source = container.settings.source
     if not source.github_configured:
@@ -176,6 +190,10 @@ def _mount_github(
             authz_dependency=authz.workspace_scoped(
                 authorize, PublicVwsAction.SOURCE_MOUNT
             ),
+            # provider 가 브라우저를 콜백으로 보낸다. Web UI 가 있으면
+            # 원시 JSON 대신 Sources 화면으로 돌려보낸다. 번들이 없는
+            # 배포에서는 돌려보낼 화면이 없으므로 JSON 을 유지한다.
+            success_redirect=sources_path if spa else None,
         )
     )
     mounted.append("github:install")
@@ -225,15 +243,17 @@ def _mount_github(
     mounted.append("github:webhook")
 
 
-def _mount_source_routers(app: FastAPI, container: Container) -> dict[str, object]:
+def _mount_source_routers(
+    app: FastAPI, container: Container, *, spa: bool
+) -> dict[str, object]:
     """Source 라우터를 붙이고 무엇을 붙였는지 보고한다."""
     mounted: list[str] = ["local"]
     skipped: dict[str, str] = {}
 
     # Local 은 외부 자격증명이 필요 없다. 항상 붙는다.
     _mount_local(app, container)
-    _mount_drive(app, container, mounted, skipped)
-    _mount_github(app, container, mounted, skipped)
+    _mount_drive(app, container, mounted, skipped, spa=spa)
+    _mount_github(app, container, mounted, skipped, spa=spa)
 
     return {"mounted": mounted, "skipped": skipped}
 
@@ -258,7 +278,13 @@ def create_app(
     )
     app.state.container = resolved
 
-    source_status = _mount_source_routers(app, resolved)
+    # OAuth 콜백을 어디로 돌려보낼지 정하려면 Web UI 유무를 라우터 배선
+    # 시점에 이미 알아야 한다. 그래서 번들 경로를 먼저 확인한다.
+    dist_env = os.environ.get("FRONTEND_DIST_DIR")
+    dist_dir = Path(dist_env) if dist_env else None
+    spa_ready = bool(dist_dir and (dist_dir / "index.html").is_file())
+
+    source_status = _mount_source_routers(app, resolved, spa=spa_ready)
 
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, object]:
@@ -293,9 +319,8 @@ def create_app(
 
     # Web UI 는 **모든 API 라우터 뒤에** 붙는다. Starlette 는 등록 순서대로
     # 매칭하므로 먼저 붙이면 catch-all 이 API 를 가린다.
-    dist = os.environ.get("FRONTEND_DIST_DIR")
     app.state.frontend_served = (
-        install_frontend(app, Path(dist)) if dist else False
+        install_frontend(app, dist_dir) if dist_dir else False
     )
     return app
 

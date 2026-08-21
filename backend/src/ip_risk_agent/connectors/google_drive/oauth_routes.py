@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Protocol
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from iprisk_contracts.common import SourceType
@@ -54,6 +56,7 @@ def create_drive_oauth_router(
     credential_vault: SourceCredentialVault,
     connection_creation_callback: DriveConnectionCreationCallback,
     authz_dependency: AuthzDependency = allow_all_authz,
+    success_redirect: Callable[[str], str] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -72,7 +75,9 @@ def create_drive_oauth_router(
     @router.get(
         "/api/v1/source-connections/google-drive/callback", response_model=DriveConnectionCallbackResponse
     )
-    async def callback(request: Request, code: str, state: str) -> DriveConnectionCallbackResponse:
+    async def callback(
+        request: Request, code: str, state: str
+    ) -> DriveConnectionCallbackResponse | RedirectResponse:
         context = await state_store.consume(state)
         if context is None:
             raise HTTPException(status_code=400, detail="invalid or expired oauth state")
@@ -108,6 +113,13 @@ def create_drive_oauth_router(
             provider_email=provider_email,
             credential_ref=credential_ref,
         )
+
+        if success_redirect is not None:
+            # provider 가 브라우저를 여기로 보낸다. JSON 을 그대로 두면
+            # 사용자가 원시 응답 화면에 갇힌다.
+            return RedirectResponse(
+                success_redirect(context["risk_workspace_id"]), status_code=303
+            )
 
         return DriveConnectionCallbackResponse(
             connection_id=connection_id, provider_email=provider_email, status="connected"
