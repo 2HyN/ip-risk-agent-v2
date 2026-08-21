@@ -17,22 +17,8 @@ Protocol 이 요구하는 것은 두 가지다 (application/process_change/queue
 from __future__ import annotations
 
 import asyncio
-import hashlib
-
 from ip_risk_agent.application.process_change.queue import TaskEnqueueError
 
-_TASK_PREFIX = "change-"
-
-
-def task_name_for(change_event_id: str) -> str:
-    """change_event_id 를 Cloud Tasks task 이름으로 바꾼다.
-
-    canonical ID 는 길고 ``:`` 를 포함하는데 task 이름은 영숫자·하이픈·언더스코어
-    500자 이하만 허용한다. 해시로 고정 길이 안전 문자열을 만든다.
-    같은 입력은 항상 같은 이름이 되어야 de-dup 이 성립한다.
-    """
-    digest = hashlib.sha256(change_event_id.encode("utf-8")).hexdigest()
-    return f"{_TASK_PREFIX}{digest}"
 
 
 class CloudTasksEnqueuer:
@@ -81,12 +67,14 @@ class CloudTasksEnqueuer:
     def _enqueue_sync(self, change_event_id: str) -> None:
         import json  # noqa: PLC0415
 
-        from google.api_core import exceptions  # noqa: PLC0415
-
         parent = self.queue_path
         body = json.dumps({"change_event_id": change_event_id}).encode("utf-8")
+        # 작업 이름을 지정하지 않는다. Cloud Tasks 는 실행이 끝난 이름을
+        # 약 1시간 동안 기억(tombstone)하므로, 결정적 이름을 쓰면 실패한
+        # 이벤트의 재큐잉이 AlreadyExists 로 조용히 버려진다 — 재시도가
+        # 전부 사라지는데 오류는 어디에도 없다. 실제로 그렇게 사라졌다.
+        # 중복 투입의 방어는 클레임 단계가 한다(already_claimed skip).
         task = {
-            "name": f"{parent}/tasks/{task_name_for(change_event_id)}",
             "http_request": {
                 "http_method": "POST",
                 "url": self._worker_url,
@@ -99,11 +87,7 @@ class CloudTasksEnqueuer:
                 },
             },
         }
-        try:
-            self._sdk().create_task(request={"parent": parent, "task": task})
-        except exceptions.AlreadyExists:
-            # 같은 change_event_id 가 이미 큐에 있다. 이것이 de-dup 이며 정상이다.
-            return
+        self._sdk().create_task(request={"parent": parent, "task": task})
 
     async def enqueue_change(self, change_event_id: str) -> None:
         if not change_event_id:
@@ -120,4 +104,4 @@ class CloudTasksEnqueuer:
             ) from exc
 
 
-__all__ = ["CloudTasksEnqueuer", "task_name_for"]
+__all__ = ["CloudTasksEnqueuer"]

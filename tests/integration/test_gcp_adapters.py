@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from ip_risk_agent.composition.gcp.queue import CloudTasksEnqueuer, task_name_for
+from ip_risk_agent.composition.gcp.queue import CloudTasksEnqueuer
 from ip_risk_agent.composition.gcp.relay import InMemoryChangeRelayStore
 from ip_risk_agent.composition.gcp.secrets import secret_id_for
 from ip_risk_agent.connectors.common.credential_vault import CredentialScope
@@ -26,19 +26,15 @@ class AlreadyExists(Exception):
 
 
 class FakeTasksClient:
-    """create_task 만 흉내 낸다. 같은 이름이면 AlreadyExists 를 던진다."""
+    """create_task 만 흉내 낸다. 실제 서비스처럼, 이름이 지정된 작업은
+    tombstone(실행 후 재사용 금지)에 걸릴 수 있으므로 이름 지정 자체를
+    계약 위반으로 본다."""
 
     def __init__(self) -> None:
         self.created: list[dict] = []
-        self._names: set[str] = set()
 
     def create_task(self, request: dict) -> None:
-        task = request["task"]
-        name = task["name"]
-        if name in self._names:
-            raise AlreadyExists(name)
-        self._names.add(name)
-        self.created.append(task)
+        self.created.append(request["task"])
 
 
 @pytest.fixture
@@ -59,25 +55,24 @@ def enqueuer_with_fake(monkeypatch):
     return enqueuer, client
 
 
-def test_task_name_is_deterministic_and_safe() -> None:
-    """같은 ID 는 같은 이름이어야 de-dup 이 성립한다."""
-    change_id = "change:v1:84bfc388a7de2a7f33c949f1ad3cebba"
-    first = task_name_for(change_id)
-    assert first == task_name_for(change_id)
-    # canonical ID 의 ':' 가 남으면 Cloud Tasks 가 거부한다.
-    assert ":" not in first
-    assert first != task_name_for(change_id + "x")
-
-
 @pytest.mark.asyncio
-async def test_duplicate_enqueue_is_absorbed(enqueuer_with_fake) -> None:
-    """같은 change_event_id 를 두 번 넣어도 task 는 하나다."""
+async def test_tasks_are_not_named_so_retries_survive_tombstones(
+    enqueuer_with_fake,
+) -> None:
+    """작업 이름을 지정하면 재시도가 조용히 사라진다.
+
+    Cloud Tasks 는 실행이 끝난 이름을 약 1시간 기억(tombstone)한다. 결정적
+    이름을 쓰면 실패한 이벤트의 재큐잉이 AlreadyExists 로 버려지는데,
+    오류는 어디에도 남지 않는다 — 운영에서 재분석 31건이 그렇게 사라졌다.
+    중복 투입의 방어는 클레임 단계(already_claimed)가 한다.
+    """
     enqueuer, client = enqueuer_with_fake
 
     await enqueuer.enqueue_change("change:v1:abc")
     await enqueuer.enqueue_change("change:v1:abc")
 
-    assert len(client.created) == 1
+    assert len(client.created) == 2
+    assert all("name" not in task for task in client.created)
 
 
 @pytest.mark.asyncio

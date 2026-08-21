@@ -7,7 +7,7 @@ GCP SDK 를 import 하지 않는다 — 그래야 자격증명 없는 환경에�
 건드리지 않으므로 테스트가 자유롭게 불러올 수 있다.
 """
 
-from .queue import CloudTasksEnqueuer, task_name_for
+from .queue import CloudTasksEnqueuer
 from .relay import (
     ChangeRelayStore,
     FirestoreChangeRelayStore,
@@ -44,5 +44,4 @@ __all__ = [
     "InMemoryChangeRelayStore",
     "SecretManagerCredentialVault",
     "secret_id_for",
-    "task_name_for",
 ]
