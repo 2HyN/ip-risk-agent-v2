@@ -12,6 +12,12 @@ from ip_risk_agent.application.repositories import (
     RecordNotFoundError,
 )
 from ip_risk_agent.core.audit import AuditEvent, AuditEventType
+from ip_risk_agent.core.risk import (
+    RiskEvent,
+    RiskEventType,
+    RiskLifecycleState,
+    risk_event_id_for,
+)
 from ip_risk_agent.core.common import ActorType, DomainInvariantError, normalize_utc
 from ip_risk_agent.core.memberships import (
     Membership,
@@ -412,6 +418,50 @@ class WorkspaceAdministrationService:
                 audit_event_id=self._id_factory("audit"),
             )
             await uow.mounts.remove(plan.mount_id)
+            # 감시가 끝난 대상의 위험은 원장에서 지우지 않고 RESOLVED 로
+            # 내린다. 지우면 "있었던 위험"의 기록이 사라지고, 그대로 두면
+            # 감시하지도 않는 대상의 위험이 화면에 영원히 남는다. 같은
+            # 대상을 다시 연결해 위험이 재확인되면 REOPENED 로 되살아난다.
+            occurred_at = self._clock()
+            for risk in await uow.risks.list_for_workspace(risk_workspace_id):
+                if risk.lifecycle_state not in (
+                    RiskLifecycleState.NEW,
+                    RiskLifecycleState.EXISTING,
+                ):
+                    continue
+                artifact = await uow.artifacts.get(risk.artifact_id)
+                if artifact is None or artifact.mount_id != mount_id:
+                    continue
+                risk_time = max(occurred_at, risk.last_seen_at, risk.updated_at)
+                updated = replace(
+                    risk,
+                    lifecycle_state=RiskLifecycleState.RESOLVED,
+                    resolved_at=risk_time,
+                    updated_at=risk_time,
+                )
+                await uow.risks.save(updated)
+                await uow.risks.append_event(
+                    RiskEvent(
+                        id=risk_event_id_for(
+                            risk.id,
+                            f"mount-removed:{mount_id}",
+                            RiskEventType.RESOLVED.value,
+                        ),
+                        risk_id=risk.id,
+                        event_type=RiskEventType.RESOLVED,
+                        actor_type=ActorType.USER,
+                        actor_user_id=actor_user_id,
+                        occurred_at=risk_time,
+                        previous_state_safe={
+                            "lifecycle_state": risk.lifecycle_state.value
+                        },
+                        new_state_safe={
+                            "lifecycle_state": RiskLifecycleState.RESOLVED.value
+                        },
+                        analysis_job_id=risk.latest_analysis_job_id,
+                        reason_safe="source mount removed",
+                    )
+                )
             await uow.audit.append(plan.audit_event)
             await uow.commit()
         return plan

@@ -317,3 +317,111 @@ def test_mount_alias_collision_rolls_back_audit_and_mount_mutation() -> None:
             assert await uow.audit.list_for_workspace("vws-1") == ()
 
     run(scenario())
+
+
+def test_mount_removal_resolves_its_risks_but_keeps_the_ledger() -> None:
+    """감시를 중단한 대상의 위험은 화면에서 사라져야 한다.
+
+    지우면 "있었던 위험"의 기록이 사라지고, 그대로 두면 감시하지도 않는
+    대상의 위험이 영원히 남는다. RESOLVED 로 내리고 타임라인에 사유를
+    남기는 것이 그 사이의 정답이다. 다른 Mount 의 위험은 건드리면 안 된다.
+    """
+    from ip_risk_agent.core.artifacts import (
+        Artifact,
+        ArtifactAvailability,
+        ArtifactState,
+        ArtifactStatus,
+    )
+    from iprisk_contracts.common import SourceType
+    from iprisk_contracts.common import AnalysisType
+    from ip_risk_agent.core.risk import (
+        ReviewDisposition,
+        ReviewPriority,
+        Risk,
+        RiskLifecycleState,
+    )
+
+    def make_artifact(artifact_id: str, mount_id: str) -> Artifact:
+        return Artifact(
+            id=artifact_id,
+            risk_workspace_id="vws-1",
+            mount_id=mount_id,
+            source_workspace_id="sws-1",
+            source_type=SourceType.GOOGLE_DRIVE,
+            source_artifact_id=f"src-{artifact_id}",
+            display_name=f"{artifact_id}.md",
+            logical_path=f"docs/{artifact_id}.md",
+            status=ArtifactStatus.ACTIVE,
+            first_seen_at=NOW,
+            last_seen_at=NOW,
+        )
+
+    def make_risk(risk_id: str, artifact_id: str) -> Risk:
+        return Risk(
+            id=risk_id,
+            risk_workspace_id="vws-1",
+            artifact_id=artifact_id,
+            analysis_type=AnalysisType.LICENSE,
+            risk_key=f"key-{risk_id}",
+            lifecycle_state=RiskLifecycleState.NEW,
+            review_disposition=ReviewDisposition.UNREVIEWED,
+            review_priority=ReviewPriority.HIGH,
+            summary=f"risk {risk_id}",
+            first_seen_at=NOW,
+            last_seen_at=NOW,
+            latest_analysis_job_id="job-1",
+            updated_at=NOW,
+        )
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        async with store() as uow:
+            await uow.users.add(make_user("owner-1"))
+            await uow.workspaces.add(make_workspace())
+            await uow.memberships.add(make_membership("owner-1", MembershipRole.OWNER))
+            await uow.mounts.add(make_mount("mount-1", MountStatus.ACTIVE))
+            await uow.mounts.add(make_mount("mount-2", MountStatus.ACTIVE))
+            state = ArtifactState(
+                artifact_id="art-1",
+                latest_revision="r1",
+                latest_checksum=None,
+                availability_state=ArtifactAvailability.AVAILABLE,
+                updated_at=NOW,
+            )
+            await uow.artifacts.add(make_artifact("art-1", "mount-1"), state)
+            await uow.artifacts.add(
+                make_artifact("art-2", "mount-2"),
+                ArtifactState(
+                    artifact_id="art-2",
+                    latest_revision="r1",
+                    latest_checksum=None,
+                    availability_state=ArtifactAvailability.AVAILABLE,
+                    updated_at=NOW,
+                ),
+            )
+            await uow.risks.add(make_risk("risk-1", "art-1"))
+            await uow.risks.add(make_risk("risk-2", "art-2"))
+            await uow.commit()
+
+        service = make_service(store)
+        await service.remove_mount(
+            risk_workspace_id="vws-1",
+            actor_user_id="owner-1",
+            mount_id="mount-1",
+        )
+
+        async with store() as uow:
+            removed_side = await uow.risks.get("risk-1")
+            kept_side = await uow.risks.get("risk-2")
+            events = await uow.risks.list_events("risk-1")
+
+        assert removed_side.lifecycle_state is RiskLifecycleState.RESOLVED
+        assert removed_side.resolved_at is not None
+        # 사람의 검토 판단은 기계 전이와 분리 원칙에 따라 그대로다.
+        assert removed_side.review_disposition is ReviewDisposition.UNREVIEWED
+        assert kept_side.lifecycle_state is RiskLifecycleState.NEW
+        assert any(
+            event.reason_safe == "source mount removed" for event in events
+        ), "타임라인에 사유가 남아야 나중에 왜 해소됐는지 알 수 있다"
+
+    run(scenario())

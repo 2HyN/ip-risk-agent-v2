@@ -25,7 +25,7 @@ type Filters = {
   source_type: string;
 };
 const initialFilters: Filters = {
-  lifecycle_state: "",
+  lifecycle_state: "ACTIVE",
   analysis_type: "",
   review_priority: "",
   review_disposition: "",
@@ -39,7 +39,19 @@ export function RiskListPage() {
   const [filters, setFilters] = useState(initialFilters);
   const filterKey = JSON.stringify(filters);
   const resource = usePagedResource(
-    (cursor) => api.risks(workspace.id, filters, cursor),
+    // "ACTIVE" 는 화면 전용 값이다. 서버에는 전체를 묻고 RESOLVED 만
+    // 화면에서 걸러낸다 — 해소된 위험을 기본으로 보이면 "감시 중단했는데
+    // 계속 남아 있다"로 읽힌다.
+    (cursor) =>
+      api.risks(
+        workspace.id,
+        {
+          ...filters,
+          lifecycle_state:
+            filters.lifecycle_state === "ACTIVE" ? "" : filters.lifecycle_state,
+        },
+        cursor,
+      ),
     [api, workspace.id, filterKey],
   );
   const mounts = usePagedResource(
@@ -67,6 +79,7 @@ export function RiskListPage() {
           value={filters.lifecycle_state}
           onChange={(event) => set("lifecycle_state", event.target.value)}
         >
+          <option value="ACTIVE">Active (default)</option>
           <option value="">All lifecycle states</option>
           <option value="NEW">New</option>
           <option value="EXISTING">Existing</option>
@@ -165,7 +178,13 @@ export function RiskListPage() {
                 </tr>
               </thead>
               <tbody>
-                {resource.data?.items.map((risk) => (
+                {resource.data?.items
+                  .filter(
+                    (risk) =>
+                      filters.lifecycle_state !== "ACTIVE" ||
+                      risk.lifecycle_state !== "RESOLVED",
+                  )
+                  .map((risk) => (
                   <tr key={risk.id}>
                     <td>
                       <Link
