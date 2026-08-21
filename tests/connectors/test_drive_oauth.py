@@ -83,7 +83,9 @@ def test_start_returns_authorize_url_with_state():
     body = response.json()
     assert "accounts.google.com" in body["authorize_url"]
     assert body["state"] in body["authorize_url"]
-    assert "drive.file" in body["authorize_url"]
+    # 폴더 단위 감시 때문에 읽기 전용 전체 스코프를 요청한다. drive.file 은
+    # 고른 항목에만 접근이 열려 폴더 하위 목록이 비어 나온다.
+    assert "drive.readonly" in body["authorize_url"]
 
 
 def test_callback_with_valid_state_exchanges_code_and_creates_connection():

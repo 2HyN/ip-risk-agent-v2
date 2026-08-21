@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+# 폴더 단위 감시에는 읽기 전용 전체 스코프가 필요하다. drive.file 은 Picker 로
+# 고른 파일에만 접근이 열려, 폴더를 골라도 하위 파일 목록이 비어 나온다.
+# 쓰기 권한은 여전히 요청하지 않는다.
+DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document"
 SELECTABLE_MIME_TYPES = (
     GOOGLE_DOC_MIME_TYPE,
@@ -81,5 +85,13 @@ def normalize_scopes(raw_scope: str | list[str] | None) -> set[str]:
 
 
 def require_exact_drive_file_scope(token: dict) -> None:
-    if normalize_scopes(token.get("scope")) != {DRIVE_FILE_SCOPE}:
-        raise DriveScopeError("Granted Google Drive scope must be exactly drive.file")
+    """읽기 범위를 벗어난 스코프를 거부한다.
+
+    drive.file(예전 연결) 또는 drive.readonly(폴더 감시용) 하나만 허용한다.
+    쓰기 스코프가 섞여 있으면 어딘가 잘못된 동의 화면을 탄 것이므로 막는다.
+    """
+    granted = normalize_scopes(token.get("scope"))
+    if granted not in ({DRIVE_FILE_SCOPE}, {DRIVE_READONLY_SCOPE}):
+        raise DriveScopeError(
+            "Granted Google Drive scope must be exactly drive.file or drive.readonly"
+        )

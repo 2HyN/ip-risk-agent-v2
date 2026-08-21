@@ -15,7 +15,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from .models import (
-    DRIVE_FILE_SCOPE,
+    DRIVE_READONLY_SCOPE,
     GOOGLE_DOC_MIME_TYPE,
     DriveChange,
     DriveChangePage,
@@ -37,7 +37,7 @@ class GoogleDriveProvider:
             token_uri="https://oauth2.googleapis.com/token",
             client_id=client_id,
             client_secret=client_secret,
-            scopes=[DRIVE_FILE_SCOPE],
+            scopes=[DRIVE_READONLY_SCOPE],
             expiry=expiry_datetime,
         )
         self._service = build("drive", "v3", credentials=self._credentials, cache_discovery=False)
@@ -106,8 +106,9 @@ class GoogleDriveProvider:
     def list_children(self, folder_id: str) -> list[DriveFile]:
         """폴더 바로 아래 항목들. 페이지를 모두 걷는다.
 
-        drive.file 스코프에서는 Picker 로 고른 폴더의 하위 항목까지 접근이
-        열린다. 접근이 없는 항목은 응답에서 빠질 뿐 오류가 나지 않는다.
+        drive.readonly 스코프라 폴더 안을 그대로 걸을 수 있다. drive.file
+        이었을 때는 고른 항목에만 접근이 열려 이 목록이 비어 나왔다 — 그것이
+        스코프를 넓힌 이유다.
         """
         children: list[DriveFile] = []
         page_token: str | None = None
@@ -144,7 +145,7 @@ class GoogleDriveProvider:
             "access_token": self._credentials.token,
             "refresh_token": self._credentials.refresh_token,
             "expires_at": expiry.replace(tzinfo=UTC).timestamp() if expiry else None,
-            "scope": DRIVE_FILE_SCOPE,
+            "scope": DRIVE_READONLY_SCOPE,
             "token_type": "Bearer",
         }
 

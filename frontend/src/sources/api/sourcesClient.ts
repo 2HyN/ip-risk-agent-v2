@@ -183,7 +183,16 @@ export class HttpSourcesApi implements SourcesApi {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
-      throw new Error(`request failed at ${path}: ${response.status}`);
+      // 서버의 detail 은 사용자가 다음에 무엇을 해야 하는지 담고 있다.
+      // 상태 코드만 남기면 화면이 "잠시 후 다시"류의 거짓 안내로 퇴화한다.
+      let detail = "";
+      try {
+        const body = (await response.json()) as { detail?: unknown };
+        if (typeof body.detail === "string") detail = ` ${body.detail}`;
+      } catch {
+        // 본문이 JSON 이 아니면 상태 코드만으로 안내한다.
+      }
+      throw new Error(`request failed at ${path}: ${response.status}${detail}`);
     }
     return (await response.json()) as T;
   }

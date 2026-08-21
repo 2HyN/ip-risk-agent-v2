@@ -154,7 +154,9 @@ export function DriveFolderPicker({
           ? "Drive 접근 권한이 만료되었습니다. Google Drive 연결을 다시 시작해 주세요."
           : reason.includes("404")
             ? "이 연결을 찾을 수 없습니다. Google Drive 연결을 다시 시작해 주세요."
-            : "폴더 선택을 완료하지 못했습니다."
+            : reason.includes("409")
+              ? "선택한 항목에서 검사할 파일을 찾지 못했습니다. 파일이 든 폴더나 파일을 골라 주세요."
+              : "폴더 선택을 완료하지 못했습니다."
       );
     } finally {
       setBusy(false);

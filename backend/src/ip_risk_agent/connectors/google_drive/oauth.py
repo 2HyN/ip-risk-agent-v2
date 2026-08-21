@@ -17,7 +17,10 @@ from .error_mapping import map_drive_status_code
 
 GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
-DRIVE_OAUTH_SCOPES = "openid email https://www.googleapis.com/auth/drive.file"
+# drive.readonly: 폴더를 고르면 하위 전체를 감시해야 하는데, drive.file 은
+# 고른 항목에만 접근이 열려 폴더 하위 목록이 비어 나온다. 쓰기는 요청하지
+# 않는다.
+DRIVE_OAUTH_SCOPES = "openid email https://www.googleapis.com/auth/drive.readonly"
 
 
 def build_authorize_url(*, client_id: str, redirect_uri: str, state: str) -> str:
