@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import shlex
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -193,6 +195,8 @@ def validate(root: Path = ROOT) -> list[str]:
         errors.append("Docker build context must exclude virtualenv and environment files")
     if any(line.startswith("!") and ".env" in line for line in dockerignore):
         errors.append("Docker build context must not re-include environment files")
+
+    _validate_wheel_package_data(root, errors)
 
     indexes = json.loads((deploy / "firestore.indexes.json").read_text("utf-8"))
     actual = {
@@ -628,6 +632,45 @@ def _condition_resource(expression: object) -> str | None:
     if not expression.startswith(prefix) or not expression.endswith('"'):
         return None
     return expression[len(prefix) : -1]
+
+
+def _validate_wheel_package_data(root: Path, errors: list[str]) -> None:
+    """코드가 아닌 runtime 자료 파일이 wheel 에 실리는지 정적으로 확인한다.
+
+    Dockerfile 이 ``pip install .`` 로 wheel 을 설치하므로, ``.py`` 가 아닌 파일은
+    ``[tool.setuptools.package-data]`` 에 선언하지 않으면 이미지에서 사라진다.
+    소스로 실행하는 로컬·테스트에서는 파일이 그 자리에 있어 **절대 재현되지 않고**,
+    배포에서만 ``FileNotFoundError`` 로 죽는다. Gemini 프롬프트가 실제로 그랬다.
+    """
+    pyproject = root / "pyproject.toml"
+    source_root = root / "backend" / "src"
+    package_root = source_root / "ip_risk_agent"
+    if not pyproject.is_file() or not package_root.is_dir():
+        return
+
+    declared = (
+        tomllib.loads(pyproject.read_text("utf-8"))
+        .get("tool", {})
+        .get("setuptools", {})
+        .get("package-data", {})
+    )
+    patterns_by_package = {
+        Path(*package.split(".")): tuple(patterns)
+        for package, patterns in declared.items()
+    }
+
+    for path in sorted(package_root.rglob("*")):
+        if not path.is_file() or path.suffix == ".py" or path.name == ".gitkeep":
+            continue
+        if "__pycache__" in path.parts:
+            continue
+        relative = path.relative_to(source_root)
+        patterns = patterns_by_package.get(relative.parent, ())
+        if not any(fnmatch.fnmatch(path.name, pattern) for pattern in patterns):
+            errors.append(
+                "runtime data file is not shipped in the wheel — declare it in "
+                f"[tool.setuptools.package-data]: {relative.as_posix()}"
+            )
 
 
 def _docker_stage_environment(dockerfile: str, *, stage: str) -> set[str]:

@@ -1,0 +1,6 @@
+# 생성물은 항상 LF 로 고정한다.
+# Windows(core.autocrlf=true)에서 `pnpm run generate` 후 줄바꿈만 바뀌어
+# Frozen Contract 에 tracked diff 가 뜨는 것을 막는다. 내용과 무관한 잡음이
+# "계약이 바뀌었다"로 오독되면 안 된다.
+shared/contracts/schemas/*.json         text eol=lf
+shared/contracts/typescript/generated/* text eol=lf

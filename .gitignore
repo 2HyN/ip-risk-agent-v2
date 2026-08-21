@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
 .pytest_cache/
 .pytest-tmp/
 .venv/
@@ -11,3 +12,5 @@ dist/
 .env.*
 !.env.example
 .pnpm-store/
+# 배포용 환경값 파일. Picker API key 같은 평문 값이 들어가므로 추적하지 않는다.
+*-env.local.yaml

@@ -36,6 +36,7 @@ def test_repository_owned_gcp_inputs_are_self_consistent() -> None:
         "missing-build-source-bucket-read",
         "scheduler-route-mismatch",
         "index-count-mismatch",
+        "unshipped-runtime-data",
     ),
 )
 def test_deployment_validator_rejects_v1_namespace_regressions(
@@ -64,12 +65,19 @@ def test_deployment_validator_rejects_v1_namespace_regressions(
         ROOT / "backend" / "src" / "ip_risk_agent" / "gcp" / "cloud_tasks.py",
         tasks_parent / "cloud_tasks.py",
     )
+    # wheel package-data 검사가 동작하려면 manifest 와 자료 파일이 함께 있어야 한다.
+    shutil.copy(ROOT / "pyproject.toml", root / "pyproject.toml")
+    shutil.copytree(
+        ROOT / "backend" / "src" / "ip_risk_agent" / "intelligence" / "gemini" / "prompts",
+        root / "backend" / "src" / "ip_risk_agent" / "intelligence" / "gemini" / "prompts",
+    )
     _inject_namespace_violation(root, violation)
     errors = validate(root)
     assert errors, f"validator accepted {violation}"
     expected_error = {
         "shared-image-api-setting": "shared runtime image must not define",
         "missing-build-source-bucket-read": "Cloud Build execution/logging/source IAM",
+        "unshipped-runtime-data": "runtime data file is not shipped in the wheel",
     }.get(violation)
     if expected_error is not None:
         assert any(expected_error in error for error in errors)
@@ -77,6 +85,23 @@ def test_deployment_validator_rejects_v1_namespace_regressions(
 
 def _inject_namespace_violation(root: Path, violation: str) -> None:
     deploy = root / "deploy"
+    if violation == "unshipped-runtime-data":
+        # package-data 선언을 지우면 Gemini 프롬프트가 wheel 에서 빠진다.
+        path = root / "pyproject.toml"
+        kept: list[str] = []
+        skipping = False
+        for line in path.read_text("utf-8").splitlines():
+            if line.startswith("[tool.setuptools.package-data]"):
+                skipping = True
+                continue
+            if skipping:
+                if line.startswith("["):
+                    skipping = False
+                else:
+                    continue
+            kept.append(line)
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        return
     if violation == "shared-image-api-setting":
         path = root / "Dockerfile"
         dockerfile = path.read_text("utf-8")

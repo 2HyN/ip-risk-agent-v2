@@ -25,6 +25,7 @@ from ip_risk_agent.connectors.common.credential_vault import (
     CredentialRef,
     CredentialScope,
 )
+from ip_risk_agent.application.process_change.queue import TaskEnqueueError
 from ip_risk_agent.connectors.common.runtime_store import DriveRuntime
 from ip_risk_agent.connectors.github.tracking_scope import GitHubTrackingScope
 from ip_risk_agent.connectors.local.staging_store import StagingRef
@@ -249,7 +250,34 @@ class FakeTasksClient:
         self.calls.append((parent, task))
 
 
-def test_cloud_tasks_payload_is_id_only_oidc_and_deterministic() -> None:
+def test_cloud_tasks_payload_is_id_only_and_oidc_bound() -> None:
+    async def scenario() -> None:
+        client = FakeTasksClient()
+        queue = CloudTasksEnqueuer(
+            client=client,
+            project_id="project-1",
+            location="asia-northeast3",
+            queue="analysis",
+            worker_base_url="https://worker.example.run.app",
+            service_account_email="tasks@example.iam.gserviceaccount.com",
+        )
+        await queue.enqueue_change("change-1")
+        first = client.calls[0][1]
+        assert json.loads(first.http_request.body) == {"change_event_id": "change-1"}
+        assert first.http_request.oidc_token.audience == "https://worker.example.run.app"
+        assert first.dispatch_deadline.seconds == 240
+
+    run(scenario())
+
+
+def test_cloud_tasks_does_not_name_tasks_so_retries_survive_tombstones() -> None:
+    """Cloud Tasks 는 끝난 작업 이름을 tombstone 으로 기억한다.
+
+    결정적 이름을 쓰면 실패한 이벤트의 재큐잉이 ``AlreadyExists`` 로 조용히
+    버려진다. 재시도가 사라지는데 오류는 어디에도 남지 않으므로, 이름을
+    지정하지 않는 것 자체를 회귀로 고정한다.
+    """
+
     async def scenario() -> None:
         client = FakeTasksClient()
         queue = CloudTasksEnqueuer(
@@ -262,12 +290,31 @@ def test_cloud_tasks_payload_is_id_only_oidc_and_deterministic() -> None:
         )
         await queue.enqueue_change("change-1")
         await queue.enqueue_change("change-1")
-        first = client.calls[0][1]
-        second = client.calls[1][1]
-        assert first.name == second.name
-        assert json.loads(first.http_request.body) == {"change_event_id": "change-1"}
-        assert first.http_request.oidc_token.audience == "https://worker.example.run.app"
-        assert first.dispatch_deadline.seconds == 240
+        assert len(client.calls) == 2
+        assert all(task.name == "" for _, task in client.calls)
+
+    run(scenario())
+
+
+def test_cloud_tasks_enqueue_failure_is_never_swallowed() -> None:
+    class FailingTasksClient(FakeTasksClient):
+        async def create_task(self, *, parent, task):
+            raise google_exceptions.AlreadyExists("tombstoned task name")
+
+    async def scenario() -> None:
+        queue = CloudTasksEnqueuer(
+            client=FailingTasksClient(),
+            project_id="project-1",
+            location="asia-northeast3",
+            queue="analysis",
+            worker_base_url="https://worker.example.run.app",
+            service_account_email="tasks@example.iam.gserviceaccount.com",
+        )
+        try:
+            await queue.enqueue_change("change-1")
+        except TaskEnqueueError:
+            return
+        raise AssertionError("enqueue failure must not be reported as success")
 
     run(scenario())
 
