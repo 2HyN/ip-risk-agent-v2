@@ -1005,8 +1005,9 @@ validator failure로 확인했다.
 5. Firestore composite index는 GitHub owner/repo query를 포함한 정확히 8개, TTL은 정확히
    2개로 manifest/validator/배포 문서를 동기화했다.
 6. Cloud Build는 `iprisk-v2-deploy` user-specified service account와
-   `CLOUD_LOGGING_ONLY`를 명시한다. 이 identity는 v2 repository Writer와 Logs Writer만,
-   Cloud Build service agent는 해당 identity Token Creator만 요구한다.
+   `CLOUD_LOGGING_ONLY`를 명시한다. 이 identity는 v2 repository Writer, Logs Writer와
+   source bucket Object Viewer를, Cloud Build service agent는 해당 identity Token Creator만
+   요구한다.
 7. Cloud Run API/Worker는 동일 `application@${IMAGE_DIGEST}`를 사용한다. validator는
    namespace, role env, IAM/secret, Scheduler job-route, build identity, 8-index/2-TTL,
    Docker context와 승인 RAG 3개 문서를 pure offline gate로 검사한다.
@@ -1030,3 +1031,48 @@ validator failure로 확인했다.
 - external: named database/resource/IAM/secret/OAuth/GitHub App/RAG corpus 생성, Cloud Build,
   Docker image runtime smoke와 live ADC/provider E2E가 남아 있다.
 - 최종 RC commit SHA와 clean status는 commit 완료 후 이 작업의 완료 보고에 기록한다.
+
+## Phase 9 외부 첫 배포 피드백 반영: Worker image ENV와 build source IAM
+
+### 확인된 blocker
+
+- 시작 RC: `d51320632d` (이 수정 이후 최종 RC가 아님).
+- shared runtime image가 `FRONTEND_DIST_DIR=/app/frontend/dist`를 기본 `ENV`로 포함해
+  Worker에도 API-only 설정이 암묵적으로 전달됐다. production role contract가 이를
+  fail-closed해 Worker startup이 `SettingsError`로 종료됐다.
+- user-specified Cloud Build identity `iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com`에
+  source staging bucket `gs://proj-aj22-211200020328_cloudbuild` 읽기 권한이 없어 첫
+  `gcloud builds submit`이 `storage.objects.get` 403으로 build step 전에 실패했다.
+
+### repository 수렴
+
+1. Dockerfile의 shared runtime ENV에서 `FRONTEND_DIST_DIR`를 제거하고 API manifest에만
+   `/app/frontend/dist`를 canonical 값으로 명시했다. Worker manifest에는 해당 key가 없다.
+2. validator가 Dockerfile runtime stage의 ENV key를 정적으로 파싱해 모든 API/Worker 전용
+   변수의 image-level 유출을 거부하도록 확장했다.
+3. production entrypoint 회귀 테스트가 API의 `/app` dist 제공, 유효 Worker startup,
+   `FRONTEND_DIST_DIR`가 상속된 Worker의 startup 거부를 함께 검증한다.
+4. IAM contract에 deploy identity의 정확한 Cloud Build source bucket 범위
+   `roles/storage.objectViewer`를 추가했다. runtime identity 권한이나 v1 resource는 변경하지
+   않았으며 실제 GCP/IAM 작업은 이 repository 수정에서 수행하지 않았다.
+
+### 검증 상태
+
+- focused deployment/settings/production composition: `29 passed`.
+- Python compile / pip check: 통과 / broken requirement 없음.
+- 전체 Python non-live: `629 passed, 1 skipped, 10 deselected`.
+- frozen offline pnpm install, contract generate/diff, typecheck/build/resolution: 통과.
+- Frontend / Desktop: `30 passed` / `70 passed, 2 skipped`.
+- deployment validator: `GCP deployment inputs: valid`.
+- RAG dry-run: 승인 3 documents, checksum/version 일치, external write 없음.
+- `git diff --check`: 통과.
+- Docker CLI가 host에 없어 실제 local image build는 미실행했다. shared runtime image ENV와
+  API/Worker production startup은 repository static/composition gate로 검증했다.
+- 실제 GCP resource/IAM 변경 명령은 실행하지 않았다.
+
+### gate 판정
+
+- 이번에 확인된 repository-side Worker startup 및 build source IAM blocker는 해결됐다.
+- 새 RC SHA와 clean status는 commit 후 완료 보고에 기록한다.
+- 외부에는 새 image build/deploy와 Worker/API runtime smoke, 기존 Phase 9 live ADC/provider
+  E2E가 남아 있다.

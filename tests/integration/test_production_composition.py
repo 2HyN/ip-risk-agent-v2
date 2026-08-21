@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from fastapi import APIRouter
+from fastapi.testclient import TestClient
 from iprisk_contracts import AnalysisType, SourceType
 
 import ip_risk_agent.composition.production as production
@@ -15,7 +17,7 @@ from ip_risk_agent.composition.container import (
     build_container,
 )
 from ip_risk_agent.composition.providers import SourceRouterBundle
-from ip_risk_agent.composition.settings import AppRole, Settings
+from ip_risk_agent.composition.settings import AppRole, Settings, SettingsError
 from ip_risk_agent.gcp.foundation import (
     GoogleCloudClients,
     GoogleCloudFoundation,
@@ -319,9 +321,15 @@ def test_production_entrypoints_use_foundation_and_runtime_composer(
             scoped.setenv(key, value)
         api_app = api_entrypoint.create_app()
         assert "/health/ready" in api_app.openapi()["paths"]
+        product = TestClient(api_app).get("/app")
+        assert product.status_code == 200
+        assert product.text == "<main>production</main>"
 
     with monkeypatch.context() as scoped:
-        for key, value in _environment(AppRole.WORKER).items():
+        worker_values = _environment(AppRole.WORKER)
+        assert "FRONTEND_DIST_DIR" not in worker_values
+        scoped.delenv("FRONTEND_DIST_DIR", raising=False)
+        for key, value in worker_values.items():
             scoped.setenv(key, value)
         worker_app = worker_entrypoint.create_app()
         assert "/internal/tasks/analyze-change" in worker_app.openapi()["paths"]
@@ -334,6 +342,20 @@ def test_production_entrypoints_use_foundation_and_runtime_composer(
         ("composer", AppRole.WORKER),
         ("overrides", AppRole.WORKER),
     ]
+
+
+def test_production_worker_entrypoint_rejects_inherited_api_image_environment(
+    monkeypatch,
+) -> None:
+    values = {
+        **_environment(AppRole.WORKER),
+        "FRONTEND_DIST_DIR": "/app/frontend/dist",
+    }
+    with monkeypatch.context() as scoped:
+        for key, value in values.items():
+            scoped.setenv(key, value)
+        with pytest.raises(SettingsError, match="API-only"):
+            worker_entrypoint.create_app()
 
 
 def test_local_entrypoints_keep_in_memory_path(monkeypatch) -> None:
@@ -366,7 +388,11 @@ def test_local_entrypoints_keep_in_memory_path(monkeypatch) -> None:
         )
 
 
-def _environment(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist") -> dict[str, str]:
+def _environment(
+    role: AppRole,
+    *,
+    frontend_dist_dir: str = "/app/frontend/dist",
+) -> dict[str, str]:
     settings = _settings(role, frontend_dist_dir=frontend_dist_dir)
     values = {
         "APP_ENV": settings.profile.value,

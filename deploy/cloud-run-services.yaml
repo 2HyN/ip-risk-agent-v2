@@ -83,6 +83,7 @@ canonicalEnvironment:
     SOURCE_CREDENTIAL_SECRET_PREFIX: iprisk-v2-cred
   api:
     APP_ROLE: api
+    FRONTEND_DIST_DIR: /app/frontend/dist
     GOOGLE_CLOUD_PROJECT_NUMBER: "555102774494"
     GITHUB_WEBHOOK_SECRET_ID: iprisk-v2-github-webhook-secret
     CLOUD_TASKS_LOCATION: asia-northeast3

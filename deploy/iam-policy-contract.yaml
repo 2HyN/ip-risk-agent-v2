@@ -43,6 +43,10 @@ buildBindings:
     role: roles/logging.logWriter
     member: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
     resource: projects/proj-aj22-211200020328
+  buildSourceBucketRead:
+    role: roles/storage.objectViewer
+    member: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/_/buckets/proj-aj22-211200020328_cloudbuild
   buildServiceAgentToken:
     role: roles/iam.serviceAccountTokenCreator
     member: service-555102774494@gcp-sa-cloudbuild.iam.gserviceaccount.com

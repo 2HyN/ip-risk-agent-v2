@@ -15,8 +15,7 @@ RUN pnpm --filter @iprisk/contracts build && pnpm --filter @iprisk/frontend buil
 FROM python:3.14.7-slim-bookworm AS runtime
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8080 \
-    FRONTEND_DIST_DIR=/app/frontend/dist
+    PORT=8080
 WORKDIR /app
 RUN groupadd --system --gid 10001 iprisk \
     && useradd --system --uid 10001 --gid iprisk --home-dir /nonexistent --shell /usr/sbin/nologin iprisk

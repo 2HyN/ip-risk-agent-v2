@@ -186,6 +186,13 @@ def test_production_worker_is_deployable_without_api_or_task_publisher_settings(
                 "CLOUD_TASKS_SERVICE_ACCOUNT": TASKS_SERVICE_ACCOUNT,
             }
         )
+    with pytest.raises(SettingsError, match="API-only"):
+        Settings.from_env(
+            {
+                **values,
+                "FRONTEND_DIST_DIR": "/app/frontend/dist",
+            }
+        )
 
 
 def test_production_rejects_role_reversal_and_partial_rag_configuration() -> None:

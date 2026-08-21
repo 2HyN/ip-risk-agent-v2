@@ -133,7 +133,7 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 | `iprisk-v2-worker` | Worker Cloud Run | v2 DB 조건부 Firestore User, v2 bucket object 권한, Worker secret, Vertex/RAG |
 | `iprisk-v2-tasks` | Cloud Tasks OIDC | v2 Worker service의 Cloud Run Invoker만 |
 | `iprisk-v2-scheduler` | Scheduler OIDC | v2 API service의 Cloud Run Invoker만 |
-| `iprisk-v2-deploy` | Cloud Build 실행/image push | v2 repository Writer와 project Logs Writer만 |
+| `iprisk-v2-deploy` | Cloud Build 실행/image push | v2 repository Writer, project Logs Writer, Cloud Build source bucket Object Viewer |
 
 세부 적용 순서:
 
@@ -153,6 +153,12 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 10. Cloud Build service agent `service-555102774494@gcp-sa-cloudbuild.iam.gserviceaccount.com`에는
     `iprisk-v2-deploy`에 대한 `roles/iam.serviceAccountTokenCreator`만 부여한다. build 제출자는
     이 account를 사용할 수 있는 제한된 권한을 별도 승인받는다.
+11. **Cloud Storage → Buckets → `proj-aj22-211200020328_cloudbuild` → Permissions**에서
+    `iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com`에 bucket-level
+    `roles/storage.objectViewer`를 부여한다. 이는 `gcloud builds submit`이 staging한 source
+    object를 user-specified build identity가 읽기 위한 권한이며 create/update/delete 권한은
+    부여하지 않는다. 첫 외부 build에서는 이 binding 부재로 `storage.objects.get` 403이
+    발생했고, binding 추가 후 source fetch가 진행됐다.
 
 `roles/cloudtasks.serviceAgent` 같은 service-agent role은 사용자 계정이나 위 5개 계정에
 직접 부여하지 않는다.
@@ -160,6 +166,7 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
 - [ ] 다섯 identity의 email을 입력표에 기록했다.
 - [ ] runtime service account key가 0개다.
 - [ ] project-wide Owner/Editor가 runtime identity에 없다.
+- [ ] deploy identity가 Cloud Build source bucket에서는 Object Viewer만 가진다.
 - [ ] API와 Worker의 effective permission을 Policy Analyzer로 검토했다.
 
 ## 5. Artifact Registry와 image 고정
@@ -172,8 +179,11 @@ API 활성화 작업자는 `roles/serviceusage.serviceUsageAdmin` 또는 동등�
    `deploy/cloudbuild.yaml`을 지정해 RC SHA를 build한다. 이 config는
    `iprisk-v2-deploy@...`를 user-specified build service account로 명시하며 default Cloud
    Build/Compute service account에 fallback하지 않는다.
-5. build의 `smoke-import-api`, `smoke-import-worker`가 모두 성공했는지 확인한다.
-6. Artifact Registry image 상세 화면에서 생성된 immutable digest를 복사해 입력표에
+5. 제출 전에 §4의 `proj-aj22-211200020328_cloudbuild` bucket Object Viewer binding이
+   적용됐는지 확인한다. 없으면 source archive download가 `storage.objects.get` 403으로
+   실패하므로 build step 자체가 시작되지 않는다.
+6. build의 `smoke-import-api`, `smoke-import-worker`가 모두 성공했는지 확인한다.
+7. Artifact Registry image 상세 화면에서 생성된 immutable digest를 복사해 입력표에
    `.../application@sha256:...` 형식으로 기록한다. 이후 두 서비스 모두 이 digest를 쓴다.
 
 - [ ] build source SHA가 RC SHA와 같다.
@@ -267,8 +277,10 @@ version을 추가하고 runtime에는 필요한
    그대로 반영한다.
 5. `APP_ENV=production`, `APP_ROLE=worker`와 `deploy/cloud-run-services.yaml`의 common,
    worker required environment만 설정한다. Worker에는 Google Login/Picker/Scheduler,
-   Drive callback/webhook/channel 또는 queue location/name을 주입하지 않는다. RAG 세 값은
-   함께 설정하거나 모두 생략하고 실제 secret은 Secret Manager ID/mapping을 쓴다.
+   Drive callback/webhook/channel 또는 queue location/name을 주입하지 않는다. 특히
+   `FRONTEND_DIST_DIR`는 API-only이므로 Worker revision 환경 및 shared image ENV 양쪽에
+   존재하면 안 된다. RAG 세 값은 함께 설정하거나 모두 생략하고 실제 secret은 Secret
+   Manager ID/mapping을 쓴다.
 6. Worker의 `APP_PUBLIC_BASE_URL`을 deterministic
    `https://ip-risk-agent-v2-worker-555102774494.asia-northeast3.run.app`로 두고 배포 결과의
    service URL과 일치하는지 확인한다. Worker에는 `ANALYSIS_WORKER_URL`과
@@ -278,6 +290,7 @@ version을 추가하고 runtime에는 필요한
 - [ ] unauthenticated 호출이 401/403이다.
 - [ ] `/health/live`가 성공한다.
 - [ ] `/health/ready`가 production durable composition을 확인한다.
+- [ ] Worker revision 환경에 `FRONTEND_DIST_DIR`가 없고 startup log에 `SettingsError`가 없다.
 - [ ] log에 token, raw content, private path가 없다.
 - [ ] Worker URL/revision을 입력표에 기록했다.
 
@@ -306,7 +319,8 @@ repository preflight는 네 maintenance route가 production API composition에 �
    session/CSRF 정책으로 보호한다.
 3. `APP_ENV=production`, `APP_ROLE=api`, `FRONTEND_DIST_DIR=/app/frontend/dist`와 manifest의
    common/API required environment를 설정한다. API에는 Intelligence/RAG 변수를 주입하지
-   않는다. `APP_PUBLIC_BASE_URL`은 최종 HTTPS API origin이다.
+   않는다. 이 frontend 경로는 shared Docker image의 기본 ENV가 아니라 API revision에
+   명시적으로 설정한다. `APP_PUBLIC_BASE_URL`은 최종 HTTPS API origin이다.
 4. `/health/live`, `/health/ready`, `/app` static asset 제공을 확인한다.
 5. `iprisk-v2-scheduler`에 v2 API service의 Cloud Run Invoker만 부여한다.
 6. **Cloud Scheduler → Create job**에서 `deploy/scheduler-jobs.yaml`의 네 job을 만든다.

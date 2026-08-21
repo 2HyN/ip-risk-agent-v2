@@ -31,7 +31,9 @@ def test_repository_owned_gcp_inputs_are_self_consistent() -> None:
         "public-worker",
         "split-image",
         "worker-api-setting",
+        "shared-image-api-setting",
         "missing-build-identity",
+        "missing-build-source-bucket-read",
         "scheduler-route-mismatch",
         "index-count-mismatch",
     ),
@@ -62,12 +64,36 @@ def test_deployment_validator_rejects_v1_namespace_regressions(
         ROOT / "backend" / "src" / "ip_risk_agent" / "gcp" / "cloud_tasks.py",
         tasks_parent / "cloud_tasks.py",
     )
-    _inject_namespace_violation(root / "deploy", violation)
+    _inject_namespace_violation(root, violation)
     errors = validate(root)
     assert errors, f"validator accepted {violation}"
+    expected_error = {
+        "shared-image-api-setting": "shared runtime image must not define",
+        "missing-build-source-bucket-read": "Cloud Build execution/logging/source IAM",
+    }.get(violation)
+    if expected_error is not None:
+        assert any(expected_error in error for error in errors)
 
 
-def _inject_namespace_violation(deploy: Path, violation: str) -> None:
+def _inject_namespace_violation(root: Path, violation: str) -> None:
+    deploy = root / "deploy"
+    if violation == "shared-image-api-setting":
+        path = root / "Dockerfile"
+        dockerfile = path.read_text("utf-8")
+        path.write_text(
+            dockerfile.replace(
+                "    PORT=8080",
+                "    PORT=8080 \\\n    FRONTEND_DIST_DIR=/app/frontend/dist",
+            ),
+            encoding="utf-8",
+        )
+        return
+    if violation == "missing-build-source-bucket-read":
+        path = deploy / "iam-policy-contract.yaml"
+        document = yaml.safe_load(path.read_text("utf-8"))
+        document["buildBindings"].pop("buildSourceBucketRead")
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        return
     if violation in {"legacy-artifact-repository", "missing-build-identity"}:
         path = deploy / "cloudbuild.yaml"
         document = yaml.safe_load(path.read_text("utf-8"))

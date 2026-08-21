@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 from pathlib import Path
 
 import yaml
@@ -12,6 +13,7 @@ from ip_risk_agent.gcp_contract import (
     API_SERVICE,
     API_SERVICE_ACCOUNT,
     ARTIFACT_REPOSITORY,
+    CLOUD_BUILD_SOURCE_BUCKET,
     DEPLOY_SERVICE_ACCOUNT,
     DYNAMIC_CREDENTIAL_SECRET_PREFIX,
     FIRESTORE_DATABASE,
@@ -87,6 +89,12 @@ WORKER_ENVIRONMENT = {
     "VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG",
     "KIPRIS_API_KEY_SECRET_ID",
     "PACKAGE_METADATA_BASE_URL",
+}
+ROLE_EXCLUSIVE_ENVIRONMENT = API_ENVIRONMENT | WORKER_ENVIRONMENT | {
+    "GEMINI_MODEL_ID",
+    "RAG_REGION",
+    "RAG_CORPUS_ID",
+    "RAG_CORPUS_VERSION",
 }
 
 
@@ -174,6 +182,13 @@ def validate(root: Path = ROOT) -> list[str]:
     )
     if any(token not in dockerfile for token in required_docker_tokens):
         errors.append("Dockerfile is missing a shared-image production invariant")
+    image_environment = _docker_stage_environment(dockerfile, stage="runtime")
+    leaked_role_environment = sorted(image_environment & ROLE_EXCLUSIVE_ENVIRONMENT)
+    if leaked_role_environment:
+        errors.append(
+            "shared runtime image must not define role-exclusive environment: "
+            + ", ".join(leaked_role_environment)
+        )
     if ".venv" not in dockerignore or ".env.*" not in dockerignore:
         errors.append("Docker build context must exclude virtualenv and environment files")
     if any(line.startswith("!") and ".env" in line for line in dockerignore):
@@ -363,6 +378,7 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
         },
         "api": {
             "APP_ROLE": "api",
+            "FRONTEND_DIST_DIR": "/app/frontend/dist",
             "GOOGLE_CLOUD_PROJECT_NUMBER": PROJECT_NUMBER,
             "GITHUB_WEBHOOK_SECRET_ID": FIXED_SECRET_IDS["github_webhook"],
             "CLOUD_TASKS_LOCATION": REGION,
@@ -560,6 +576,11 @@ def _validate_iam_contract(iam: dict, errors: list[str]) -> None:
             "member": DEPLOY_SERVICE_ACCOUNT,
             "resource": f"projects/{PROJECT_ID}",
         },
+        "buildSourceBucketRead": {
+            "role": "roles/storage.objectViewer",
+            "member": DEPLOY_SERVICE_ACCOUNT,
+            "resource": f"projects/_/buckets/{CLOUD_BUILD_SOURCE_BUCKET}",
+        },
         "buildServiceAgentToken": {
             "role": "roles/iam.serviceAccountTokenCreator",
             "member": (
@@ -571,7 +592,7 @@ def _validate_iam_contract(iam: dict, errors: list[str]) -> None:
         },
     }
     if iam.get("buildBindings") != expected_build_bindings:
-        errors.append("Cloud Build execution/logging IAM contract mismatch")
+        errors.append("Cloud Build execution/logging/source IAM contract mismatch")
 
     dynamic = iam.get("dynamicCredentialPermissions", {})
     if dynamic.get("creator", {}).get("permissions") != [
@@ -607,6 +628,36 @@ def _condition_resource(expression: object) -> str | None:
     if not expression.startswith(prefix) or not expression.endswith('"'):
         return None
     return expression[len(prefix) : -1]
+
+
+def _docker_stage_environment(dockerfile: str, *, stage: str) -> set[str]:
+    """Return ENV keys defined in one Dockerfile stage without executing Docker."""
+
+    logical_lines = (
+        dockerfile.replace("\\\r\n", " ").replace("\\\n", " ").splitlines()
+    )
+    in_stage = False
+    environment: set[str] = set()
+    for raw_line in logical_lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.upper().startswith("FROM "):
+            parts = line.split()
+            in_stage = (
+                len(parts) >= 4
+                and parts[-2].upper() == "AS"
+                and parts[-1] == stage
+            )
+            continue
+        if not in_stage or not line.upper().startswith("ENV "):
+            continue
+        tokens = shlex.split(line[4:].strip(), posix=True)
+        if all("=" in token for token in tokens):
+            environment.update(token.split("=", 1)[0] for token in tokens)
+        elif tokens:
+            environment.add(tokens[0])
+    return environment
 
 
 def main() -> int:

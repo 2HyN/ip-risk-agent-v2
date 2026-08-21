@@ -15,6 +15,7 @@ WORKER_BASE_URL = (
 TASK_QUEUE = "ip-risk-agent-v2-analysis-changes"
 ARTIFACT_REPOSITORY = "ip-risk-agent-v2"
 IMAGE_NAME = "application"
+CLOUD_BUILD_SOURCE_BUCKET = f"{PROJECT_ID}_cloudbuild"
 STAGING_BUCKET = f"{PROJECT_ID}-iprisk-v2-staging"
 RAG_CORPUS_DISPLAY_NAME = "ip-risk-agent-v2-legal-reference"
 
@@ -58,6 +59,7 @@ __all__ = [
     "API_SERVICE",
     "API_SERVICE_ACCOUNT",
     "ARTIFACT_REPOSITORY",
+    "CLOUD_BUILD_SOURCE_BUCKET",
     "DEPLOY_SERVICE_ACCOUNT",
     "DYNAMIC_CREDENTIAL_SECRET_PREFIX",
     "FIRESTORE_DATABASE",

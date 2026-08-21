@@ -220,7 +220,7 @@ Frontend 개발 서버는 다음과 같이 실행할 수 있다.
 pnpm --filter @iprisk/frontend dev
 ```
 
-Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. 로그인 후 Source 화면은 현재 workspace ID를 사용해 OAuth/install을 시작하고, callback 뒤 Drive Picker 또는 GitHub repository/branch 선택을 mount 생성까지 이어간다. Google Picker가 필요하면 `GOOGLE_PICKER_API_KEY`와 `GOOGLE_CLOUD_PROJECT_NUMBER`를 API 환경에 함께 설정한다. Built frontend는 production image의 `FRONTEND_DIST_DIR`에서 API와 same-origin으로 제공된다.
+Vite는 `/api`를 `http://127.0.0.1:8000`으로 proxy한다. 로그인 후 Source 화면은 현재 workspace ID를 사용해 OAuth/install을 시작하고, callback 뒤 Drive Picker 또는 GitHub repository/branch 선택을 mount 생성까지 이어간다. Google Picker가 필요하면 `GOOGLE_PICKER_API_KEY`와 `GOOGLE_CLOUD_PROJECT_NUMBER`를 API 환경에 함께 설정한다. Built frontend는 API revision에 명시한 `FRONTEND_DIST_DIR=/app/frontend/dist`에서 same-origin으로 제공된다. 이 변수는 shared image 기본 ENV나 Worker 환경에 두지 않는다.
 
 Desktop 개발 실행과 검증:
 

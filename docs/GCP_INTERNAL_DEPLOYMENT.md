@@ -27,6 +27,9 @@ v1의 `(default)` database, `ip-risk-agent` Run service,
 ## 2. 배포 단위와 role 계약
 
 하나의 non-root immutable `application` image digest를 두 Cloud Run service가 공유한다.
+따라서 Dockerfile runtime `ENV`에는 API-only 또는 Worker-only 변수를 두지 않는다.
+`FRONTEND_DIST_DIR=/app/frontend/dist`는 API revision manifest에만 명시하며 Worker에는
+직접 또는 image 기본값으로도 주입하지 않는다.
 
 | 서비스 | entrypoint | ingress/auth | 고유 책임 |
 |---|---|---|---|
@@ -75,7 +78,7 @@ handoff다.
 | Worker | v2 database, v2 staging objects, Worker fixed secrets, dynamic credential add/access, Vertex AI와 v2 RAG corpus |
 | Tasks caller | v2 Worker service의 `roles/run.invoker`만 |
 | Scheduler caller | v2 API service의 `roles/run.invoker`만 |
-| Deploy/build | v2 Artifact repository writer와 project Logs Writer만; runtime secret/data 권한 없음 |
+| Deploy/build | v2 Artifact repository writer, project Logs Writer, `proj-aj22-211200020328_cloudbuild` bucket Object Viewer; runtime secret/data 권한 없음 |
 | Cloud Build service agent | `iprisk-v2-deploy`에 대한 Token Creator만 |
 
 runtime identity에는 Owner, Editor, `roles/secretmanager.admin`, unconditional
@@ -142,9 +145,13 @@ projects/proj-aj22-211200020328/serviceAccounts/
 iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
 ```
 
-이 identity는 v2 Artifact Registry repository의 Writer와 Cloud Logging의 Logs Writer만
-요구한다. Cloud Build service agent에는 이 build identity에 대한 Token Creator만 둔다.
-build log는 `CLOUD_LOGGING_ONLY`이며 default Cloud Build/Compute identity와
+이 identity는 v2 Artifact Registry repository의 Writer, Cloud Logging의 Logs Writer와
+Cloud Build source bucket `gs://proj-aj22-211200020328_cloudbuild`의 bucket-level
+`roles/storage.objectViewer`를 요구한다. 마지막 binding은 제출자가 staging한 source
+archive를 build identity가 읽을 때 필요한 `storage.objects.get`을 제공하며 object
+create/update/delete는 허용하지 않는다. 실제 첫 외부 제출에서는 이 binding이 없어 403이
+발생했고 추가 후 source fetch가 진행됐다. Cloud Build service agent에는 이 build
+identity에 대한 Token Creator만 둔다. build log는 `CLOUD_LOGGING_ONLY`이며 default Cloud Build/Compute identity와
 `cloud-run-source-deploy` repository에 의존하지 않는다. build는 commit SHA tag 하나를
 push하고, API/Worker manifest는 같은 `application@${IMAGE_DIGEST}`를 요구한다.
 
@@ -164,10 +171,11 @@ python -m pytest tests/integration -m "not live"
 python scripts/prepare_rag_ingestion.py
 ```
 
-validator는 v1/default namespace, 역할별 환경 불일치, public Worker, 서로 다른 API/Worker
-artifact, broad IAM, non-v2 secret prefix, 8-index/2-TTL, 네 Scheduler route/job, Cloud Build
-identity/logging과 immutable digest 계약을 실패시킨다. 외부 resource를 조회하거나 만들지
-않는 pure repository preflight다.
+validator는 v1/default namespace, 역할별 환경 불일치, shared image runtime ENV를 통한
+role-only 변수 유입, public Worker, 서로 다른 API/Worker artifact, broad IAM, non-v2 secret
+prefix, 8-index/2-TTL, 네 Scheduler route/job, Cloud Build identity/logging/source bucket read와
+immutable digest 계약을 실패시킨다. 외부 resource를 조회하거나 만들지 않는 pure repository
+preflight다.
 
 공식 근거:
 
@@ -177,3 +185,4 @@ identity/logging과 immutable digest 계약을 실패시킨다. 외부 resource�
 - [Cloud Run deterministic URL](https://cloud.google.com/run/docs/triggering/https-request)
 - [Cloud Run service-to-service OIDC audience](https://cloud.google.com/run/docs/authenticating/service-to-service)
 - [Cloud Build user-specified service account](https://cloud.google.com/build/docs/securing-builds/configure-user-specified-service-accounts)
+- [Cloud Storage Object Viewer와 bucket IAM](https://cloud.google.com/storage/docs/access-control/iam)
