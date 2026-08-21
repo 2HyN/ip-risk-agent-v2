@@ -1,0 +1,27 @@
+# IP Risk Agent E2E 샘플 — License analyzer (PyPI)
+#
+# Drive 에 반드시 파일명 `requirements.txt` 그대로 올린다.
+# 이름이 다르면 ArtifactKind 가 DOCUMENT_TEXT 로 분류되어 License 가 아니라
+# Patent analyzer 로 간다.
+#
+# 각 줄이 노리는 판정은 samples/README.md 표를 본다.
+
+# POLICY_CONFLICT — 결합 저작물의 소스 공개를 요구한다.
+# deps.dev 는 이 패키지를 non-standard 로 답하고, PyPI 원문에서 AGPL-3.0-only 가 복원된다.
+# 폴백 경로까지 함께 태우는 줄이다.
+pymupdf==1.24.0
+
+# REVIEW_REQUIRED — 결합 방식에 따라 의무가 달라져 사람이 판단해야 한다.
+certifi==2024.7.4
+psycopg2==2.9.9
+
+# NOTICE_REQUIRED — 고지와 사본 첨부로 충족된다.
+requests==2.32.3
+click==8.1.7
+
+# VERSION_RANGE_NOT_PINNED — 확정 버전이 아니라 범위다.
+# `==` 만 확정으로 보므로 이 줄은 진단이 붙는다.
+urllib3>=2.0.0
+
+# NOT_FOUND — 존재하지 않는 패키지. 실패를 "위험 없음" 으로 바꾸지 않는지 확인한다.
+iprisk-nonexistent-sample-package==0.0.1
