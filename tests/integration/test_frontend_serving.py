@@ -117,3 +117,21 @@ def test_path_traversal_cannot_escape_the_bundle(web_client: TestClient) -> None
     # 정규화되어 index.html 로 떨어지거나 거부된다. 파일 내용이 새면 안 된다.
     assert response.status_code in {200, 400, 404}
     assert "root:" not in response.text
+
+
+def test_index_is_never_cached(web_client: TestClient) -> None:
+    """index.html 경로는 고정인데 참조하는 자산 해시는 배포마다 바뀐다.
+
+    브라우저가 옛 index.html 을 재사용하면 이미 사라진 해시 파일을 찾아
+    흰 화면이 되거나, 옛 코드가 돌아 "배포가 반영되지 않은" 것처럼 보인다.
+    """
+    for path in ("/", "/w/vws-1/risks"):
+        cache_control = web_client.get(path).headers.get("cache-control", "")
+        assert "no-store" in cache_control, f"{path} 가 캐시될 수 있다"
+
+
+def test_hashed_assets_stay_cacheable(web_client: TestClient) -> None:
+    """자산은 파일명에 해시가 있어 캐시해도 안전하다. 같이 막으면 손해다."""
+    assert "no-store" not in web_client.get(
+        "/assets/index-abc.js"
+    ).headers.get("cache-control", "")

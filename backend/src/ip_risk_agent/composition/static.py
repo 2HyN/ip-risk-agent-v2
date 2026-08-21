@@ -19,6 +19,12 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+# index.html 은 절대 캐시하지 않는다. 자산 파일명에는 해시가 붙어 바뀌지만
+# index.html 의 경로는 고정이다. 브라우저가 옛 index.html 을 들고 있으면 이미
+# 사라진 해시 파일을 찾아 흰 화면이 되거나, 옛 코드가 그대로 돌아 배포가
+# 반영되지 않은 것처럼 보인다.
+NO_STORE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
 # 이 접두사로 시작하는 경로는 SPA 로 넘기지 않는다.
 # 여기에 해당하는데 실제 라우트가 없으면 정직하게 404 를 돌려준다.
 RESERVED_PREFIXES: tuple[str, ...] = (
@@ -73,9 +79,9 @@ def install_frontend(app: FastAPI, dist_dir: Path) -> bool:
             and candidate.is_relative_to(dist_dir.resolve())
         ):
             return FileResponse(candidate)
-        return FileResponse(index)
+        return FileResponse(index, headers=NO_STORE)
 
     return True
 
 
-__all__ = ["RESERVED_PREFIXES", "install_frontend", "is_reserved"]
+__all__ = ["NO_STORE", "RESERVED_PREFIXES", "install_frontend", "is_reserved"]
