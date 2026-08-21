@@ -162,6 +162,7 @@ export type ConnectedSource = {
 
 export type TrackedArtifact = {
   artifact_id: string;
+  change_event_id: string | null;
   mount_id: string;
   source_type: string;
   source_context: string | null;

@@ -114,6 +114,11 @@ export class ControlApi {
     this.client.url(`/api/v1/workspaces/${id}/audit/export`);
   security = (id: string) =>
     this.client.request<SecuritySettings>(`/api/v1/workspaces/${id}/security`);
+  requestReanalysis = (id: string, changeEventId: string) =>
+    this.client.request<{ status: string }>(
+      `/api/v1/workspaces/${id}/security/reanalyze`,
+      { method: "POST", body: JSON.stringify({ change_event_id: changeEventId }) },
+    );
   dataAccess = (id: string) =>
     this.client.request<DataAccessSummary>(
       `/api/v1/workspaces/${id}/security/data-access-summary`,

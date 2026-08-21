@@ -670,3 +670,59 @@ def test_reconnecting_a_disabled_source_reactivates_the_mount() -> None:
         assert revived.status is MountStatus.ACTIVE
 
     run(scenario())
+
+
+def test_reanalysis_reruns_a_finished_analysis() -> None:
+    """파일 변경 없이 다시 검사할 수 있어야 한다.
+
+    `retry_failed_analysis` 는 FAILED 만 되돌린다. 재검사의 요점은 이미 끝난
+    결과도 다시 돌리는 것이다 — 재현을 파일 재업로드에 의존하면 디버깅과 검증이
+    모두 느려진다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        receipt = await facade.register_source_change(make_change(source))
+
+        claim = await facade.claim_analysis(receipt.change_event_id)
+        assert claim is not None
+        await facade.fail_analysis(
+            receipt.change_event_id, failure_safe="CONTRACT:X", attempt=claim.attempt
+        )
+
+        before = len(queue.attempts)
+        await facade.request_reanalysis(receipt.change_event_id)
+        assert len(queue.attempts) == before + 1
+
+        # 되돌린 뒤에는 다시 점유할 수 있어야 한다.
+        again = await facade.claim_analysis(receipt.change_event_id)
+        assert again is not None
+        assert again.attempt > claim.attempt
+
+    run(scenario())
+
+
+def test_reanalysis_refuses_an_in_flight_analysis() -> None:
+    """진행 중인 실행을 되돌리면 늦게 도착한 결과가 새 시도를 덮는다."""
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        receipt = await facade.register_source_change(make_change(source))
+
+        claim = await facade.claim_analysis(receipt.change_event_id)
+        assert claim is not None  # 이제 PROCESSING/RUNNING 이다
+
+        with pytest.raises(DomainInvariantError):
+            await facade.request_reanalysis(receipt.change_event_id)
+
+    run(scenario())

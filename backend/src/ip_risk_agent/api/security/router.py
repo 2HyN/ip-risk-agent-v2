@@ -104,7 +104,12 @@ class ConnectedSourceResponse(StrictApiModel):
     mounted_by_user_id: str
 
 
+class ReanalysisRequest(StrictApiModel):
+    change_event_id: str
+
+
 class TrackedArtifactResponse(StrictApiModel):
+    change_event_id: str | None
     artifact_id: str
     mount_id: str
     source_type: str
@@ -172,6 +177,25 @@ def create_security_router(deps: SecurityRouterDependencies) -> APIRouter:
         )
         return result
 
+    @router.post("/reanalyze", status_code=202)
+    async def request_reanalysis(
+        vws_id: str,
+        body: ReanalysisRequest,
+        principal: CurrentPrincipal = Depends(current),
+        _csrf: None = Depends(csrf),
+    ):
+        """파일 변경 없이 다시 검사한다.
+
+        진행 중인 실행은 되돌리지 않는다 — 돌리면 실행 중인 worker 의 결과가 뒤늦게
+        도착해 새 시도를 덮는다.
+        """
+        await deps.security.request_reanalysis(
+            risk_workspace_id=vws_id,
+            actor_user_id=principal.user.id,
+            change_event_id=body.change_event_id,
+        )
+        return {"status": "queued"}
+
     @router.get("/data-access-summary", response_model=DataAccessSummaryResponse)
     async def data_access_summary(
         vws_id: str,
@@ -204,6 +228,7 @@ def create_security_router(deps: SecurityRouterDependencies) -> APIRouter:
             ],
             tracked_artifacts=[
                 TrackedArtifactResponse(
+                    change_event_id=item.change_event_id,
                     artifact_id=item.artifact.id,
                     mount_id=item.artifact.mount_id,
                     source_type=item.artifact.source_type.value,

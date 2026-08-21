@@ -520,6 +520,7 @@ def test_control_workspace_risk_history_security_notification_routes() -> None:
         assert summary.json()["raw_source_persisted"] is False
         assert summary.json()["tracked_artifacts"] == [
             {
+                "change_event_id": "change-1",
                 "artifact_id": "artifact-1",
                 "mount_id": "mount-1",
                 "source_type": "GOOGLE_DRIVE",

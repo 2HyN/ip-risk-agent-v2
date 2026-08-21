@@ -45,6 +45,24 @@ def complete_analysis_job(
     )
 
 
+def reanalyze_analysis_job(job: AnalysisJob) -> AnalysisJob:
+    """재검사를 위해 job 을 초기 상태로 되돌린다.
+
+    이전 판정(analysis_outcomes)을 지운다. 남겨 두면 새 결과가 "이미 있는 결과"
+    로 취급되어 수용 검사를 다르게 통과한다.
+    """
+    if job.status in {AnalysisJobStatus.QUEUED, AnalysisJobStatus.RUNNING}:
+        raise DomainInvariantError("analysis is already in flight")
+    return replace(
+        job,
+        status=AnalysisJobStatus.QUEUED,
+        started_at=None,
+        completed_at=None,
+        failure_safe=None,
+        analysis_outcomes={},
+    )
+
+
 def requeue_analysis_job(job: AnalysisJob) -> AnalysisJob:
     if job.status is not AnalysisJobStatus.FAILED:
         raise DomainInvariantError("only a FAILED analysis job may be requeued")
@@ -83,5 +101,6 @@ __all__ = [
     "claim_analysis_job",
     "complete_analysis_job",
     "reclaim_analysis_job",
+    "reanalyze_analysis_job",
     "requeue_analysis_job",
 ]

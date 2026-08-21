@@ -49,6 +49,26 @@ export function SourcePanel({
   const connectionId = safeOpaqueId(search.get("connection_id"));
   const completion = search.get("status") === "connected" && provider !== null && connectionId !== null;
 
+  const [reanalyzing, setReanalyzing] = useState<string | null>(null);
+
+  async function reanalyze(artifact: TrackedArtifact): Promise<void> {
+    if (artifact.change_event_id === null) return;
+    setReanalyzing(artifact.artifact_id);
+    setNotice(null);
+    setMutationError(null);
+    try {
+      await api.requestReanalysis(workspace.id, artifact.change_event_id);
+      setNotice(`${artifact.display_name} 재검사를 요청했습니다.`);
+      sources.reload();
+    } catch (reason) {
+      setMutationError(
+        reason instanceof Error ? reason : new Error("재검사를 요청하지 못했습니다."),
+      );
+    } finally {
+      setReanalyzing(null);
+    }
+  }
+
   function complete(message: string): void {
     setNotice(message);
     setMutationError(null);
@@ -187,9 +207,20 @@ export function SourcePanel({
                 ) : (
                   <span>{artifact.highest_risk_priority} priority</span>
                 )}
-                <Link to={`artifacts/${encodeURIComponent(artifact.artifact_id)}`}>
-                  View artifact analysis
-                </Link>
+                <div className="card-actions">
+                  <Link to={`artifacts/${encodeURIComponent(artifact.artifact_id)}`}>
+                    View artifact analysis
+                  </Link>
+                  {artifact.change_event_id === null ? null : (
+                    <Button
+                      type="button"
+                      onClick={() => void reanalyze(artifact)}
+                      disabled={reanalyzing !== null}
+                    >
+                      {reanalyzing === artifact.artifact_id ? "재검사 요청 중…" : "다시 검사"}
+                    </Button>
+                  )}
+                </div>
               </Card>
             ))}
           </section>

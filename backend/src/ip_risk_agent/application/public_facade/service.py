@@ -263,6 +263,14 @@ class ControlPlaneFacade:
     async def retry_failed_analysis(self, change_event_id: str) -> None:
         await self._jobs.retry_failed(change_event_id)
 
+    async def request_reanalysis(self, change_event_id: str) -> None:
+        """변경 없이 다시 검사한다. 진행 중이면 거부한다."""
+        await self._jobs.request_reanalysis(change_event_id)
+        self._observer.event(
+            "analysis_reanalysis_requested",
+            correlation=CorrelationIds(event_id=change_event_id),
+        )
+
     async def register_source_access(
         self,
         context: SourceAccessReceiptContext,

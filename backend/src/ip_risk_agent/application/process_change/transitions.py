@@ -91,6 +91,24 @@ def fail_change_event(
     )
 
 
+def reanalyze_change_event(event: ChangeEvent, *, occurred_at: datetime) -> ChangeEvent:
+    """사용자가 변경 없이 다시 검사하도록 되돌린다.
+
+    `requeue_change_event` 는 FAILED 만 허용한다. 재검사는 이미 끝난(DONE) 결과도
+    다시 돌려야 하므로 별도 전이가 필요하다. 진행 중인 것은 되돌리지 않는다 —
+    돌리면 실행 중인 worker 의 결과가 뒤늦게 도착해 새 시도를 덮는다.
+    """
+    if event.status in {ChangeEventStatus.PENDING, ChangeEventStatus.PROCESSING}:
+        raise DomainInvariantError("analysis is already in flight")
+    return replace(
+        event,
+        status=ChangeEventStatus.PENDING,
+        last_error_safe=None,
+        updated_at=normalize_utc(occurred_at, "change_event_reanalyze.occurred_at"),
+        lease_expires_at=None,
+    )
+
+
 def requeue_change_event(event: ChangeEvent, *, occurred_at: datetime) -> ChangeEvent:
     if event.status is not ChangeEventStatus.FAILED:
         raise DomainInvariantError("only a FAILED change event may be requeued")
@@ -105,6 +123,7 @@ def requeue_change_event(event: ChangeEvent, *, occurred_at: datetime) -> Change
 
 __all__ = [
     "claim_change_event",
+    "reanalyze_change_event",
     "complete_change_event",
     "fail_change_event",
     "reclaim_change_event",

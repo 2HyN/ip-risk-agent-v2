@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -58,6 +60,10 @@ class ConnectedSourceSummary:
     tracking_scope_summary: Mapping[str, object]
 
 
+class ReanalysisRequester(Protocol):
+    async def __call__(self, change_event_id: str) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class TrackedArtifactSummary:
     artifact: Artifact
@@ -66,6 +72,8 @@ class TrackedArtifactSummary:
     latest_revision: str | None
     change_status: ChangeEventStatus | None
     analysis_status: AnalysisJobStatus | None
+    # 수동 재검사가 어떤 실행을 다시 돌릴지 가리키기 위한 값이다.
+    change_event_id: str | None
     risk_count: int
     active_risk_count: int
     first_risk_id: str | None
@@ -93,10 +101,38 @@ class WorkspaceSecurityService:
         unit_of_work_factory: ControlUnitOfWorkFactory,
         clock: Clock,
         id_factory: IdFactory,
+        reanalysis_requester: ReanalysisRequester | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
         self._id_factory = id_factory
+        self._reanalysis_requester = reanalysis_requester
+
+    async def request_reanalysis(
+        self,
+        *,
+        risk_workspace_id: str,
+        actor_user_id: str,
+        change_event_id: str,
+    ) -> None:
+        """파일 변경 없이 같은 artifact 를 다시 검사한다.
+
+        재검사는 provider 를 다시 호출하므로 소스 조작 권한을 요구한다. 대상이 이
+        workspace 의 것인지 확인하지 않으면 id 만 알면 남의 workspace 를 돌릴 수 있다.
+        """
+        if self._reanalysis_requester is None:
+            raise DomainInvariantError("reanalysis is not configured")
+        async with self._unit_of_work_factory() as uow:
+            await _authorize_and_workspace(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                actor_user_id=actor_user_id,
+                action=VwsAction.MOUNT_SOURCE_OPERATION,
+            )
+            event = await uow.change_events.get(change_event_id)
+            if event is None or event.risk_workspace_id != risk_workspace_id:
+                raise RecordNotFoundError("change event was not found in this workspace")
+        await self._reanalysis_requester(change_event_id)
 
     async def get_settings(
         self,
@@ -258,6 +294,7 @@ class WorkspaceSecurityService:
                 tracked_artifacts.append(
                     TrackedArtifactSummary(
                         artifact=artifact,
+                        change_event_id=None if change is None else change.id,
                         mount_alias=(
                             None
                             if artifact.mount_id not in mounts_by_id

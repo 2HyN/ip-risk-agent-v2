@@ -20,6 +20,7 @@ from ip_risk_agent.application.process_change.models import (
 )
 from ip_risk_agent.application.process_change.queue import TaskEnqueuer
 from ip_risk_agent.application.process_change.transitions import (
+    reanalyze_change_event,
     claim_change_event,
     complete_change_event,
     fail_change_event,
@@ -28,7 +29,9 @@ from ip_risk_agent.application.process_change.transitions import (
 )
 
 from .models import AnalysisJob, AnalysisJobStatus
+
 from .transitions import (
+    reanalyze_analysis_job,
     claim_analysis_job,
     complete_analysis_job,
     reclaim_analysis_job,
@@ -230,6 +233,23 @@ class AnalysisJobOrchestrationService:
             await uow.change_events.save(event)
             await uow.commit()
         return AnalysisExecutionState(event, job)
+
+    async def request_reanalysis(self, change_event_id: str) -> AnalysisExecutionState:
+        """변경 없이 같은 artifact 를 다시 검사한다.
+
+        `retry_failed` 는 FAILED 만 되돌린다. 재검사는 이미 끝난 결과도 다시 돌려야
+        하고, 그것이 이 기능의 요점이다. 진행 중이면 거부한다.
+        """
+        async with self._unit_of_work_factory() as uow:
+            event, job = await _load_execution(uow, change_event_id)
+            event = reanalyze_change_event(event, occurred_at=self._clock())
+            job = reanalyze_analysis_job(job)
+            await uow.change_events.save(event)
+            await uow.analysis_jobs.save(job)
+            await uow.commit()
+            state = AnalysisExecutionState(event, job)
+        await self._task_enqueuer.enqueue_change(change_event_id)
+        return state
 
     async def retry_failed(self, change_event_id: str) -> AnalysisExecutionState:
         async with self._unit_of_work_factory() as uow:
