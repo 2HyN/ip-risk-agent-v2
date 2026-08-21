@@ -39,6 +39,9 @@ export function AddSourceChooser({
     } catch (cause) {
       // 원인을 삼키면 "잠시 후 다시" 라는 안내가 영원히 맞지 않는 상황에서도
       // 사용자가 그대로 기다리게 된다. 상태 코드는 드러낸다.
+      // 상태 코드가 없는 실패(요청이 나가지도 못한 경우)는 화면 문구만으로
+      // 구분되지 않는다. 원인은 콘솔에 그대로 남긴다.
+      console.error(cause);
       const reason = cause instanceof Error ? cause.message : "";
       setError(
         reason.includes("401")
@@ -59,6 +62,9 @@ export function AddSourceChooser({
     } catch (cause) {
       // 원인을 삼키면 "잠시 후 다시" 라는 안내가 영원히 맞지 않는 상황에서도
       // 사용자가 그대로 기다리게 된다. 상태 코드는 드러낸다.
+      // 상태 코드가 없는 실패(요청이 나가지도 못한 경우)는 화면 문구만으로
+      // 구분되지 않는다. 원인은 콘솔에 그대로 남긴다.
+      console.error(cause);
       const reason = cause instanceof Error ? cause.message : "";
       setError(
         reason.includes("401")

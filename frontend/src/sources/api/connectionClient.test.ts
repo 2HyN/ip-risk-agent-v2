@@ -92,3 +92,35 @@ test("연결 시작 요청은 세션 쿠키를 함께 보낸다", async () => {
     assert.equal(init.credentials, "include");
   }
 });
+
+test("기본 fetchImpl 은 전역 fetch 를 올바른 수신자로 부른다", async () => {
+  // 전역 `fetch` 를 필드에 그대로 담으면 `this.fetchImpl(...)` 호출 시
+  // 수신자가 클라이언트 인스턴스가 되어 브라우저가 TypeError 를 던진다.
+  // 요청이 나가지 않으므로 서버 로그에도 네트워크 탭에도 흔적이 없고,
+  // 화면에는 상태 코드 없는 일반 오류만 보여 원인을 찾기 어렵다.
+  // 브라우저의 수신자 검사를 흉내 내 그 상태를 막는다.
+  const calls: string[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = function (this: unknown, input: string | URL) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError(
+        "'fetch' called on an object that does not implement interface Window."
+      );
+    }
+    calls.push(String(input));
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ authorize_url: "https://github.test/install", state: "s1" }),
+    } as Response);
+  } as unknown as typeof fetch;
+
+  try {
+    const client = new HttpConnectionApiClient("");
+    const result = await client.startGithubConnection("rw1");
+    assert.equal(result.authorizeUrl, "https://github.test/install");
+    assert.deepEqual(calls, ["/api/v1/source-connections/github/install/start"]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

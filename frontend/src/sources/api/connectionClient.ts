@@ -24,7 +24,12 @@ export type FetchLike = typeof fetch;
 export class HttpConnectionApiClient implements ConnectionApiClient {
   constructor(
     private readonly baseUrl: string,
-    private readonly fetchImpl: FetchLike = fetch
+    // 전역 `fetch` 를 그대로 담으면 안 된다. `this.fetchImpl(...)` 로 부르는
+    // 순간 수신자가 이 인스턴스가 되고, 브라우저는 `fetch` 가 Window 에서
+    // 불리지 않았다며 TypeError 를 던진다. 요청이 아예 나가지 않아 네트워크
+    // 탭에는 아무것도 남지 않고 화면에는 "연결 실패"로만 보인다.
+    // 감싸서 전역 수신자로 부른다.
+    private readonly fetchImpl: FetchLike = (...args) => fetch(...args)
   ) {}
 
   async startDriveConnection(riskWorkspaceId: string): Promise<StartConnectionResponse> {
