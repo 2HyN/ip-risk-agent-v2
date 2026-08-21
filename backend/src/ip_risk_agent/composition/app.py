@@ -130,6 +130,9 @@ def _mount_drive(
         create_drive_mounts_router(
             picker_api_key=source.drive_picker_api_key,
             picker_app_id=source.drive_picker_app_id,
+            # 폴더 선택을 하위 파일로 펼친다. 없으면 폴더 id 만 추적되어
+            # 사용자의 기대("폴더 안을 감시")와 실제가 조용히 어긋난다.
+            selection_expander=container.drive_selection_expander,
             provider_factory=bundle.provider_factory,
             credential_vault=ports.credential_vault,
             connection_credential_lookup=bundle.credential_lookup,

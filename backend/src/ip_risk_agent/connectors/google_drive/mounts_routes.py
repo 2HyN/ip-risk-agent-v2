@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Protocol
 
+from collections.abc import Sequence
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -17,6 +19,18 @@ from .tracking_scope import DriveTrackingScope
 
 class DriveProviderFactory(Protocol):
     def create(self, token: dict) -> object: ...
+
+
+class SelectionExpander(Protocol):
+    """Picker 선택에서 폴더를 하위 파일로 펼친다.
+
+    사용자는 폴더를 "폴더 안을 감시해 달라"는 뜻으로 고르지만, 변경 감지는
+    file id 정확 일치다. 펼치지 않으면 그 기대가 조용히 어긋난다.
+    """
+
+    async def expand(
+        self, connection_id: str, selected_file_ids: list[str]
+    ) -> Sequence: ...
 
 
 class PickerSessionResponse(BaseModel):
@@ -62,6 +76,7 @@ def create_drive_mounts_router(
     authz_dependency: AuthzDependency = allow_all_authz,
     picker_api_key: str | None = None,
     picker_app_id: str | None = None,
+    selection_expander: SelectionExpander | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -105,19 +120,39 @@ def create_drive_mounts_router(
     ) -> DriveMountCreationResponse:
         await authz_dependency(request, body.risk_workspace_id)
 
+        selected_file_ids = body.selected_file_ids
+        display_metadata = dict(body.display_metadata_by_file)
+        if selection_expander is not None:
+            files = await selection_expander.expand(
+                connection_id, body.selected_file_ids
+            )
+            selected_file_ids = [f.file_id for f in files]
+            for f in files:
+                display_metadata.setdefault(f.file_id, {"name": f.name})
+            if not selected_file_ids:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "선택한 폴더에 접근 가능한 파일이 없습니다. "
+                        "파일이 든 폴더나 파일을 골라 주세요."
+                    ),
+                )
+
         result = await mount_creation_callback.create_drive_mount(
             request,
             connection_id=connection_id,
             risk_workspace_id=body.risk_workspace_id,
-            selected_file_ids=body.selected_file_ids,
+            selected_file_ids=selected_file_ids,
         )
 
         await tracking_scope_store.save(
             result.server_mount_id,
             DriveTrackingScope(
                 mount_id=result.server_mount_id,
-                selected_file_ids=body.selected_file_ids,
-                display_metadata_by_file=body.display_metadata_by_file,
+                # 펼친 목록을 저장해야 변경 감지(file id 일치)가 폴더 안의
+                # 파일들과 실제로 맞는다.
+                selected_file_ids=selected_file_ids,
+                display_metadata_by_file=display_metadata,
             ),
         )
 

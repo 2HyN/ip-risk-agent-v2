@@ -34,8 +34,9 @@ from ip_risk_agent.connectors.common.fingerprint import drive_change_fingerprint
 
 logger = logging.getLogger(__name__)
 
-# 폴더는 내용물이 없어 분석할 수 없다. drive.file 스코프에서는 폴더를
-# 골라도 하위 파일 접근이 함께 열리지 않으므로, 여기서 펼치지도 못한다.
+# 폴더는 내용물이 없어 분석할 수 없다. 폴더의 하위 확장은 Mount 생성
+# 전에 DriveSelectionExpander 가 끝내므로 여기 오는 폴더는 예외 상황이지만,
+# 그래도 조용히 걸러서 파이프라인에 빈 분석이 들어가지 않게 한다.
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
 

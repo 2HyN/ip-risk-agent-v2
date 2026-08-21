@@ -103,6 +103,33 @@ class GoogleDriveProvider:
             new_start_page_token=response.get("newStartPageToken"),
         )
 
+    def list_children(self, folder_id: str) -> list[DriveFile]:
+        """폴더 바로 아래 항목들. 페이지를 모두 걷는다.
+
+        drive.file 스코프에서는 Picker 로 고른 폴더의 하위 항목까지 접근이
+        열린다. 접근이 없는 항목은 응답에서 빠질 뿐 오류가 나지 않는다.
+        """
+        children: list[DriveFile] = []
+        page_token: str | None = None
+        while True:
+            response = (
+                self._service.files()
+                .list(
+                    q=f"'{folder_id}' in parents and trashed=false",
+                    spaces="drive",
+                    fields=(
+                        "nextPageToken,"
+                        "files(id,name,mimeType,modifiedTime,version,webViewLink)"
+                    ),
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            children.extend(self._to_file(item) for item in response.get("files", []))
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                return children
+
     def read_text(self, file_id: str, mime_type: str) -> str:
         files = self._service.files()
         if mime_type == GOOGLE_DOC_MIME_TYPE:
