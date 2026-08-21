@@ -48,6 +48,12 @@ dev = [
 where = ["shared/contracts/python", "backend/src"]
 include = ["iprisk_contracts*", "ip_risk_agent*"]
 
+[tool.setuptools.package-data]
+# Gemini 프롬프트는 코드가 아니라 .md 파일이다. 명시하지 않으면 wheel 에서
+# 빠지고, 로컬(소스 실행)에서는 멀쩡하던 특허 분석이 배포에서만
+# FileNotFoundError 로 죽는다 — 실제로 그렇게 죽었다.
+"ip_risk_agent.intelligence.gemini.prompts" = ["*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["shared/contracts/tests", "tests"]
 pythonpath = ["shared/contracts/python", "backend/src", "."]
