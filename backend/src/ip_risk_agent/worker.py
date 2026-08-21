@@ -43,12 +43,23 @@ def create_worker_app(
 ) -> FastAPI:
     """분석 워커 애플리케이션.
 
-    ``adapters`` 는 provider 별 ``SourceAdapter`` 다. 실제 provider client 는
-    자격증명을 요구하므로 기본값은 비어 있다. 어댑터가 없는 source_type 의
-    작업은 성공으로 위장하지 않고 실패로 남는다.
+    ``adapters`` 를 넘기면 그것을 그대로 쓴다(테스트 주입용). 넘기지 않으면
+    컨테이너가 조립해 둔 provider 어댑터를 이어받는다 — 이 기본값이 비어
+    있으면 모든 분석이 "no adapter" 실패로 0.2초 만에 끝나면서도 HTTP 는
+    200 이라, 큐도 워커도 멀쩡해 보이는 채로 Risk 가 영영 비는 사고가 된다.
+    실제로 그렇게 배포된 적이 있다.
     """
     resolved = container or build_container(env if env is not None else os.environ)
-    resolved_adapters = dict(adapters or {})
+    if adapters is not None:
+        resolved_adapters = dict(adapters)
+    else:
+        resolved_adapters = {}
+        if resolved.drive is not None:
+            resolved_adapters[SourceType.GOOGLE_DRIVE] = resolved.drive.adapter
+        if resolved.github is not None:
+            resolved_adapters[SourceType.GITHUB] = resolved.github.adapter
+        # LOCAL 은 desktop 전용 조회 포트가 필요해 아직 조립하지 않는다.
+        # 어댑터가 없는 작업은 성공으로 위장하지 않고 실패로 남는다.
     pipeline = AnalysisPipeline(
         resolved.facade,
         adapters=resolved_adapters,

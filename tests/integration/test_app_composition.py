@@ -162,3 +162,40 @@ def test_google_login_fails_closed_when_unconfigured() -> None:
 )
 def test_control_routes_require_a_session(client: TestClient, path: str) -> None:
     assert client.get(path).status_code == 401
+
+
+def test_worker_inherits_provider_adapters_from_the_container() -> None:
+    """워커 기본 어댑터가 비면 모든 분석이 "no adapter" 실패로 끝난다.
+
+    그러면서도 HTTP 는 200 이라 큐도 워커도 멀쩡해 보인다 — Risk 만 영영
+    비는, 화면으로는 원인을 알 수 없는 사고다. 실제로 그렇게 배포됐었다.
+    """
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from iprisk_contracts.common import SourceType
+
+    from ip_risk_agent.worker import create_worker_app
+
+    container = build_test_container()
+    wired = replace(
+        container,
+        drive=SimpleNamespace(adapter=object()),
+        github=SimpleNamespace(adapter=object()),
+    )
+
+    with TestClient(create_worker_app(container=wired)) as client:
+        health = client.get("/health").json()
+
+    assert health["adapters"] == [
+        SourceType.GITHUB.value,
+        SourceType.GOOGLE_DRIVE.value,
+    ]
+
+
+def test_worker_without_bundles_reports_empty_adapters() -> None:
+    """provider 미구성 배포에서는 빈 목록이 정직한 상태다. health 로 보인다."""
+    from ip_risk_agent.worker import create_worker_app
+
+    with TestClient(create_worker_app(container=build_test_container())) as client:
+        assert client.get("/health").json()["adapters"] == []
