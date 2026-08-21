@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from pathlib import Path
 
 from fastapi import FastAPI
 
@@ -33,6 +34,7 @@ from ip_risk_agent.connectors.local.routes import create_local_desktop_router
 
 from . import authz
 from .container import Container, build_container
+from .static import install_frontend
 
 # 어떤 provider 라우터가 왜 빠졌는지 사람이 읽을 수 있게 남긴다.
 SKIP_REASONS = {
@@ -282,11 +284,19 @@ def create_app(
             "intelligence": (
                 "enabled" if resolved.intelligence_enabled else "disabled"
             ),
+            "web": "served" if app.state.frontend_served else "not-bundled",
             "sources": source_status,
         }
 
-    # Control API 는 미들웨어까지 함께 설치하므로 마지막에 붙인다.
+    # Control API 는 미들웨어까지 함께 설치하므로 라우터 중에서는 마지막이다.
     create_control_api_bundle(resolved.control_api).install(app)
+
+    # Web UI 는 **모든 API 라우터 뒤에** 붙는다. Starlette 는 등록 순서대로
+    # 매칭하므로 먼저 붙이면 catch-all 이 API 를 가린다.
+    dist = os.environ.get("FRONTEND_DIST_DIR")
+    app.state.frontend_served = (
+        install_frontend(app, Path(dist)) if dist else False
+    )
     return app
 
 

@@ -4,7 +4,10 @@
 # .dockerignore 를 찾으므로 deploy/ 에 두면 무시된다.
 #
 # Cloud Build 는 컨텍스트를 통째로 업로드하므로, 제외하지 않으면 .venv 와
-# node_modules 수 GB 를 매번 올리게 된다.
+# node_modules 를 매번 올리게 된다.
+#
+# frontend/ 와 apps/ 소스는 **제외하지 않는다.** Dockerfile 의 web 스테이지가
+# Web UI 를 빌드하는 데 필요하다. 빌드 산출물(dist)과 의존성만 막는다.
 
 .venv/
 node_modules/
@@ -15,6 +18,7 @@ __pycache__/
 **/__pycache__/
 *.pyc
 .pytest_cache/
+.mypy_cache/
 
 .git/
 .gitignore
@@ -23,12 +27,15 @@ __pycache__/
 # 이미지에 들어갈 필요가 없는 것
 tests/
 docs/
-frontend/
-apps/
 rag-corpus/
 contract-change-requests/
+deploy/
+
+# 문서는 README.md 만 남긴다 (pyproject 가 참조한다)
 *.md
 !README.md
+
+# 실제 값이 담긴 환경 파일은 절대 넣지 않는다
 .env
 .env.*
 !.env.example
