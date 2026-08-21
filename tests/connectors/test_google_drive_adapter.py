@@ -458,3 +458,67 @@ def test_reconcile_uses_display_metadata_name_when_available():
         assert result.changes[0].artifact.display_name == "My Spec Doc"
 
     asyncio.run(scenario())
+
+
+def test_initial_changes_captures_the_change_cursor_at_mount_time():
+    """mount 시점에 커서를 잡지 않으면 그때부터 첫 reconcile 까지가 사각지대가 된다.
+
+    reconcile 은 커서가 없으면 `getStartPageToken()` 즉 "지금부터" 로 시작하므로,
+    커서를 첫 실행 때 잡으면 mount 직후의 파일 수정이 초기 스냅샷에도 이후
+    reconcile 에도 잡히지 않고 영구히 사라진다. 운영에서 실제로 그렇게 사라졌다.
+    """
+
+    async def scenario():
+        files = {
+            "file-1": DriveFile(
+                file_id="file-1",
+                name="requirements.txt",
+                mime_type="text/plain",
+                modified_time="2026-08-21T10:00:00Z",
+                revision_id="3",
+                web_view_link=None,
+            )
+        }
+        provider = FakeDriveProvider(files=files)
+        adapter, _, _, runtime_store = await _build_adapter(
+            provider, tracked_ids=["file-1"]
+        )
+
+        await adapter.initial_changes(_mount(), ["file-1"])
+
+        runtime = await runtime_store.load("conn-1")
+        assert runtime is not None
+        assert runtime.change_cursor == provider._start_token
+
+    asyncio.run(scenario())
+
+
+def test_initial_changes_does_not_rewind_an_existing_cursor():
+    """이미 진행된 커서를 mount 가 되감으면 처리한 변경을 다시 흘린다."""
+
+    async def scenario():
+        files = {
+            "file-1": DriveFile(
+                file_id="file-1",
+                name="requirements.txt",
+                mime_type="text/plain",
+                modified_time="2026-08-21T10:00:00Z",
+                revision_id="3",
+                web_view_link=None,
+            )
+        }
+        provider = FakeDriveProvider(files=files)
+        runtime_store = InMemoryRuntimeStore()
+        await runtime_store.save(
+            "conn-1", DriveRuntime(connection_id="conn-1", change_cursor="already-advanced")
+        )
+        adapter, _, _, _ = await _build_adapter(
+            provider, tracked_ids=["file-1"], runtime_store=runtime_store
+        )
+
+        await adapter.initial_changes(_mount(), ["file-1"])
+
+        runtime = await runtime_store.load("conn-1")
+        assert runtime.change_cursor == "already-advanced"
+
+    asyncio.run(scenario())

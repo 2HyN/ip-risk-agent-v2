@@ -238,6 +238,9 @@ class GoogleDriveAdapter:
                 safe_message="Drive tracking scope is unavailable",
             )
         provider, connection = await self._provider_for_mount(mount.mount_id)
+        # 파일을 읽기 **전에** 커서를 확보한다. 순서가 뒤바뀌면 그 사이의 변경이
+        # 초기 스냅샷에도, 이후 reconcile 에도 잡히지 않는다.
+        await self._ensure_change_cursor(connection, provider)
         now = datetime.now(timezone.utc)
         changes: list[SourceChange] = []
         try:
@@ -315,6 +318,29 @@ class GoogleDriveAdapter:
             original_source_type=OriginalSourceType.PROVIDER_URL,
             provider_url=provider_url,
             metadata_safe={},
+        )
+
+    async def _ensure_change_cursor(self, connection, provider) -> None:
+        """mount 시점의 changes 커서를 확보한다.
+
+        ``reconcile()`` 은 저장된 커서가 없으면 ``getStartPageToken()`` 즉 "지금부터"
+        로 시작한다. 커서를 첫 reconcile 실행 때 잡으면 **mount 생성부터 그 실행
+        사이의 변경이 영구히 유실된다** — 소스를 연결한 직후가 오히려 감지
+        사각지대가 된다. 운영에서 실제로 그 구간의 파일 수정이 사라졌다.
+
+        초기 스캔이 현재 상태를 덮으므로, 그 직전 시점을 커서로 두면 이후 변경은
+        빠짐없이 잡힌다. 겹치는 변경은 fingerprint 로 무해화된다.
+        """
+        runtime: DriveRuntime | None = await self._runtime_store.load(
+            connection.connection_id
+        )
+        if runtime is not None and runtime.change_cursor:
+            return
+        token = provider.get_start_page_token()
+        base = runtime or DriveRuntime(connection_id=connection.connection_id)
+        await self._runtime_store.save(
+            connection.connection_id,
+            base.model_copy(update={"change_cursor": token}),
         )
 
     async def reconcile(self, mount: MountRef, cursor: str | None) -> ReconcileResult:
