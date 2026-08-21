@@ -19,7 +19,11 @@ MAX_QUERIES = 5
 MIN_QUERY_WORDS = 2
 MAX_QUERY_WORDS = 3
 
-PROMPT_NAME = "patent_extract_v1"
+# v1 은 영문 검색어를 지시했다. KIPRIS 는 한국 특허 DB 이고 색인 본문이 한국어라
+# 영문 2~3 단어로는 히트가 0 건이었다 — 배포 진단에서 query_count=3,
+# search_failures=0, hit_total=0 으로 확인했다. v2 는 한국어 검색어를 만든다.
+# v1 파일은 과거 결과의 prompt_version 근거로 남긴다.
+PROMPT_NAME = "patent_extract_v2"
 
 
 def render_segments(artifact: AnalysisArtifact) -> str:

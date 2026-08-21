@@ -332,3 +332,28 @@ def test_analyzers_run_together_through_the_registry():
     results = asyncio.run(registry.analyze(artifact))
     # 문서이므로 특허만 돌고 라이선스는 supports=False 다.
     assert [r.analysis_type for r in results] == [AnalysisType.PATENT]
+
+
+def test_extraction_prompt_asks_for_korean_queries_against_kipris():
+    """KIPRIS 는 한국 특허 DB 이고 색인 본문이 한국어다.
+
+    v1 프롬프트는 영문 검색어를 지시했고, 배포 진단에서 query_count=3,
+    search_failures=0, hit_total=0 으로 히트가 하나도 잡히지 않았다. 검색어 언어가
+    색인 언어와 어긋나면 파이프라인의 나머지가 모두 정상이어도 결과가 0 건이다.
+    """
+    from ip_risk_agent.intelligence.gemini.client import PromptLibrary
+    from ip_risk_agent.intelligence.patent.extraction import PROMPT_NAME
+
+    prompt = PromptLibrary().get(PROMPT_NAME)
+    assert prompt.prompt_version == "patent_extract_v2"
+    assert "한국어 검색어" in prompt.template
+    assert "영문 검색어는 결과가 0건" in prompt.template
+    # 모든 단어를 포함해야 하므로 짧게 유지하라는 제약이 남아 있어야 한다.
+    assert "2 단어를 기본으로 한다" in prompt.template
+
+
+def test_previous_extraction_prompt_is_kept_for_provenance():
+    """과거 결과에 기록된 prompt_version 을 되짚을 수 있어야 한다."""
+    from ip_risk_agent.intelligence.gemini.client import PromptLibrary
+
+    assert PromptLibrary().get("patent_extract_v1").prompt_version == "patent_extract_v1"

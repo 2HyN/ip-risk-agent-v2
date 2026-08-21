@@ -306,6 +306,11 @@ class ControlPlaneFacade:
                 ),
             ),
             source_type=snapshot.source_type.value,
+            # 거부 사유를 남기지 않으면 화면에는 INCONCLUSIVE 만 보이고 왜 막혔는지
+            # 알 수 없다. 열거형 값이라 본문이나 경로가 새지 않는다.
+            diagnostic_code=(
+                None if result.denial_reason is None else result.denial_reason.value
+            ),
         )
         return AnalysisArtifactBuildResult(
             analysis_artifact=result.analysis_artifact,
