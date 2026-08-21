@@ -636,3 +636,37 @@ def test_same_provider_scope_can_mount_into_two_risk_workspaces() -> None:
         assert second.created_mount
 
     run(scenario())
+
+
+def test_reconnecting_a_disabled_source_reactivates_the_mount() -> None:
+    """소스를 다시 연결하는 것은 "다시 감시하겠다" 는 뜻이다.
+
+    계정 단위 정체성 때문에 재연결은 같은 mount 로 수렴한다. DISABLED 로 남겨 두면
+    이후 SourceChange 가 전부 "SourceChange mount is not processable" 로 거부되어
+    **한 번 끈 소스를 다시 켤 수 없다** — 운영에서 실제로 그렇게 막혔다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+
+        first = await facade.register_source_metadata(source_command())
+        async with store() as uow:
+            mount = await uow.mounts.get(first.mount_id)
+            await uow.mounts.save(
+                replace(mount, status=MountStatus.DISABLED, updated_at=NOW)
+            )
+            await uow.commit()
+
+        second = await facade.register_source_metadata(source_command())
+        assert second.mount_id == first.mount_id
+        assert not second.created_mount
+
+        async with store() as uow:
+            revived = await uow.mounts.get(first.mount_id)
+        assert revived.status is MountStatus.ACTIVE
+
+    run(scenario())

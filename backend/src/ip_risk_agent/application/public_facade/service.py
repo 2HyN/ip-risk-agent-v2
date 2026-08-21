@@ -629,6 +629,7 @@ class ControlPlaneFacade:
 
             mount = await uow.mounts.get(mount_id)
             created_mount = mount is None
+            reactivated_mount = False
             if mount is None:
                 mount = WorkspaceMount(
                     id=mount_id,
@@ -644,6 +645,17 @@ class ControlPlaneFacade:
                 await uow.mounts.add(mount)
             else:
                 _require_mount_match(mount, connection_id, source_workspace_id, command)
+                if mount.status is MountStatus.DISABLED:
+                    # 소스를 다시 연결하는 것은 "다시 감시하겠다" 는 뜻이다. mount
+                    # 상태는 정체성이 아니라 상태이며, DISABLED 로 남겨 두면 이후의
+                    # SourceChange 가 전부 "mount is not processable" 로 거부된다.
+                    # 계정 단위 정체성 때문에 재연결은 같은 mount 로 수렴하므로,
+                    # 여기서 되살리지 않으면 한 번 끈 소스는 다시 켤 수 없다.
+                    mount = replace(
+                        mount, status=MountStatus.ACTIVE, updated_at=occurred_at
+                    )
+                    await uow.mounts.save(mount)
+                    reactivated_mount = True
 
             registration_fingerprint = stable_key(
                 "source-registration",
@@ -689,6 +701,7 @@ class ControlPlaneFacade:
                 or created_mount
                 or rotated_credential
                 or updated_tracking
+                or reactivated_mount
             ):
                 await uow.commit()
         return SourceMetadataRegistration(

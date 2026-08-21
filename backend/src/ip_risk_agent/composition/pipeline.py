@@ -164,13 +164,14 @@ class AnalysisPipeline:
             if snapshot_fetched:
                 await _cleanup(adapter, claim.source_change)
             return result
-        except DomainInvariantError:
+        except DomainInvariantError as exc:
             result = await self._fail(
                 change_event_id,
                 claim.analysis_job_id,
                 claim.attempt,
                 safe_code="CONTRACT:CANONICAL_INTAKE_REJECTED",
                 retryable=False,
+                reason=getattr(exc, "safe_reason", None),
             )
             if snapshot_fetched:
                 await _cleanup(adapter, claim.source_change)
@@ -192,6 +193,7 @@ class AnalysisPipeline:
         *,
         safe_code: str,
         retryable: bool,
+        reason: object = None,
     ) -> PipelineResult:
         # 실패 코드는 canonical 기록에만 남아 있었다. 배포에서 화면은 FAILED 인데
         # 로그에는 아무것도 없어 분류를 되짚을 수 없었다. 코드는 개발자가 쓴
@@ -205,6 +207,13 @@ class AnalysisPipeline:
                     "event_id": change_event_id,
                     "failure_safe": safe_code,
                     "retryable": retryable,
+                    # 어떤 불변조건이 깨졌는지. 상수 메시지를 보장하는 예외만
+                    # safe_reason 을 내놓는다.
+                    **(
+                        {"failure_reason": str(reason)}
+                        if isinstance(reason, str) and reason
+                        else {}
+                    ),
                 },
                 ensure_ascii=True,
                 separators=(",", ":"),
