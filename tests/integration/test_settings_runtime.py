@@ -230,3 +230,39 @@ def test_production_rejects_role_reversal_and_partial_rag_configuration() -> Non
                 "SCHEDULER_SERVICE_ACCOUNT": SCHEDULER_SERVICE_ACCOUNT,
             }
         )
+
+
+def test_configure_logging_emits_structured_diagnostics_to_stdout(capsys) -> None:
+    """구조화 진단이 실제로 stdout 으로 나가야 한다.
+
+    logging 설정이 없으면 root 기본 레벨이 WARNING 이라 StructuredLogger 의
+    info() 기록이 전부 사라진다. 배포에서 4xx 의 diagnostic_code 를 볼 수 없어
+    원인을 매번 추측해야 했다.
+    """
+    import json
+    import logging
+
+    from ip_risk_agent.application.observability import StructuredLogger
+    from ip_risk_agent.composition.runtime import configure_logging
+
+    logger = logging.getLogger("ip_risk_agent")
+    previous_handlers = list(logger.handlers)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    try:
+        logger.handlers.clear()
+        configure_logging("INFO")
+        configure_logging("INFO")  # 중복 배선은 handler 를 늘리지 않는다.
+        assert len(logger.handlers) == 1
+
+        StructuredLogger().event("probe_event", diagnostic_code="probe_code")
+        written = capsys.readouterr().out.strip().splitlines()
+        assert written, "structured diagnostics must reach stdout"
+        record = json.loads(written[-1])
+        assert record["event"] == "probe_event"
+        assert record["diagnostic_code"] == "probe_code"
+    finally:
+        logger.handlers.clear()
+        logger.handlers.extend(previous_handlers)
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate

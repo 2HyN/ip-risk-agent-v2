@@ -584,3 +584,55 @@ def test_facade_redacts_worker_failure_before_persistence() -> None:
         assert "abcdefghijklmnop" not in (job.failure_safe or "")
 
     run(scenario())
+
+
+def test_same_provider_scope_can_mount_into_two_risk_workspaces() -> None:
+    """SourceWorkspace 는 mount 를 하나만 가진다(전역 제약).
+
+    따라서 정체성이 VWS 범위가 아니면, 같은 Drive 계정이나 같은 GitHub repository 를
+    두 번째 Risk Workspace 에 연결할 때 UniqueConstraintViolation 이 나고 사용자에게는
+    mount 요청이 409 로 보인다 — 실제로 새 workspace 에서 그렇게 막혔다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        async with store() as uow:
+            await uow.workspaces.add(
+                RiskWorkspace(
+                    "vws-2", "Second", "owner-1", "security-v1", "retention-v1", NOW, NOW
+                )
+            )
+            await uow.memberships.add(
+                Membership(
+                    membership_id_for("vws-2", "owner-1"),
+                    "vws-2",
+                    "owner-1",
+                    MembershipRole.OWNER,
+                    MembershipStatus.ACTIVE,
+                    "owner-1",
+                    NOW,
+                    NOW,
+                )
+            )
+            await uow.commit()
+        facade = make_facade(store, queue, clock)
+
+        first = await facade.register_source_metadata(source_command())
+        second = await facade.register_source_metadata(
+            replace(
+                source_command(),
+                risk_workspace_id="vws-2",
+                # 조립 계층은 source workspace key 를 VWS 로 한정한다.
+                source_workspace_key="vws:vws-2|scope:repo-42",
+            )
+        )
+
+        assert second.connection_id == first.connection_id
+        assert second.source_workspace_id != first.source_workspace_id
+        assert second.mount_id != first.mount_id
+        assert second.created_mount
+
+    run(scenario())
