@@ -67,6 +67,25 @@ test("server errors remain failures instead of being treated as empty success", 
   await expect(client.startGithubConnection("vws-1")).rejects.toThrow();
 });
 
+test("active Drive mount operations use mount-scoped routes without OAuth restart", async () => {
+  const { client, calls } = sourceClient((url) => url.endsWith("/picker-session")
+    ? json({ access_token: "picker-token" })
+    : json({ server_mount_id: "mount-2", source_workspace_id: "source-2" }));
+
+  await client.createDrivePickerSessionForMount("mount-1");
+  await client.createAdditionalDriveMount("mount-1", "vws-1", ["file-2"]);
+
+  expect(calls.map((call) => call.url)).toEqual([
+    "http://localhost:8000/api/v1/source-mounts/mount-1/drive/picker-session",
+    "http://localhost:8000/api/v1/source-mounts/mount-1/drive/mounts",
+  ]);
+  expect(calls.some((call) => call.url.includes("google-drive/start"))).toBe(false);
+  expect(JSON.parse(String(calls[1]?.init.body))).toMatchObject({
+    risk_workspace_id: "vws-1",
+    selected_file_ids: ["file-2"],
+  });
+});
+
 test("desktop revoke is an authenticated CSRF-protected mutation", async () => {
   const { client, calls } = sourceClient(() => new Response(null, { status: 204 }));
 

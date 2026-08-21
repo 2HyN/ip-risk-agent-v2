@@ -4,14 +4,17 @@ import json
 from typing import Protocol
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from iprisk_contracts.common import SafeMetadata
 
 from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.credential_vault import SourceCredentialVault
 from ..common.errors import NotFoundError, SourceConnectorError
-from .connection_lookup import DriveConnectionCredentialLookup
+from .connection_lookup import (
+    DriveConnectionCredentialLookup,
+    DriveConnectionLookup,
+)
 from .tracking_scope import DriveTrackingScope
 
 
@@ -32,6 +35,7 @@ class DriveMountCreationRequest(BaseModel):
 class DriveMountCreationResponse(BaseModel):
     server_mount_id: str
     source_workspace_id: str
+    selected_file_ids: list[str] = Field(default_factory=list)
 
 
 class DriveMountCreationCallback(Protocol):
@@ -53,25 +57,16 @@ def create_drive_mounts_router(
     provider_factory: DriveProviderFactory,
     credential_vault: SourceCredentialVault,
     connection_credential_lookup: DriveConnectionCredentialLookup,
+    mount_connection_lookup: DriveConnectionLookup | None = None,
     tracking_scope_store,
     mount_creation_callback: DriveMountCreationCallback,
     connection_authz_dependency: AuthzDependency = deny_all_authz,
+    mount_authz_dependency: AuthzDependency = deny_all_authz,
     workspace_authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
     router = APIRouter()
 
-    @router.post(
-        "/api/v1/source-connections/{connection_id}/drive/picker-session",
-        response_model=PickerSessionResponse,
-    )
-    async def create_picker_session(connection_id: str, request: Request) -> PickerSessionResponse:
-        await connection_authz_dependency(request, connection_id)
-
-        try:
-            credential_ref = await connection_credential_lookup.resolve_credential_ref(connection_id)
-        except NotFoundError as exc:
-            raise HTTPException(status_code=404, detail="unknown source connection") from exc
-
+    async def issue_picker_session(credential_ref) -> PickerSessionResponse:
         raw_token = await credential_vault.get(credential_ref)
         token = json.loads(raw_token)
         provider = provider_factory.create(token)
@@ -86,6 +81,38 @@ def create_drive_mounts_router(
         await credential_vault.update(credential_ref, json.dumps(provider.export_token()))
 
         return PickerSessionResponse(access_token=access_token)
+
+    @router.post(
+        "/api/v1/source-connections/{connection_id}/drive/picker-session",
+        response_model=PickerSessionResponse,
+    )
+    async def create_picker_session(
+        connection_id: str, request: Request
+    ) -> PickerSessionResponse:
+        await connection_authz_dependency(request, connection_id)
+        try:
+            credential_ref = await connection_credential_lookup.resolve_credential_ref(
+                connection_id
+            )
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="unknown source connection") from exc
+        return await issue_picker_session(credential_ref)
+
+    @router.post(
+        "/api/v1/source-mounts/{mount_id}/drive/picker-session",
+        response_model=PickerSessionResponse,
+    )
+    async def create_active_picker_session(
+        mount_id: str, request: Request
+    ) -> PickerSessionResponse:
+        await mount_authz_dependency(request, mount_id)
+        if mount_connection_lookup is None:
+            raise HTTPException(status_code=404, detail="unknown Drive mount")
+        try:
+            context = await mount_connection_lookup.resolve(mount_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="unknown Drive mount") from exc
+        return await issue_picker_session(context.credential_ref)
 
     @router.post(
         "/api/v1/source-connections/{connection_id}/drive/mounts",
@@ -108,11 +135,60 @@ def create_drive_mounts_router(
             result.server_mount_id,
             DriveTrackingScope(
                 mount_id=result.server_mount_id,
-                selected_file_ids=body.selected_file_ids,
-                display_metadata_by_file=body.display_metadata_by_file,
+                selected_file_ids=result.selected_file_ids or body.selected_file_ids,
+                display_metadata_by_file=_selected_metadata(
+                    body.display_metadata_by_file,
+                    result.selected_file_ids or body.selected_file_ids,
+                ),
             ),
         )
 
         return result
 
+    @router.post(
+        "/api/v1/source-mounts/{mount_id}/drive/mounts",
+        response_model=DriveMountCreationResponse,
+    )
+    async def create_additional_mount(
+        mount_id: str, request: Request, body: DriveMountCreationRequest
+    ) -> DriveMountCreationResponse:
+        await mount_authz_dependency(request, mount_id)
+        await workspace_authz_dependency(request, body.risk_workspace_id)
+        if mount_connection_lookup is None:
+            raise HTTPException(status_code=404, detail="unknown Drive mount")
+        try:
+            context = await mount_connection_lookup.resolve(mount_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="unknown Drive mount") from exc
+        if context.operational_connection_id is None:
+            raise HTTPException(status_code=404, detail="unknown Drive mount")
+        result = await mount_creation_callback.create_drive_mount(
+            request,
+            connection_id=context.operational_connection_id,
+            risk_workspace_id=body.risk_workspace_id,
+            selected_file_ids=body.selected_file_ids,
+        )
+        await tracking_scope_store.save(
+            result.server_mount_id,
+            DriveTrackingScope(
+                mount_id=result.server_mount_id,
+                selected_file_ids=result.selected_file_ids or body.selected_file_ids,
+                display_metadata_by_file=_selected_metadata(
+                    body.display_metadata_by_file,
+                    result.selected_file_ids or body.selected_file_ids,
+                ),
+            ),
+        )
+        return result
+
     return router
+
+
+def _selected_metadata(
+    metadata: dict[str, SafeMetadata], selected_file_ids: list[str]
+) -> dict[str, SafeMetadata]:
+    return {
+        file_id: metadata[file_id]
+        for file_id in selected_file_ids
+        if file_id in metadata
+    }

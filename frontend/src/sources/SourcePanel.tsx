@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useSession } from "../auth/session.js";
+import { ApiFailure } from "../shared/api/client.js";
+import type { ConnectedSource } from "../shared/api/types.js";
 import { useResource } from "../shared/hooks/use-resource.js";
 import {
   Badge,
@@ -38,6 +40,7 @@ export function SourcePanel({
   const sourceApi = useMemo(() => new SourceApiClient(api.client), [api]);
   const [search, setSearch] = useSearchParams();
   const [selected, setSelected] = useState<SourceProviderType | null>(null);
+  const [managedDrive, setManagedDrive] = useState<ConnectedSource | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<Error | null>(null);
   const sources = useResource(() => api.dataAccess(workspace.id), [api, workspace.id]);
@@ -49,6 +52,7 @@ export function SourcePanel({
     setNotice(message);
     setMutationError(null);
     setSelected(null);
+    setManagedDrive(null);
     setSearch({}, { replace: true });
     sources.reload();
   }
@@ -86,17 +90,42 @@ export function SourcePanel({
                 description="Google Drive, GitHub 또는 Desktop local folder를 현재 workspace에 연결하세요."
               />
             </Card>
-          ) : connected.map((source) => (
+          ) : connected.map((source) => {
+            const trackedFileIds = driveFileIds(source);
+            return (
             <Card key={source.mount_id} className="source-card">
               <div className="card-row">
                 <div>
                   <p className="eyebrow">{source.source_type ?? "SOURCE"}</p>
-                  <h2>{source.alias}</h2>
+                  <h2>{source.source_type === "GOOGLE_DRIVE" ? "Google Drive" : source.alias}</h2>
                   <p>{source.provider_account_label ?? "Provider identity protected"}</p>
+                  {source.source_type === "GOOGLE_DRIVE" ? (
+                    <>
+                      <p>{trackedFileIds.length} {trackedFileIds.length === 1 ? "file" : "files"} tracked</p>
+                      {trackedFileIds.length === 0 ? null : (
+                        <ul aria-label="Tracked Google Drive files">
+                          {trackedFileIds.map((fileId) => <li key={fileId}>{fileId}</li>)}
+                        </ul>
+                      )}
+                    </>
+                  ) : null}
                 </div>
                 <Badge tone={toneFor(source.status)}>{source.status}</Badge>
               </div>
               <div className="button-row">
+                {source.source_type === "GOOGLE_DRIVE" && source.status === "ACTIVE" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setManagedDrive(source);
+                      setSelected(null);
+                      setMutationError(null);
+                    }}
+                  >
+                    Add files
+                  </Button>
+                ) : null}
                 {source.status === "REAUTH_REQUIRED" && source.source_type !== "LOCAL" ? (
                   <Button
                     type="button"
@@ -113,10 +142,20 @@ export function SourcePanel({
                 ) : null}
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
         <Card className="source-connect-card">
-          {completion && provider === "GOOGLE_DRIVE" ? (
+          {managedDrive !== null ? (
+            <DriveCompletion
+              sourceApi={sourceApi}
+              drivePicker={drivePicker}
+              mountId={managedDrive.mount_id}
+              riskWorkspaceId={workspace.id}
+              existingFileIds={driveFileIds(managedDrive)}
+              onComplete={() => complete("Additional Google Drive files are now tracked.")}
+            />
+          ) : completion && provider === "GOOGLE_DRIVE" ? (
             <DriveCompletion
               sourceApi={sourceApi}
               drivePicker={drivePicker}
@@ -157,44 +196,78 @@ function DriveCompletion({
   sourceApi,
   drivePicker,
   connectionId,
+  mountId,
   riskWorkspaceId,
+  existingFileIds = [],
   onComplete,
 }: {
   sourceApi: SourceApiClient;
   drivePicker: DrivePickerAdapter;
-  connectionId: string;
+  connectionId?: string;
+  mountId?: string;
   riskWorkspaceId: string;
+  existingFileIds?: string[];
   onComplete: () => void;
 }) {
   const [files, setFiles] = useState<DrivePickerFile[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const addingFiles = mountId !== undefined;
+
+  async function pickerSession(): Promise<string> {
+    if (mountId !== undefined) return sourceApi.createDrivePickerSessionForMount(mountId);
+    if (connectionId !== undefined) return sourceApi.createDrivePickerSession(connectionId);
+    throw new Error("drive_reference_missing");
+  }
+
+  async function createMount(selectedFileIds: string[]): Promise<void> {
+    if (mountId !== undefined) {
+      await sourceApi.createAdditionalDriveMount(mountId, riskWorkspaceId, selectedFileIds);
+      return;
+    }
+    if (connectionId !== undefined) {
+      await sourceApi.createDriveMount(connectionId, riskWorkspaceId, selectedFileIds);
+      return;
+    }
+    throw new Error("drive_reference_missing");
+  }
 
   async function pick(): Promise<void> {
     setBusy(true);
     setError(null);
+    setInfo(null);
     let selectedFiles: DrivePickerFile[];
     try {
-      const accessToken = await sourceApi.createDrivePickerSession(connectionId);
+      const accessToken = await pickerSession();
       selectedFiles = await drivePicker.pick(accessToken);
     } catch {
       setError("Google Drive Picker 선택 결과를 확인하지 못했습니다. 다시 선택해 주세요.");
       setBusy(false);
       return;
     }
-    setFiles(selectedFiles);
-    if (selectedFiles.length === 0) {
+    const tracked = new Set(existingFileIds);
+    const newFiles = selectedFiles.filter((file) => !tracked.has(file.id));
+    setFiles(newFiles);
+    if (selectedFiles.length > 0 && newFiles.length === 0) {
+      setInfo("All selected files are already tracked in this workspace.");
+      setBusy(false);
+      return;
+    }
+    if (newFiles.length === 0) {
       setBusy(false);
       return;
     }
     try {
-      await sourceApi.createDriveMount(
-        connectionId,
-        riskWorkspaceId,
-        selectedFiles.map((file) => file.id),
-      );
+      await createMount(newFiles.map((file) => file.id));
       onComplete();
-    } catch {
+    } catch (reason) {
+      if (reason instanceof ApiFailure && reason.status === 409) {
+        setFiles([]);
+        setInfo("All selected files are already tracked in this workspace.");
+        setBusy(false);
+        return;
+      }
       setError("선택한 Drive 파일을 mount로 만들지 못했습니다.");
       setBusy(false);
     }
@@ -203,8 +276,9 @@ function DriveCompletion({
   async function mount(): Promise<void> {
     setBusy(true);
     setError(null);
+    setInfo(null);
     try {
-      await sourceApi.createDriveMount(connectionId, riskWorkspaceId, files.map((file) => file.id));
+      await createMount(files.map((file) => file.id));
       onComplete();
     } catch {
       setError("선택한 Drive 파일을 mount로 만들지 못했습니다.");
@@ -216,7 +290,8 @@ function DriveCompletion({
   return (
     <div className="source-completion">
       <p className="eyebrow">Google Drive connected</p>
-      <h2>Select files to track</h2>
+      <h2>{addingFiles ? "Add files" : "Select files to track"}</h2>
+      {addingFiles ? <p>{existingFileIds.length} files are already tracked by this mount.</p> : null}
       <p>Picker에서 Select하면 명시적으로 선택한 file ID만 즉시 tracking scope에 저장됩니다.</p>
       {!drivePicker.available ? <p className="source-error">Drive Picker runtime configuration is unavailable.</p> : null}
       <Button type="button" variant="secondary" disabled={!drivePicker.available || busy} onClick={() => void pick()}>
@@ -234,6 +309,7 @@ function DriveCompletion({
         </Button>
       )}
       {error === null ? null : <p className="source-error" role="alert">{error}</p>}
+      {info === null ? null : <p className="source-selection" role="status">{info}</p>}
     </div>
   );
 }
@@ -320,4 +396,10 @@ function safeProvider(value: string | null): "GOOGLE_DRIVE" | "GITHUB" | null {
 function safeOpaqueId(value: string | null): string | null {
   if (value === null || value.length < 8 || value.length > 256 || !/^[A-Za-z0-9._~-]+$/u.test(value)) return null;
   return value;
+}
+
+function driveFileIds(source: ConnectedSource): string[] {
+  const value = source.tracking_scope_summary.selected_file_ids;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
 }

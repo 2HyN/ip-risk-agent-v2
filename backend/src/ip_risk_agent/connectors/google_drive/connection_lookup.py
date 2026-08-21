@@ -12,6 +12,7 @@ from ..common.errors import NotFoundError
 class DriveConnectionContext(StrictModel):
     connection_id: str
     credential_ref: CredentialRef
+    operational_connection_id: str | None = None
 class DriveConnectionLookup(Protocol):
     async def resolve(self, mount_id: str) -> DriveConnectionContext: ...
 class InMemoryDriveConnectionLookup:

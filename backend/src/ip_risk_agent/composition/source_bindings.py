@@ -33,6 +33,7 @@ class DriveMountConnectionLookup:
         return DriveConnectionContext(
             connection_id=binding.canonical_connection_id,
             credential_ref=pending.credential_ref,
+            operational_connection_id=binding.pending_connection_id,
         )
 
 

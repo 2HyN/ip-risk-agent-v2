@@ -63,6 +63,9 @@ class PendingConnectionStore(Protocol):
     async def save_pending(self, value: PendingSourceConnection) -> None: ...
     async def get_binding(self, registration_key: str) -> SourceMountBinding | None: ...
     async def get_binding_for_mount(self, mount_id: str) -> SourceMountBinding | None: ...
+    async def get_bindings_for_connection(
+        self, canonical_connection_id: str
+    ) -> tuple[SourceMountBinding, ...]: ...
     async def save_binding(self, value: SourceMountBinding) -> None: ...
 
 
@@ -93,6 +96,15 @@ class InMemoryPendingConnectionStore:
     async def get_binding_for_mount(self, mount_id: str) -> SourceMountBinding | None:
         registration_key = self.bindings_by_mount.get(mount_id)
         return self.bindings.get(registration_key) if registration_key else None
+
+    async def get_bindings_for_connection(
+        self, canonical_connection_id: str
+    ) -> tuple[SourceMountBinding, ...]:
+        return tuple(
+            binding
+            for binding in self.bindings.values()
+            if binding.canonical_connection_id == canonical_connection_id
+        )
 
     async def save_binding(self, value: SourceMountBinding) -> None:
         self.bindings[value.registration_key] = value
@@ -171,10 +183,23 @@ class SourceRegistrationService:
         )
         async with self._lock:
             existing = await self._store.get_pending_by_key(key)
-            if existing and existing.status in {
-                PendingConnectionStatus.PENDING,
-                PendingConnectionStatus.ACTIVE,
-            } and existing.expires_at > now:
+            if existing and existing.status is PendingConnectionStatus.ACTIVE:
+                # ACTIVE connections are durable. A later OAuth callback is an
+                # explicit reauthorization and refreshes the credential on the
+                # existing operational handle rather than creating a parallel
+                # connection for the same account/workspace.
+                refreshed = replace(
+                    existing,
+                    provider_account_label=values["provider_account_label"],
+                    credential_ref=values["credential_ref"],
+                )
+                await self._store.save_pending(refreshed)
+                return refreshed.id
+            if (
+                existing
+                and existing.status is PendingConnectionStatus.PENDING
+                and existing.expires_at > now
+            ):
                 return existing.id
             pending = PendingSourceConnection(
                 id=f"pending-{self._id_factory()}",
@@ -215,22 +240,77 @@ class SourceRegistrationService:
         selected_file_ids: list[str],
     ) -> DriveMountCreationResponse:
         if not selected_file_ids or len(selected_file_ids) != len(set(selected_file_ids)):
-            raise HTTPException(status_code=422, detail="selected files must be unique and non-empty")
-        scope = ",".join(sorted(selected_file_ids))
+            raise HTTPException(
+                status_code=422,
+                detail="selected files must be unique and non-empty",
+            )
+        pending = await self._require_pending(connection_id, SourceType.GOOGLE_DRIVE)
+        principal = await self._principal(request)
+        if (
+            pending.owner_user_id != principal.user.id
+            or pending.risk_workspace_id != risk_workspace_id
+        ):
+            raise HTTPException(status_code=403, detail="pending connection scope mismatch")
+        normalized_file_ids = sorted(selected_file_ids)
+        scope = ",".join(normalized_file_ids)
+        exact_scope_id = f"drive-selection:{_digest(scope)}"
+        exact_key = stable_key(
+            "source-registration",
+            (pending.id, risk_workspace_id, exact_scope_id),
+        )
+        exact_binding = await self._store.get_binding(exact_key)
+        if exact_binding is not None:
+            return DriveMountCreationResponse(
+                server_mount_id=exact_binding.mount_id,
+                source_workspace_id=exact_binding.source_workspace_id,
+                selected_file_ids=normalized_file_ids,
+            )
+
+        tracked_file_ids = await self._tracked_drive_file_ids(pending)
+        new_file_ids = [
+            file_id for file_id in normalized_file_ids if file_id not in tracked_file_ids
+        ]
+        if not new_file_ids:
+            raise HTTPException(status_code=409, detail="selected files are already tracked")
+
+        scope = ",".join(new_file_ids)
+        scope_digest = _digest(scope)
+        alias_digest = _digest(f"{pending.id}\0{scope}")
         registration = await self._mount(
             request,
-            connection_id=connection_id,
+            connection_id=pending.id,
             risk_workspace_id=risk_workspace_id,
             source_type=SourceType.GOOGLE_DRIVE,
-            external_scope_id=f"drive-selection:{_digest(scope)}",
+            external_scope_id=f"drive-selection:{scope_digest}",
             display_name="Google Drive selection",
-            mount_alias="Google Drive",
-            tracking={"selected_file_ids": sorted(selected_file_ids)},
+            mount_alias=f"Google Drive {alias_digest[:8]}",
+            tracking={"selected_file_ids": new_file_ids},
         )
         return DriveMountCreationResponse(
             server_mount_id=registration.mount_id,
             source_workspace_id=registration.source_workspace_id,
+            selected_file_ids=new_file_ids,
         )
+
+    async def _tracked_drive_file_ids(
+        self, pending: PendingSourceConnection
+    ) -> set[str]:
+        if pending.canonical_connection_id is None:
+            return set()
+        tracked: set[str] = set()
+        bindings = await self._store.get_bindings_for_connection(
+            pending.canonical_connection_id
+        )
+        for binding in bindings:
+            if binding.pending_connection_id != pending.id:
+                continue
+            context = await self._control.get_source_workspace_context(
+                binding.source_workspace_id
+            )
+            values = context.tracking_config_safe.get("selected_file_ids", ())
+            if isinstance(values, (list, tuple)):
+                tracked.update(value for value in values if isinstance(value, str))
+        return tracked
 
     async def create_github_mount(
         self,

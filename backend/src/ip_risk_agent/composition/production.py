@@ -259,9 +259,11 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
         provider_factory=source.drive_provider_factory,
         credential_vault=foundation.credential_vault,
         connection_credential_lookup=registration,
+        mount_connection_lookup=DriveMountConnectionLookup(source.pending),
         tracking_scope_store=source.drive_tracking,
         mount_creation_callback=registration,
         connection_authz_dependency=connection_auth,
+        mount_authz_dependency=mount_auth,
         workspace_authz_dependency=workspace_auth,
     )
     drive_webhook = create_drive_webhook_router(

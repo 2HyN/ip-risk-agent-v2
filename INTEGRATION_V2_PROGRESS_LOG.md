@@ -1144,3 +1144,55 @@ validator failure로 확인했다.
 - diagnostic allowlist 및 token/raw metadata 비노출: 통과.
 - frontend 전체 test: `40 passed`; typecheck/build: 통과.
 - 실제 GCP 명령은 실행하지 않았다.
+
+## Phase 9 staging Drive ACTIVE connection 추가 파일 lifecycle
+
+### live gap 및 원인
+
+- 첫 OAuth와 mount 뒤 operational pending connection은 `ACTIVE`로 유지되고 credential도
+  Secret Manager reference로 남았지만, Sources 화면은 canonical workspace mount만 조회했다.
+  따라서 frontend에는 ACTIVE credential로 Picker를 다시 여는 안전한 경로가 없었고 Add Source
+  OAuth flow만 노출됐다.
+- backend의 기존 connection-scoped Picker/mount API는 ACTIVE 상태의 operational
+  `pending-*` handle도 허용했다. 다만 그 handle을 화면에 다시 노출하면 동일 계정의 여러
+  workspace 경계를 모호하게 만들 수 있어, 기존 mount authorization을 기준으로 credential을
+  찾는 mount-scoped API를 추가했다.
+- 서로 다른 Drive 선택 집합은 별도 SourceWorkspace/WorkspaceMount로 등록되는 기존 설계였지만
+  모든 mount alias가 `Google Drive`로 같았다. 두 번째 선택은 workspace alias unique invariant와
+  충돌하는 실제 backend 결함이었다. 선택 집합 digest 기반의 결정적이고 고유한 alias로 수정했다.
+
+### 구현 결과
+
+1. ACTIVE Drive 카드에 tracked file ID 목록/개수와 `Add files` 액션을 표시한다. Add files는
+   OAuth start를 호출하지 않고 기존 mount로 Picker session을 발급한 뒤 선택된 새 file ID만
+   추가 mount로 등록하고 data-access summary를 reload한다.
+2. `POST /api/v1/source-mounts/{mount_id}/drive/picker-session`과
+   `POST /api/v1/source-mounts/{mount_id}/drive/mounts`를 추가했다. 두 route는 mount와 workspace를
+   각각 authorize한 뒤 operational binding의 기존 ACTIVE credential을 재사용한다.
+3. backend는 기존 connection의 모든 Drive tracking scope를 읽어 이미 추적 중인 ID를 제거한다.
+   exact retry는 같은 mount를 반환하며, 모두 중복인 새 조합은 `409 selected files are already
+   tracked`로 명확히 처리한다. 부분 중복은 새 ID만 저장하므로 duplicate workspace mount를 만들지 않는다.
+4. ACTIVE connection은 pending TTL 뒤에도 durable하게 유지한다. 명시적 OAuth reconnect가 발생한
+   경우 같은 operational handle의 credential reference만 갱신하고 평행 connection을 만들지 않는다.
+5. mount 실패 시 기존 connection/mount와 선택 상태를 유지하고 retry를 제공한다. token, Picker
+   callback 원문, Drive metadata는 UI/console/log에 추가하지 않았다.
+
+### 422 `Method Not Allowed` 판정
+
+- 현재 repository에는 `422`와 `detail="Method Not Allowed"`를 함께 생성하는 코드가 없다.
+  FastAPI/Starlette의 method mismatch는 정확히 `405 {"detail":"Method Not Allowed"}`이며 이를
+  route regression test로 고정했다. request validation 422와 domain 422도 서로 다른 safe body를 쓴다.
+- 따라서 live에서 기록된 `422` status와 해당 body의 조합은 현재 배포 코드 한 응답으로는 재현할
+  수 없다. 두 번째 서로 다른 선택에서 repository가 실제로 재현한 제품 오류는 동일 mount alias의
+  unique collision이었고, 설치된 error handler 계약상 409 conflict 경로다. 이 alias collision과
+  OAuth 재시작 우회는 이번 변경으로 제거했다. 새 revision 배포 후에도 동일 조합이 관찰되면 같은
+  Network request의 status/body/response headers를 한 번에 다시 수집해야 한다.
+
+### 검증 상태
+
+- frontend 전체 test: `44 passed`; frontend typecheck/build: 통과.
+- focused backend integration/Drive route: `12 passed`.
+- 전체 Python non-live: `632 passed, 1 skipped, 10 deselected`.
+- repository 전체 TypeScript typecheck/build, Python compile, pip check: 통과.
+- GCP deployment validator: `GCP deployment inputs: valid`.
+- 실제 GCP resource/IAM/OAuth 설정 또는 배포 명령은 실행하지 않았다.

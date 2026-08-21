@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException, Request
@@ -119,6 +120,7 @@ class FakeControl:
         self.auth_calls: list[dict[str, object]] = []
         self.registration_calls = []
         self.allowed = True
+        self.source_contexts: dict[str, object] = {}
 
     async def authorize_vws_action(self, **values):
         self.auth_calls.append(values)
@@ -134,14 +136,25 @@ class FakeControl:
 
     async def register_source_metadata(self, command):
         self.registration_calls.append(command)
+        index = len(self.registration_calls)
+        source_workspace_id = (
+            "canonical-source-1" if index == 1 else f"canonical-source-{index}"
+        )
+        mount_id = "canonical-mount-1" if index == 1 else f"canonical-mount-{index}"
+        self.source_contexts[source_workspace_id] = SimpleNamespace(
+            tracking_config_safe=command.tracking_config_safe
+        )
         return SourceMetadataRegistration(
             connection_id="canonical-connection-1",
-            source_workspace_id="canonical-source-1",
-            mount_id="canonical-mount-1",
+            source_workspace_id=source_workspace_id,
+            mount_id=mount_id,
             created_connection=True,
             created_source_workspace=True,
             created_mount=True,
         )
+
+    async def get_source_workspace_context(self, source_workspace_id: str):
+        return self.source_contexts[source_workspace_id]
 
 
 class ConnectionResolver:
@@ -258,6 +271,30 @@ def test_pending_connection_is_idempotent_and_mounts_only_after_selection() -> N
         )
         assert mounted_connection.connection_id == "canonical-connection-1"
         assert mounted_connection.credential_ref == credential
+
+        additional = await service.create_drive_mount(
+            request(),
+            connection_id=first,
+            risk_workspace_id="vws-1",
+            selected_file_ids=["file-2", "file-3"],
+        )
+        assert additional.server_mount_id == "canonical-mount-2"
+        assert additional.selected_file_ids == ["file-3"]
+        assert len(control.registration_calls) == 2
+        assert control.registration_calls[1].mount_alias != command.mount_alias
+        assert tuple(control.registration_calls[1].tracking_config_safe["selected_file_ids"]) == (
+            "file-3",
+        )
+
+        with pytest.raises(HTTPException) as duplicate:
+            await service.create_drive_mount(
+                request(),
+                connection_id=first,
+                risk_workspace_id="vws-1",
+                selected_file_ids=["file-3", "file-2"],
+            )
+        assert duplicate.value.status_code == 409
+        assert len(control.registration_calls) == 2
 
         other_service = SourceRegistrationService(
             store=store,

@@ -1,6 +1,7 @@
 export type ApiFailurePayload = {
   code?: string;
   message?: string;
+  detail?: string;
   details?: Array<Record<string, unknown>>;
 };
 
@@ -9,7 +10,7 @@ export class ApiFailure extends Error {
   readonly code: string;
 
   constructor(status: number, payload: ApiFailurePayload = {}) {
-    super(payload.message ?? "The request could not be completed.");
+    super(payload.message ?? payload.detail ?? "The request could not be completed.");
     this.name = "ApiFailure";
     this.status = status;
     this.code = payload.code ?? "REQUEST_FAILED";

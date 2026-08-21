@@ -81,6 +81,14 @@ export class SourceApiClient {
     return response.access_token;
   }
 
+  async createDrivePickerSessionForMount(mountId: string): Promise<string> {
+    const response = await this.client.request<{ access_token: string }>(
+      `/api/v1/source-mounts/${encodeURIComponent(mountId)}/drive/picker-session`,
+      { method: "POST" },
+    );
+    return response.access_token;
+  }
+
   async createDriveMount(
     connectionId: string,
     riskWorkspaceId: string,
@@ -88,6 +96,25 @@ export class SourceApiClient {
   ): Promise<MountCreationResponse> {
     const response = await this.client.request<MountCreationApiResponse>(
       `/api/v1/source-connections/${encodeURIComponent(connectionId)}/drive/mounts`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          risk_workspace_id: riskWorkspaceId,
+          selected_file_ids: selectedFileIds,
+          display_metadata_by_file: {},
+        }),
+      },
+    );
+    return mapMount(response);
+  }
+
+  async createAdditionalDriveMount(
+    mountId: string,
+    riskWorkspaceId: string,
+    selectedFileIds: string[],
+  ): Promise<MountCreationResponse> {
+    const response = await this.client.request<MountCreationApiResponse>(
+      `/api/v1/source-mounts/${encodeURIComponent(mountId)}/drive/mounts`,
       {
         method: "POST",
         body: JSON.stringify({

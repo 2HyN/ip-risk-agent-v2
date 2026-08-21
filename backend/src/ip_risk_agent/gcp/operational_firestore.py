@@ -378,6 +378,20 @@ class FirestorePendingConnectionStore:
             )
         )
 
+    async def get_bindings_for_connection(
+        self, canonical_connection_id: str
+    ) -> tuple[SourceMountBinding, ...]:
+        documents = await self._backend.query_many(
+            MOUNT_BINDINGS,
+            {"canonical_connection_id": canonical_connection_id},
+            limit=500,
+        )
+        return tuple(
+            binding
+            for document in documents
+            if (binding := _binding(document)) is not None
+        )
+
     async def save_binding(self, value: SourceMountBinding) -> None:
         await self._backend.put(
             MOUNT_BINDINGS,
