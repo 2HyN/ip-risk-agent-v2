@@ -102,6 +102,8 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
     readPending(workspace.id),
   );
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
+  const [retryBusy, setRetryBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setListError(null);
@@ -154,6 +156,29 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
     void refresh();
   }, [clearPending, refresh]);
 
+  const retryFailed = useCallback(async () => {
+    // 큐 재시도가 소진돼 폐기된 분석을 되살린다. 성공분은 건너뛰고 실패분만
+    // 재큐잉되므로 여러 번 눌러도 안전하다.
+    setRetryMessage(null);
+    setRetryBusy(true);
+    try {
+      const result = await sourcesApi.retryFailedAnalyses(workspace.id);
+      setRetryMessage(
+        result.requeued === 0 && result.expired === 0
+          ? "다시 실행할 실패 분석이 없습니다."
+          : `분석 ${result.requeued}건을 다시 시작했습니다.` +
+              (result.expired > 0
+                ? ` ${result.expired}건은 보존 기간(7일)이 지나 폴더를 다시 선택해야 합니다.`
+                : ""),
+      );
+    } catch (cause) {
+      console.error(cause);
+      setRetryMessage("실패한 분석을 다시 시작하지 못했습니다.");
+    } finally {
+      setRetryBusy(false);
+    }
+  }, [sourcesApi, workspace.id]);
+
   const removeMount = useCallback(
     async (mount: Mount) => {
       // 원본은 건드리지 않는다 — 감시만 중단된다. 그래도 목록에서 사라지는
@@ -198,6 +223,13 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
         loadFiles={(mount) => sourcesApi.listTrackedFiles(mount.id)}
       />
       {removeError && <p style={{ color: "red" }}>{removeError}</p>}
+
+      <p>
+        <button type="button" onClick={() => void retryFailed()} disabled={retryBusy}>
+          {retryBusy ? "다시 시작하는 중…" : "실패한 분석 다시 실행"}
+        </button>
+        {retryMessage && <span> {retryMessage}</span>}
+      </p>
 
       {pending?.provider === "github" ? (
         <>

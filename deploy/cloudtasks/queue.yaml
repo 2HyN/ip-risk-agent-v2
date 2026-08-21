@@ -16,10 +16,13 @@ rateLimits:
   maxDispatchesPerSecond: 10
 
 retryConfig:
-  # 5회 후에도 실패하면 dead-letter 로 보낸다. 무한 재시도는 비용만 태운다.
-  maxAttempts: 5
+  # 배포로 고치는 유형의 장애는 수정에 몇 분~한 시간이 걸린다. 재시도 창이
+  # 그보다 짧으면(예전 5회 ≈ 2.5분) 고치는 동안 작업이 전부 폐기되어,
+  # 고쳤는데 일감이 죽어 있는 상태가 된다 — 실제로 그렇게 특허 분석
+  # 배치를 잃었다. 20회 × 최대 600초 ≈ 2시간을 버틴다.
+  maxAttempts: 20
   minBackoff: 10s
-  maxBackoff: 300s
+  maxBackoff: 600s
   maxDoublings: 4
   # 하루가 지난 작업은 재시도해도 의미가 없다.
   maxRetryDuration: 86400s

@@ -89,6 +89,9 @@ export interface SourcesApi {
   }): Promise<{ mountId: string }>;
   createDrivePickerSession(connectionId: string): Promise<DrivePickerSession>;
   listTrackedFiles(mountId: string): Promise<TrackedFiles>;
+  retryFailedAnalyses(
+    riskWorkspaceId: string,
+  ): Promise<{ requeued: number; expired: number }>;
   createDriveMount(input: {
     connectionId: string;
     riskWorkspaceId: string;
@@ -152,6 +155,15 @@ export class HttpSourcesApi implements SourcesApi {
       }
     );
     return { mountId: data.server_mount_id };
+  }
+
+  async retryFailedAnalyses(
+    riskWorkspaceId: string,
+  ): Promise<{ requeued: number; expired: number }> {
+    return this.request<{ requeued: number; expired: number }>(
+      `/api/v1/workspaces/${encodeURIComponent(riskWorkspaceId)}/analyses/retry-failed`,
+      { method: "POST" }
+    );
   }
 
   async listTrackedFiles(mountId: string): Promise<TrackedFiles> {

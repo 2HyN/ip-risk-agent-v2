@@ -31,6 +31,7 @@ function api(overrides: Partial<SourcesApi> = {}): SourcesApi {
       descriptor: null,
       files: [],
     })),
+    retryFailedAnalyses: vi.fn(async () => ({ requeued: 0, expired: 0 })),
     ...overrides,
   };
 }

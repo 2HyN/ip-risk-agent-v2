@@ -287,6 +287,20 @@ def _mount_source_routers(
         )
     )
 
+    # 실패한 분석 재실행. 큐 재시도가 소진된 작업을 화면에서 되살린다.
+    from .retry_failed import create_retry_failed_router  # noqa: PLC0415
+
+    app.include_router(
+        create_retry_failed_router(
+            unit_of_work_factory=container.unit_of_work_factory,
+            change_relay=container.source_ports.change_relay,
+            change_sink=container.source_ports.change_sink,
+            authz_dependency=authz.workspace_scoped(
+                facade.authorize_vws_action, PublicVwsAction.SOURCE_MOUNT
+            ),
+        )
+    )
+
     return {"mounted": mounted, "skipped": skipped}
 
 
