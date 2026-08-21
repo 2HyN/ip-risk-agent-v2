@@ -149,6 +149,7 @@ describe("SourcePanel product integration", () => {
 
     expect(await screen.findByText("1 file tracked")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add files" }));
+    expect(screen.getByRole("heading", { name: "Add Source" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Select in Google Drive" }));
 
     expect(await screen.findByText("Additional Google Drive files are now tracked.")).toBeInTheDocument();
@@ -159,6 +160,74 @@ describe("SourcePanel product integration", () => {
     });
     expect(calls.some((call) => call.path.includes("google-drive/start"))).toBe(false);
     expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary"))).toHaveLength(2);
+  });
+
+  it("renders provider-neutral artifact, analysis, and risk state with detail navigation", async () => {
+    window.location.hash = "#/w/vws-1/sources";
+    const summary = {
+      ...connectedDriveSummary,
+      tracked_artifacts: [
+        {
+          artifact_id: "artifact-drive-1",
+          mount_id: "mount-drive-1",
+          source_type: "GOOGLE_DRIVE",
+          source_context: "Google Drive a1b2c3d4",
+          display_name: "Claims.txt",
+          logical_path: "Claims.txt",
+          availability: "AVAILABLE",
+          latest_revision: "rev-2",
+          change_status: "DONE",
+          analysis_status: "SUCCEEDED",
+          risk_count: 2,
+          active_risk_count: 1,
+          first_risk_id: "risk-7",
+          highest_risk_priority: "HIGH",
+          updated_at: "2026-08-21T00:00:00Z",
+        },
+        {
+          artifact_id: "artifact-local-1",
+          mount_id: "mount-local-1",
+          source_type: "LOCAL",
+          source_context: "Desktop project",
+          display_name: "package.json",
+          logical_path: "web/package.json",
+          availability: "AVAILABLE",
+          latest_revision: "sha-1",
+          change_status: "PROCESSING",
+          analysis_status: "RUNNING",
+          risk_count: 0,
+          active_risk_count: 0,
+          first_risk_id: null,
+          highest_risk_priority: null,
+          updated_at: "2026-08-20T00:00:00Z",
+        },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/security/data-access-summary")) return response(summary);
+      const base = baseResponse(path);
+      if (base !== null) return base;
+      return response({ code: "NOT_FOUND" }, 404);
+    }));
+
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={unavailablePicker} /> }} />);
+
+    expect(await screen.findByRole("heading", { name: "Tracked artifacts" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Claims.txt" })).toBeInTheDocument();
+    expect(screen.getByText("Change: DONE · Analysis: SUCCEEDED")).toBeInTheDocument();
+    expect(screen.getByText("1 active · 2 total risks")).toBeInTheDocument();
+    expect(screen.getByText("package.json")).toBeInTheDocument();
+    expect(screen.getByText("No risk has been produced for the latest analyzed state.")).toBeInTheDocument();
+    const artifactLinks = screen.getAllByRole("link", { name: "View artifact analysis" });
+    expect(artifactLinks[0]!).toHaveAttribute("href", "#/w/vws-1/sources/artifacts/artifact-drive-1");
+    expect(screen.getByRole("heading", { name: "Add Source" })).toBeInTheDocument();
+
+    await userEvent.click(artifactLinks[0]!);
+    expect(await screen.findByText("Latest revision")).toBeInTheDocument();
+    expect(screen.getByText("rev-2")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open risk findings and evidence" }))
+      .toHaveAttribute("href", "#/w/vws-1/risks/risk-7");
   });
 
   it("treats selecting only an already tracked Drive file as a no-op", async () => {

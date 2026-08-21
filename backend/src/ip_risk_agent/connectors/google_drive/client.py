@@ -13,7 +13,9 @@ from datetime import UTC, datetime
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
+from .error_mapping import map_drive_status_code
 from .models import (
     DRIVE_FILE_SCOPE,
     GOOGLE_DOC_MIME_TYPE,
@@ -53,11 +55,18 @@ class GoogleDriveProvider:
         )
 
     def get_file(self, file_id: str) -> DriveFile:
-        response = (
-            self._service.files()
-            .get(fileId=file_id, fields="id,name,mimeType,modifiedTime,version,webViewLink")
-            .execute()
-        )
+        try:
+            response = (
+                self._service.files()
+                .get(fileId=file_id, fields="id,name,mimeType,modifiedTime,version,webViewLink")
+                .execute()
+            )
+        except HttpError as exc:
+            status = int(getattr(exc.resp, "status", 500))
+            raise map_drive_status_code(
+                status,
+                "drive_file_metadata failed",
+            ) from exc
         return self._to_file(response)
 
     def get_start_page_token(self) -> str:

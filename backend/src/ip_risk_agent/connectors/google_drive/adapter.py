@@ -216,6 +216,68 @@ class GoogleDriveAdapter:
             source_access_receipt=receipt,
         )
 
+    async def initial_changes(
+        self,
+        mount: MountRef,
+        selected_file_ids: list[str],
+    ) -> tuple[SourceChange, ...]:
+        """Materialize Picker selections into the canonical change pipeline.
+
+        Drive's changes feed starts *after* ``getStartPageToken``.  It therefore
+        cannot discover files that were already selected when a mount was
+        created.  Fetching only the Picker-approved IDs preserves ``drive.file``
+        while giving each initial file a real provider revision for idempotent
+        intake and Worker snapshot validation.
+        """
+        scope: DriveTrackingScope | None = await self._tracking_scope_store.load(
+            mount.mount_id
+        )
+        if scope is None:
+            raise PermissionDeniedError(
+                provider="google_drive",
+                safe_message="Drive tracking scope is unavailable",
+            )
+        provider, connection = await self._provider_for_mount(mount.mount_id)
+        now = datetime.now(timezone.utc)
+        changes: list[SourceChange] = []
+        try:
+            for file_id in selected_file_ids:
+                if not scope.contains(file_id):
+                    raise PermissionDeniedError(
+                        provider="google_drive",
+                        safe_message="artifact is outside the tracked Drive selection",
+                    )
+                drive_file = provider.get_file(file_id)
+                revision = drive_file.revision_id or drive_file.modified_time or "unknown"
+                fingerprint = drive_change_fingerprint(
+                    file_id=file_id,
+                    resolved_revision=revision,
+                )
+                changes.append(
+                    SourceChange(
+                        contract_version="1",
+                        event_id=fingerprint,
+                        provider_event_id=None,
+                        event_fingerprint=fingerprint,
+                        risk_workspace_id=mount.risk_workspace_id,
+                        mount_id=mount.mount_id,
+                        source_workspace_id=mount.source_workspace_id,
+                        source_type=SourceType.GOOGLE_DRIVE,
+                        artifact=SourceArtifactRef(
+                            source_artifact_id=file_id,
+                            display_name=drive_file.name,
+                        ),
+                        change_type=ChangeType.CREATE,
+                        revision=revision,
+                        previous_revision=None,
+                        observed_at=now,
+                        safe_metadata={},
+                    )
+                )
+        finally:
+            await self._persist_refreshed_token(connection, provider)
+        return tuple(changes)
+
     def _unsupported_snapshot(self, change: SourceChange, *, resolved_revision: str) -> SourceSnapshot:
         receipt = build_access_receipt(SourceAccessType.METADATA, content_bytes=0)
         return SourceSnapshot(

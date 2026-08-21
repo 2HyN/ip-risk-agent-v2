@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 
 import { useSession } from "../auth/session.js";
 import { ApiFailure } from "../shared/api/client.js";
-import type { ConnectedSource } from "../shared/api/types.js";
+import type { ConnectedSource, TrackedArtifact } from "../shared/api/types.js";
 import { useResource } from "../shared/hooks/use-resource.js";
 import {
   Badge,
@@ -39,6 +39,7 @@ export function SourcePanel({
   const { workspace, role } = useWorkspace();
   const sourceApi = useMemo(() => new SourceApiClient(api.client), [api]);
   const [search, setSearch] = useSearchParams();
+  const sourcePath = useParams()["*"] ?? "";
   const [selected, setSelected] = useState<SourceProviderType | null>(null);
   const [managedDrive, setManagedDrive] = useState<ConnectedSource | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -71,6 +72,14 @@ export function SourcePanel({
   if (sources.loading) return <LoadingState label="Loading connected sources" />;
   if (sources.error !== null) return <ErrorState error={sources.error} retry={sources.reload} />;
   const connected = sources.data?.connected_sources ?? [];
+  const trackedArtifacts = sources.data?.tracked_artifacts ?? [];
+  const artifactId = sourcePath.startsWith("artifacts/")
+    ? sourcePath.slice("artifacts/".length)
+    : null;
+  if (artifactId !== null) {
+    const artifact = trackedArtifacts.find((item) => item.artifact_id === artifactId);
+    return <TrackedArtifactDetail workspaceId={workspace.id} artifact={artifact ?? null} />;
+  }
 
   return (
     <div className="content content--wide">
@@ -144,8 +153,57 @@ export function SourcePanel({
             </Card>
             );
           })}
+          <section className="source-artifacts" aria-labelledby="tracked-artifacts-title">
+            <div>
+              <p className="eyebrow">Virtual Workspace</p>
+              <h2 id="tracked-artifacts-title">Tracked artifacts</h2>
+              <p>Provider files that have entered the snapshot and analysis pipeline.</p>
+            </div>
+            {trackedArtifacts.length === 0 ? (
+              <Card>
+                <EmptyState
+                  title="Waiting for the first snapshot"
+                  description={connected.length === 0
+                    ? "Connect a source to begin tracking artifacts."
+                    : "The source is connected. Newly selected or changed artifacts will appear here as collection begins."}
+                />
+              </Card>
+            ) : trackedArtifacts.map((artifact) => (
+              <Card key={artifact.artifact_id} className="source-card">
+                <div className="card-row">
+                  <div>
+                    <p className="eyebrow">{artifact.source_type}</p>
+                    <h3>{artifact.display_name}</h3>
+                    <p>{artifact.logical_path}</p>
+                    <p>Change: {artifact.change_status ?? "WAITING"} · Analysis: {artifact.analysis_status ?? "WAITING"}</p>
+                    <p>{artifact.active_risk_count} active · {artifact.risk_count} total risks</p>
+                  </div>
+                  <Badge tone={toneFor(artifact.analysis_status ?? artifact.availability)}>
+                    {artifact.analysis_status ?? artifact.availability}
+                  </Badge>
+                </div>
+                {artifact.first_risk_id === null ? (
+                  <p>No risk has been produced for the latest analyzed state.</p>
+                ) : (
+                  <span>{artifact.highest_risk_priority} priority</span>
+                )}
+                <Link to={`artifacts/${encodeURIComponent(artifact.artifact_id)}`}>
+                  View artifact analysis
+                </Link>
+              </Card>
+            ))}
+          </section>
         </div>
-        <Card className="source-connect-card">
+        <div className="source-connect-stack">
+          <Card>
+            <AddSourceChooser
+              onSelect={setSelected}
+              isDesktop={platform.platform === "desktop"}
+              riskWorkspaceId={workspace.id}
+              connectionApiClient={sourceApi}
+            />
+          </Card>
+          {managedDrive !== null || completion || selected === "LOCAL" ? <Card>
           {managedDrive !== null ? (
             <DriveCompletion
               sourceApi={sourceApi}
@@ -178,16 +236,63 @@ export function SourcePanel({
               revokeDesktopDevice={(deviceId) => sourceApi.revokeDesktopDevice(deviceId)}
               onConnected={() => complete("Local folder가 연결되고 watcher가 시작되었습니다.")}
             />
-          ) : (
-            <AddSourceChooser
-              onSelect={setSelected}
-              isDesktop={platform.platform === "desktop"}
-              riskWorkspaceId={workspace.id}
-              connectionApiClient={sourceApi}
-            />
-          )}
+          ) : null}
+          </Card> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrackedArtifactDetail({
+  workspaceId,
+  artifact,
+}: {
+  workspaceId: string;
+  artifact: TrackedArtifact | null;
+}) {
+  if (artifact === null) {
+    return (
+      <div className="content">
+        <PageHeader eyebrow="Virtual Workspace" title="Artifact unavailable" />
+        <Card>
+          <EmptyState
+            title="Tracked artifact not found"
+            description="This artifact is not available in the current workspace."
+          />
+          <Link to={`/w/${encodeURIComponent(workspaceId)}/sources`}>Back to Sources</Link>
         </Card>
       </div>
+    );
+  }
+  return (
+    <div className="content">
+      <PageHeader
+        eyebrow="Virtual Workspace artifact"
+        title={artifact.display_name}
+        description={`${artifact.source_type} · ${artifact.source_context ?? "Connected source"}`}
+      />
+      <Card>
+        <dl className="detail-grid">
+          <div><dt>Path</dt><dd>{artifact.logical_path}</dd></div>
+          <div><dt>Availability</dt><dd>{artifact.availability}</dd></div>
+          <div><dt>Latest revision</dt><dd>{artifact.latest_revision ?? "Waiting"}</dd></div>
+          <div><dt>Change</dt><dd>{artifact.change_status ?? "WAITING"}</dd></div>
+          <div><dt>Analysis</dt><dd>{artifact.analysis_status ?? "WAITING"}</dd></div>
+          <div><dt>Risk</dt><dd>{artifact.risk_count === 0
+            ? "No risk produced"
+            : `${artifact.active_risk_count} active / ${artifact.risk_count} total (${artifact.highest_risk_priority ?? "review"})`}</dd></div>
+          <div><dt>Last updated</dt><dd>{artifact.updated_at}</dd></div>
+        </dl>
+        <div className="button-row">
+          <Link to={`/w/${encodeURIComponent(workspaceId)}/sources`}>Back to Sources</Link>
+          {artifact.first_risk_id === null ? null : (
+            <Link to={`/w/${encodeURIComponent(workspaceId)}/risks/${encodeURIComponent(artifact.first_risk_id)}`}>
+              Open risk findings and evidence
+            </Link>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -221,13 +326,27 @@ function DriveCompletion({
     throw new Error("drive_reference_missing");
   }
 
-  async function createMount(selectedFileIds: string[]): Promise<void> {
+  async function createMount(selectedFiles: DrivePickerFile[]): Promise<void> {
+    const selectedFileIds = selectedFiles.map((file) => file.id);
+    const displayMetadata = Object.fromEntries(
+      selectedFiles.map((file) => [file.id, { name: file.name }]),
+    );
     if (mountId !== undefined) {
-      await sourceApi.createAdditionalDriveMount(mountId, riskWorkspaceId, selectedFileIds);
+      await sourceApi.createAdditionalDriveMount(
+        mountId,
+        riskWorkspaceId,
+        selectedFileIds,
+        displayMetadata,
+      );
       return;
     }
     if (connectionId !== undefined) {
-      await sourceApi.createDriveMount(connectionId, riskWorkspaceId, selectedFileIds);
+      await sourceApi.createDriveMount(
+        connectionId,
+        riskWorkspaceId,
+        selectedFileIds,
+        displayMetadata,
+      );
       return;
     }
     throw new Error("drive_reference_missing");
@@ -259,7 +378,7 @@ function DriveCompletion({
       return;
     }
     try {
-      await createMount(newFiles.map((file) => file.id));
+      await createMount(newFiles);
       onComplete();
     } catch (reason) {
       if (reason instanceof ApiFailure && reason.status === 409) {
@@ -278,7 +397,7 @@ function DriveCompletion({
     setError(null);
     setInfo(null);
     try {
-      await createMount(files.map((file) => file.id));
+      await createMount(files);
       onComplete();
     } catch {
       setError("선택한 Drive 파일을 mount로 만들지 못했습니다.");

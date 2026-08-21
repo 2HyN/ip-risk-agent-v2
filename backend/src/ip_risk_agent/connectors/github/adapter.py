@@ -29,6 +29,7 @@ from iprisk_contracts.source_change import SourceChange
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
+from ..common.fingerprint import github_change_fingerprint
 from ..common.errors import (
     AuthRequiredError,
     NotFoundError,
@@ -37,7 +38,7 @@ from ..common.errors import (
 )
 from ..common.ipriskignore import is_denied_by_ipriskignore, parse_ipriskignore
 from .connection_lookup import GitHubConnectionContext, GitHubConnectionLookup
-from .identity import decode_github_artifact_id
+from .identity import decode_github_artifact_id, encode_github_artifact_id
 from .models import GitHubProvider
 from .tracking_scope import GitHubTrackingScope
 
@@ -160,6 +161,70 @@ class GitHubAdapter:
             byte_size=bytes_of_text(file_content.text),
             source_access_receipt=receipt,
         )
+
+    async def initial_changes(self, mount: MountRef) -> tuple[SourceChange, ...]:
+        scope: GitHubTrackingScope | None = await self._tracking_scope_store.load(
+            mount.mount_id
+        )
+        if scope is None:
+            raise PermissionDeniedError(
+                provider="github",
+                safe_message="GitHub tracking scope is unavailable",
+            )
+        provider, _ = await self._provider_for_mount(mount.mount_id)
+        ignored = await self._fetch_source_ignore_patterns(
+            provider,
+            scope.owner,
+            scope.repo,
+            scope.tracked_branch,
+        )
+        files = await provider.list_repository_files(
+            scope.owner,
+            scope.repo,
+            scope.tracked_branch,
+        )
+        repository_id = f"{scope.owner}/{scope.repo}"
+        observed_at = datetime.now(timezone.utc)
+        changes: list[SourceChange] = []
+        for file in files:
+            if not scope.is_tracked(file.path):
+                continue
+            if is_denied_by_ipriskignore(file.path, ignored):
+                continue
+            fingerprint = github_change_fingerprint(
+                repository_id=repository_id,
+                tracked_branch=scope.tracked_branch,
+                commit_sha=file.sha,
+                changed_path=file.path,
+            )
+            changes.append(
+                SourceChange(
+                    contract_version="1",
+                    event_id=fingerprint,
+                    provider_event_id=None,
+                    event_fingerprint=fingerprint,
+                    risk_workspace_id=mount.risk_workspace_id,
+                    mount_id=mount.mount_id,
+                    source_workspace_id=mount.source_workspace_id,
+                    source_type=SourceType.GITHUB,
+                    artifact=SourceArtifactRef(
+                        source_artifact_id=encode_github_artifact_id(
+                            owner=scope.owner,
+                            repo=scope.repo,
+                            branch=scope.tracked_branch,
+                            path=file.path,
+                        ),
+                        display_name=file.path.rsplit("/", 1)[-1],
+                        path_hint=file.path,
+                    ),
+                    change_type=ChangeType.CREATE,
+                    revision=file.sha,
+                    previous_revision=None,
+                    observed_at=observed_at,
+                    safe_metadata={},
+                )
+            )
+        return tuple(changes)
 
     def _unsupported_snapshot(self, change: SourceChange, *, resolved_revision: str) -> SourceSnapshot:
         receipt = build_access_receipt(SourceAccessType.METADATA, content_bytes=0)

@@ -1145,6 +1145,64 @@ validator failure로 확인했다.
 - frontend 전체 test: `40 passed`; typecheck/build: 통과.
 - 실제 GCP 명령은 실행하지 않았다.
 
+## Phase 9 Sources / Virtual Workspace / Risk lifecycle closure
+
+### Confirmed root gaps
+
+- A completed Drive mount persisted canonical source metadata and Picker tracking scope, but it did
+  not emit an initial `SourceChange`. Drive reconciliation starts from a new changes cursor, so a
+  file selected before that cursor could remain unanalyzed until the user edited it later.
+- The Sources UI consumed only the security data-access summary. Canonical Artifact,
+  ChangeEvent, AnalysisJob, and Risk records therefore had no provider-neutral Sources read model,
+  even when the Worker pipeline had completed successfully.
+- Add Source and the active completion/manage flow shared one conditional card. A completion or
+  Add-files action therefore replaced the Add Source entry point instead of coexisting with it.
+
+### Implemented convergence
+
+1. Drive mount completion now saves the Picker scope first, fetches metadata only for the
+   explicitly selected IDs, emits idempotent CREATE changes with provider revisions, and publishes
+   them through the existing canonical intake/Cloud Tasks boundary.
+   GitHub mount completion similarly reads the tracked branch tree, applies include/exclude and
+   source `.ipriskignore` rules, and publishes tracked blobs by SHA. A truncated provider tree fails
+   safely instead of silently presenting incomplete coverage. Desktop continues to publish its
+   initial watcher events through the existing device event boundary.
+2. Data-access summary now includes workspace-isolated tracked-artifact projections with provider,
+   availability, latest change/analysis state, risk counts, and a safe Risk-detail reference.
+3. Sources renders that provider-neutral Virtual Workspace list and links artifacts with findings to
+   the existing Risk detail/evidence UI. Zero-risk, waiting, running, failed, and succeeded states are
+   represented without inferring a finding that does not exist.
+4. Add Source is permanently visible. ACTIVE Drive file expansion stays on the connected Drive card
+   and reuses the mount-bound ACTIVE credential; it does not restart OAuth.
+5. Picker display names are sent as safe metadata. Tokens, callback payloads, raw Drive responses,
+   and source content remain excluded from UI diagnostics and logs.
+
+### 422 evidence conclusion
+
+- This repository cannot produce `422 {"detail":"Method Not Allowed"}` for the active Drive POST.
+  Starlette produces that exact body only for a method mismatch and returns 405; application 422
+  handlers use a different safe error envelope. The mount callback did not call Google Drive at all,
+  so the previously observed response was not an external Drive 405 translated by this code.
+- The POST route remains covered explicitly, while the wrong-method regression is fixed at 405.
+  After this change, the only new provider call in mount completion is the Picker-scoped initial
+  metadata fetch; failures are not translated to the contradictory 422 body.
+- A provider HTTP failure during that initial metadata operation is mapped to the source connector
+  error boundary and returned as a safe 502/503 `DRIVE_INITIAL_SYNC_FAILED` envelope containing only
+  operation, category, and retryability. Provider URL, file ID, response body, and credentials are
+  excluded.
+
+### Verification
+
+- Drive initial selection/scope and active route tests cover initial change publication, duplicate
+  behavior, authorization, and the 405/422 distinction.
+- Sources tests cover persistent Add Source, ACTIVE Add files without OAuth, multiple selections,
+  retry, provider-neutral mixed artifacts, analysis states, risk/no-risk states, refresh, and Risk
+  navigation.
+- Existing pipeline tests continue to cover SourceChange intake -> queue -> Worker -> analysis result
+  -> risk persistence. No GCP command or resource/IAM/OAuth mutation was executed.
+- Final gates: Python non-live `641 passed, 1 skipped, 10 deselected`; frontend `45 passed`;
+  workspace typecheck/build, dependency check, deployment validator, and diff check passed.
+
 ## Phase 9 staging Drive ACTIVE connection 추가 파일 lifecycle
 
 ### live gap 및 원인

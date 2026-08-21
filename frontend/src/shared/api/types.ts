@@ -160,12 +160,31 @@ export type ConnectedSource = {
   mounted_by_user_id: string;
 };
 
+export type TrackedArtifact = {
+  artifact_id: string;
+  mount_id: string;
+  source_type: string;
+  source_context: string | null;
+  display_name: string;
+  logical_path: string;
+  availability: string;
+  latest_revision: string | null;
+  change_status: string | null;
+  analysis_status: string | null;
+  risk_count: number;
+  active_risk_count: number;
+  first_risk_id: string | null;
+  highest_risk_priority: string | null;
+  updated_at: string;
+};
+
 export type DataAccessSummary = {
   risk_workspace_id: string;
   retention_policy_version: string;
   policy_version: string;
   mounts: Mount[];
   connected_sources: ConnectedSource[];
+  tracked_artifacts: TrackedArtifact[];
   recent_access: SourceAccess[];
   raw_source_persisted: false;
   analysis_artifact_persisted: false;

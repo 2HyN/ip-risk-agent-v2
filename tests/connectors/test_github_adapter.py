@@ -16,13 +16,18 @@ from ip_risk_agent.connectors.github.connection_lookup import (
     InMemoryGitHubConnectionLookup,
 )
 from ip_risk_agent.connectors.github.identity import encode_github_artifact_id
-from ip_risk_agent.connectors.github.models import GitHubFileContent, GitHubInstallationToken
+from ip_risk_agent.connectors.github.models import (
+    GitHubFileContent,
+    GitHubInstallationToken,
+    GitHubTreeFile,
+)
 from ip_risk_agent.connectors.github.tracking_scope import GitHubTrackingScope
 
 
 class FakeGitHubProvider:
-    def __init__(self, files: dict | None = None) -> None:
+    def __init__(self, files: dict | None = None, tree: list | None = None) -> None:
         self._files = files or {}
+        self._tree = tree or []
         self.token_fetched = False
 
     async def get_installation_token(self) -> GitHubInstallationToken:
@@ -40,6 +45,9 @@ class FakeGitHubProvider:
             return self._files[path]
         except KeyError as exc:
             raise NotFoundError(provider="github", safe_message=f"{path} not found") from exc
+
+    async def list_repository_files(self, owner: str, repo: str, ref: str):
+        return self._tree
 
 
 class FakeGitHubProviderFactory:
@@ -95,6 +103,36 @@ def test_fetch_snapshot_returns_full_text_for_tracked_file():
         assert snapshot.content_scope.value == "FULL_TEXT"
         assert snapshot.text_segments[0].text == "print(1)"
         assert snapshot.artifact_kind.value == "SOURCE_CODE"
+
+    asyncio.run(scenario())
+
+
+def test_initial_changes_discover_only_tracked_non_ignored_repository_files():
+    async def scenario():
+        provider = FakeGitHubProvider(
+            files={
+                ".ipriskignore": GitHubFileContent(
+                    path=".ipriskignore",
+                    sha="ignore-sha",
+                    text="src/generated/**\n",
+                    size=17,
+                )
+            },
+            tree=[
+                GitHubTreeFile(path="src/a.py", sha="blob-a"),
+                GitHubTreeFile(path="src/generated/b.py", sha="blob-b"),
+                GitHubTreeFile(path="docs/readme.md", sha="blob-c"),
+            ],
+        )
+        adapter = await _build_adapter(provider, include_patterns=["src/**"])
+
+        changes = await adapter.initial_changes(_mount())
+
+        assert len(changes) == 1
+        assert changes[0].artifact.display_name == "a.py"
+        assert changes[0].artifact.path_hint == "src/a.py"
+        assert changes[0].revision == "blob-a"
+        assert changes[0].change_type is ChangeType.CREATE
 
     asyncio.run(scenario())
 

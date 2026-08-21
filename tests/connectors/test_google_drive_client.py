@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 pytest.importorskip("googleapiclient")
 pytest.importorskip("google.oauth2.credentials")
@@ -13,6 +14,8 @@ from ip_risk_agent.connectors.google_drive.client import (
     GoogleDriveProvider,
     GoogleDriveProviderFactory,
 )
+from ip_risk_agent.connectors.common.errors import TemporaryUnavailableError
+from googleapiclient.errors import HttpError
 
 
 def test_to_file_maps_all_fields():
@@ -43,3 +46,32 @@ def test_factory_creates_provider_instance():
     token = {"access_token": "at", "refresh_token": "rt", "expires_at": None}
     provider = factory.create(token)
     assert isinstance(provider, GoogleDriveProvider)
+
+
+def test_file_metadata_provider_405_maps_to_safe_non_retryable_connector_error():
+    class Request:
+        def execute(self):
+            raise HttpError(
+                SimpleNamespace(status=405, reason="Method Not Allowed"),
+                b'{"provider":"raw-body-must-not-escape"}',
+                uri="https://www.googleapis.com/drive/v3/files/private-file-id",
+            )
+
+    class Files:
+        def get(self, **_kwargs):
+            return Request()
+
+    class Service:
+        def files(self):
+            return Files()
+
+    provider = object.__new__(GoogleDriveProvider)
+    provider._service = Service()
+
+    with pytest.raises(TemporaryUnavailableError) as caught:
+        provider.get_file("private-file-id")
+
+    assert caught.value.retryable is False
+    assert caught.value.safe_message == "drive_file_metadata failed"
+    assert "private-file-id" not in str(caught.value)
+    assert "raw-body" not in str(caught.value)

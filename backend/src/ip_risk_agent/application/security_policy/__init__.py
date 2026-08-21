@@ -5,6 +5,7 @@ from .service import (
     DataAccessSummary,
     SecurityPolicyConflictError,
     SecurityPolicyUpdate,
+    TrackedArtifactSummary,
     WorkspaceSecurityService,
     WorkspaceSecuritySettings,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "DataAccessSummary",
     "SecurityPolicyConflictError",
     "SecurityPolicyUpdate",
+    "TrackedArtifactSummary",
     "WorkspaceSecurityService",
     "WorkspaceSecuritySettings",
 ]

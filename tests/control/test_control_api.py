@@ -8,7 +8,17 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
-from iprisk_contracts import AnalysisType, ReviewPriority, SourceAccessType
+from iprisk_contracts import (
+    AnalysisType,
+    ChangeType,
+    ReviewPriority,
+    SourceAccessType,
+    SourceArtifactRef,
+    SourceChange,
+    SourceType,
+)
+from ip_risk_agent.application.analysis_jobs import AnalysisJob, AnalysisJobStatus
+from ip_risk_agent.application.process_change import ChangeEvent, ChangeEventStatus
 from ip_risk_agent.api import (
     ApplicationHardeningConfig,
     ApplicationSessionConfig,
@@ -36,6 +46,12 @@ from ip_risk_agent.application.security_policy import WorkspaceSecurityService
 from ip_risk_agent.application.workspace_admin import WorkspaceAdministrationService
 from ip_risk_agent.core.common import ActorType, DomainInvariantError
 from ip_risk_agent.core.audit import SourceAccessEvent
+from ip_risk_agent.core.artifacts import (
+    Artifact,
+    ArtifactAvailability,
+    ArtifactState,
+    ArtifactStatus,
+)
 from ip_risk_agent.core.notifications import (
     Notification,
     NotificationStatus,
@@ -324,6 +340,78 @@ def test_control_workspace_risk_history_security_notification_routes() -> None:
 
         async def seed_risk_and_notification() -> None:
             async with store() as uow:
+                source_change = SourceChange(
+                    contract_version="1",
+                    event_id="provider-event-1",
+                    event_fingerprint="fingerprint-1",
+                    risk_workspace_id=vws_id,
+                    mount_id="mount-1",
+                    source_workspace_id="source-1",
+                    source_type=SourceType.GOOGLE_DRIVE,
+                    artifact=SourceArtifactRef(
+                        source_artifact_id="file-1",
+                        display_name="Claims.txt",
+                    ),
+                    change_type=ChangeType.CREATE,
+                    revision="revision-1",
+                    observed_at=NOW,
+                    safe_metadata={},
+                )
+                artifact = Artifact(
+                    id="artifact-1",
+                    risk_workspace_id=vws_id,
+                    mount_id="mount-1",
+                    source_workspace_id="source-1",
+                    source_type=SourceType.GOOGLE_DRIVE,
+                    source_artifact_id="file-1",
+                    display_name="Claims.txt",
+                    logical_path="Claims.txt",
+                    status=ArtifactStatus.ACTIVE,
+                    first_seen_at=NOW,
+                    last_seen_at=NOW,
+                )
+                await uow.artifacts.add(
+                    artifact,
+                    ArtifactState(
+                        artifact_id=artifact.id,
+                        latest_revision="revision-1",
+                        latest_checksum=None,
+                        availability_state=ArtifactAvailability.AVAILABLE,
+                        updated_at=NOW,
+                    ),
+                )
+                await uow.change_events.add(
+                    ChangeEvent(
+                        id="change-1",
+                        event_fingerprint="fingerprint-1",
+                        risk_workspace_id=vws_id,
+                        mount_id="mount-1",
+                        source_workspace_id="source-1",
+                        source_artifact_id="file-1",
+                        source_type=SourceType.GOOGLE_DRIVE,
+                        change_type=ChangeType.CREATE,
+                        revision="revision-1",
+                        previous_revision=None,
+                        observed_at=NOW,
+                        status=ChangeEventStatus.PENDING,
+                        attempts=0,
+                        created_at=NOW,
+                        updated_at=NOW,
+                        source_change=source_change,
+                        artifact_id=artifact.id,
+                    )
+                )
+                await uow.analysis_jobs.add(
+                    AnalysisJob(
+                        id="job-1",
+                        change_event_id="change-1",
+                        artifact_id=artifact.id,
+                        revision="revision-1",
+                        requested_analysis_types=(AnalysisType.PATENT,),
+                        status=AnalysisJobStatus.QUEUED,
+                        created_at=NOW,
+                    )
+                )
                 risk = Risk(
                     id="risk-1",
                     risk_workspace_id=vws_id,
@@ -430,6 +518,25 @@ def test_control_workspace_risk_history_security_notification_routes() -> None:
         assert summary.status_code == 200
         assert summary.json()["policy_version"] == policy_version
         assert summary.json()["raw_source_persisted"] is False
+        assert summary.json()["tracked_artifacts"] == [
+            {
+                "artifact_id": "artifact-1",
+                "mount_id": "mount-1",
+                "source_type": "GOOGLE_DRIVE",
+                "source_context": None,
+                "display_name": "Claims.txt",
+                "logical_path": "Claims.txt",
+                "availability": "AVAILABLE",
+                "latest_revision": "revision-1",
+                "change_status": "PENDING",
+                "analysis_status": "QUEUED",
+                "risk_count": 1,
+                "active_risk_count": 1,
+                "first_risk_id": "risk-1",
+                "highest_risk_priority": "HIGH",
+                "updated_at": NOW.isoformat().replace("+00:00", "Z"),
+            }
+        ]
         assert "access-secret" not in summary.text
         assert "C:\\\\Users" not in summary.text
         assert "/home/alice" not in summary.text

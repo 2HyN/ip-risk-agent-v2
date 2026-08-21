@@ -338,9 +338,11 @@ textarea:focus-visible {
 .source-local-flow p {
   margin-bottom: 0;
 }
-.source-connect-card {
-  position: sticky;
-  top: 22px;
+.source-connect-stack {
+    position: sticky;
+    top: 22px;
+    display: grid;
+    gap: 16px;
 }
 .source-selection {
   padding: 12px;
@@ -365,8 +367,8 @@ textarea:focus-visible {
   .source-layout {
     grid-template-columns: 1fr;
   }
-  .source-connect-card {
-    position: static;
+  .source-connect-stack {
+      position: static;
   }
 }
 .login-page {

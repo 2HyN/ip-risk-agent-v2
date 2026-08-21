@@ -7,7 +7,10 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from hashlib import sha256
 
-from iprisk_contracts import SourceType
+from iprisk_contracts import ReviewPriority, SourceType
+from ip_risk_agent.application.analysis_jobs.models import AnalysisJobStatus
+from ip_risk_agent.application.process_change.models import ChangeEventStatus
+from ip_risk_agent.core.artifacts import Artifact, ArtifactAvailability
 
 from ip_risk_agent.application.repositories import (
     ControlUnitOfWork,
@@ -56,12 +59,27 @@ class ConnectedSourceSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class TrackedArtifactSummary:
+    artifact: Artifact
+    mount_alias: str | None
+    availability: ArtifactAvailability
+    latest_revision: str | None
+    change_status: ChangeEventStatus | None
+    analysis_status: AnalysisJobStatus | None
+    risk_count: int
+    active_risk_count: int
+    first_risk_id: str | None
+    highest_risk_priority: ReviewPriority | None
+
+
+@dataclass(frozen=True, slots=True)
 class DataAccessSummary:
     risk_workspace_id: str
     retention_policy_version: str
     policy_version: str
     mounts: tuple[WorkspaceMount, ...]
     connected_sources: tuple[ConnectedSourceSummary, ...]
+    tracked_artifacts: tuple[TrackedArtifactSummary, ...]
     recent_access: tuple[SourceAccessEvent, ...]
     raw_source_persisted: bool = False
     analysis_artifact_persisted: bool = False
@@ -190,6 +208,75 @@ class WorkspaceSecurityService:
                     )
                 )
             access = await uow.audit.list_source_access(risk_workspace_id)
+            artifacts = await uow.artifacts.list_for_workspace(risk_workspace_id)
+            changes = await uow.change_events.list_for_workspace(risk_workspace_id)
+            risks = await uow.risks.list_for_workspace(risk_workspace_id)
+            changes_by_artifact = {}
+            for change in changes:
+                if change.artifact_id is None:
+                    continue
+                previous = changes_by_artifact.get(change.artifact_id)
+                if previous is None or (change.updated_at, change.id) > (
+                    previous.updated_at,
+                    previous.id,
+                ):
+                    changes_by_artifact[change.artifact_id] = change
+            risks_by_artifact: dict[str, list] = {}
+            for risk in risks:
+                risks_by_artifact.setdefault(risk.artifact_id, []).append(risk)
+            tracked_artifacts = []
+            mounts_by_id = {mount.id: mount for mount in mounts}
+            for artifact in artifacts:
+                state = await uow.artifacts.get_state(artifact.id)
+                change = changes_by_artifact.get(artifact.id)
+                jobs = (
+                    ()
+                    if change is None
+                    else await uow.analysis_jobs.list_for_change(change.id)
+                )
+                latest_job = max(jobs, key=lambda job: (job.created_at, job.id), default=None)
+                artifact_risks = risks_by_artifact.get(artifact.id, [])
+                active_risks = [
+                    risk
+                    for risk in artifact_risks
+                    if risk.lifecycle_state.value != "RESOLVED"
+                ]
+                first_risk = max(
+                    artifact_risks,
+                    key=lambda risk: (risk.updated_at, risk.id),
+                    default=None,
+                )
+                highest_priority = max(
+                    (risk.review_priority for risk in active_risks),
+                    key=lambda value: {
+                        ReviewPriority.LOW: 0,
+                        ReviewPriority.MEDIUM: 1,
+                        ReviewPriority.HIGH: 2,
+                    }[value],
+                    default=None,
+                )
+                tracked_artifacts.append(
+                    TrackedArtifactSummary(
+                        artifact=artifact,
+                        mount_alias=(
+                            None
+                            if artifact.mount_id not in mounts_by_id
+                            else mounts_by_id[artifact.mount_id].alias
+                        ),
+                        availability=(
+                            ArtifactAvailability.UNAVAILABLE
+                            if state is None
+                            else state.availability_state
+                        ),
+                        latest_revision=None if state is None else state.latest_revision,
+                        change_status=None if change is None else change.status,
+                        analysis_status=None if latest_job is None else latest_job.status,
+                        risk_count=len(artifact_risks),
+                        active_risk_count=len(active_risks),
+                        first_risk_id=None if first_risk is None else first_risk.id,
+                        highest_risk_priority=highest_priority,
+                    )
+                )
         recent = tuple(
             sorted(access, key=lambda event: (event.occurred_at, event.id), reverse=True)[
                 :access_limit
@@ -201,6 +288,13 @@ class WorkspaceSecurityService:
             policy_version=workspace.security_policy_version,
             mounts=mounts,
             connected_sources=tuple(connected_sources),
+            tracked_artifacts=tuple(
+                sorted(
+                    tracked_artifacts,
+                    key=lambda item: (item.artifact.last_seen_at, item.artifact.id),
+                    reverse=True,
+                )
+            ),
             recent_access=recent,
         )
 

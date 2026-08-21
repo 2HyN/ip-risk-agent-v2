@@ -67,7 +67,15 @@ class FakeMountCreationCallback:
         return GitHubMountCreationResponse(server_mount_id="server-mount-1", source_workspace_id="sw-1")
 
 
-def _build_client(provider: FakeGitHubProvider | None = None):
+class FakeInitialChangeSync:
+    def __init__(self) -> None:
+        self.mount_ids = []
+
+    async def initialize(self, *, mount_id: str) -> None:
+        self.mount_ids.append(mount_id)
+
+
+def _build_client(provider: FakeGitHubProvider | None = None, *, initial_change_sync=None):
     factory = FakeGitHubProviderFactory(provider or FakeGitHubProvider())
     lookup = InMemoryGitHubConnectionInstallationLookup()
     lookup.register("conn-1", "inst-1")
@@ -79,6 +87,7 @@ def _build_client(provider: FakeGitHubProvider | None = None):
         connection_installation_lookup=lookup,
         tracking_scope_store=tracking_scope_store,
         mount_creation_callback=callback,
+        initial_change_sync=initial_change_sync,
         connection_authz_dependency=allow_all_authz,
         workspace_authz_dependency=allow_all_authz,
     )
@@ -159,6 +168,27 @@ def test_create_mount_respects_explicit_tracked_branch():
         assert scope.tracked_branch == "release-2.0"
         assert scope.default_branch == "main"
         assert scope.include_patterns == ["src/**"]
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_create_mount_publishes_initial_repository_changes_after_scope_save():
+    async def scenario():
+        sync = FakeInitialChangeSync()
+        client, _, tracking_scope_store, _ = _build_client(
+            initial_change_sync=sync
+        )
+
+        response = client.post(
+            "/api/v1/source-connections/conn-1/github/mounts",
+            json={"risk_workspace_id": "rw1", "owner": "acme", "repo": "widgets"},
+        )
+
+        assert response.status_code == 200
+        assert await tracking_scope_store.load("server-mount-1") is not None
+        assert sync.mount_ids == ["server-mount-1"]
 
     import asyncio
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..common.authz import AuthzDependency, deny_all_authz
-from ..common.errors import NotFoundError
+from ..common.errors import NotFoundError, SourceConnectorError
 from .connection_lookup import GitHubConnectionInstallationLookup
 from .models import GitHubProvider
 from .tracking_scope import GitHubTrackingScope
@@ -58,12 +58,17 @@ class GitHubMountCreationCallback(Protocol):
     ) -> GitHubMountCreationResponse: ...
 
 
+class GitHubInitialChangeSync(Protocol):
+    async def initialize(self, *, mount_id: str) -> None: ...
+
+
 def create_github_mounts_router(
     *,
     provider_factory: GitHubProviderFactory,
     connection_installation_lookup: GitHubConnectionInstallationLookup,
     tracking_scope_store,
     mount_creation_callback: GitHubMountCreationCallback,
+    initial_change_sync: GitHubInitialChangeSync | None = None,
     connection_authz_dependency: AuthzDependency = deny_all_authz,
     workspace_authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
@@ -137,6 +142,22 @@ def create_github_mounts_router(
                 exclude_patterns=body.exclude_patterns,
             ),
         )
+
+        if initial_change_sync is not None:
+            try:
+                await initial_change_sync.initialize(
+                    mount_id=result.server_mount_id,
+                )
+            except SourceConnectorError as exc:
+                raise HTTPException(
+                    status_code=503 if exc.retryable else 502,
+                    detail={
+                        "code": "GITHUB_INITIAL_SYNC_FAILED",
+                        "operation": "github_repository_tree",
+                        "provider_error": exc.category.value,
+                        "retryable": exc.retryable,
+                    },
+                ) from exc
 
         return result
 

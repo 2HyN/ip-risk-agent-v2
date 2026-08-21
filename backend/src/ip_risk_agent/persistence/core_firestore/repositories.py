@@ -552,6 +552,15 @@ class FirestoreArtifactRepository(_Repository):
             artifact_state_to_document,
         )
 
+    async def list_for_workspace(
+        self, risk_workspace_id: str
+    ) -> tuple[Artifact, ...]:
+        return await self._query(
+            ARTIFACTS,
+            (QueryFilter("risk_workspace_id", risk_workspace_id),),
+            artifact_from_document,
+        )
+
 
 class FirestoreChangeEventRepository(_Repository):
     async def get(self, change_event_id: str) -> ChangeEvent | None:

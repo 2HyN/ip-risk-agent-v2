@@ -87,6 +87,7 @@ class DataAccessSummaryResponse(StrictApiModel):
     policy_version: str
     mounts: list[MountResponse]
     connected_sources: list["ConnectedSourceResponse"]
+    tracked_artifacts: list["TrackedArtifactResponse"]
     recent_access: list[SourceAccessResponse]
     raw_source_persisted: bool
     analysis_artifact_persisted: bool
@@ -101,6 +102,24 @@ class ConnectedSourceResponse(StrictApiModel):
     status: str
     tracking_scope_summary: dict[str, object]
     mounted_by_user_id: str
+
+
+class TrackedArtifactResponse(StrictApiModel):
+    artifact_id: str
+    mount_id: str
+    source_type: str
+    source_context: str | None
+    display_name: str
+    logical_path: str
+    availability: str
+    latest_revision: str | None
+    change_status: str | None
+    analysis_status: str | None
+    risk_count: int
+    active_risk_count: int
+    first_risk_id: str | None
+    highest_risk_priority: str | None
+    updated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +201,34 @@ def create_security_router(deps: SecurityRouterDependencies) -> APIRouter:
                     mounted_by_user_id=item.mount.mounted_by_user_id,
                 )
                 for item in summary.connected_sources
+            ],
+            tracked_artifacts=[
+                TrackedArtifactResponse(
+                    artifact_id=item.artifact.id,
+                    mount_id=item.artifact.mount_id,
+                    source_type=item.artifact.source_type.value,
+                    source_context=item.mount_alias,
+                    display_name=item.artifact.display_name,
+                    logical_path=item.artifact.logical_path,
+                    availability=item.availability.value,
+                    latest_revision=item.latest_revision,
+                    change_status=(
+                        None if item.change_status is None else item.change_status.value
+                    ),
+                    analysis_status=(
+                        None if item.analysis_status is None else item.analysis_status.value
+                    ),
+                    risk_count=item.risk_count,
+                    active_risk_count=item.active_risk_count,
+                    first_risk_id=item.first_risk_id,
+                    highest_risk_priority=(
+                        None
+                        if item.highest_risk_priority is None
+                        else item.highest_risk_priority.value
+                    ),
+                    updated_at=item.artifact.last_seen_at,
+                )
+                for item in summary.tracked_artifacts
             ],
             recent_access=[
                 SourceAccessResponse.from_event(item) for item in summary.recent_access

@@ -47,6 +47,12 @@ class GitHubRepository:
     default_branch: str
 
 
+@dataclass(frozen=True, slots=True)
+class GitHubTreeFile:
+    path: str
+    sha: str
+
+
 class GitHubProvider(Protocol):
     async def get_installation_token(self) -> GitHubInstallationToken: ...
 
@@ -57,3 +63,7 @@ class GitHubProvider(Protocol):
     async def get_file_content(self, owner: str, repo: str, path: str, ref: str) -> GitHubFileContent: ...
 
     async def list_installation_repositories(self) -> list[GitHubRepository]: ...
+
+    async def list_repository_files(
+        self, owner: str, repo: str, ref: str
+    ) -> list[GitHubTreeFile]: ...

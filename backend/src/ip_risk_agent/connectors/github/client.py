@@ -15,6 +15,7 @@ from .models import (
     GitHubFileContent,
     GitHubInstallationToken,
     GitHubRepository,
+    GitHubTreeFile,
 )
 
 
@@ -133,6 +134,40 @@ class GitHubAppProvider:
                     default_branch=repo.get("default_branch") or "main",
                 )
                 for repo in data.get("repositories", [])
+            ]
+
+        return await with_http_retry(_call, provider="github")
+
+    async def list_repository_files(
+        self, owner: str, repo: str, ref: str
+    ) -> list[GitHubTreeFile]:
+        token = await self.get_installation_token()
+
+        async def _call() -> list[GitHubTreeFile]:
+            url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees/{ref}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    url,
+                    headers=self._auth_headers(token.token),
+                    params={"recursive": "1"},
+                )
+            if resp.status_code >= 400:
+                raise map_github_status_code(
+                    resp.status_code,
+                    "failed to list repository tree",
+                )
+            data = resp.json()
+            if data.get("truncated") is True:
+                raise map_github_status_code(
+                    503,
+                    "repository tree is too large for initial discovery",
+                )
+            return [
+                GitHubTreeFile(path=item["path"], sha=item["sha"])
+                for item in data.get("tree", [])
+                if item.get("type") == "blob"
+                and isinstance(item.get("path"), str)
+                and isinstance(item.get("sha"), str)
             ]
 
         return await with_http_retry(_call, provider="github")

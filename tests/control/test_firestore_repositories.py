@@ -582,6 +582,8 @@ def test_artifact_change_job_and_risk_history_commit_as_one_firestore_transactio
         async with factory() as uow:
             assert await uow.artifacts.get("artifact-1") == artifact
             assert await uow.artifacts.get_state("artifact-1") == state
+            assert await uow.artifacts.list_for_workspace("vws-1") == (artifact,)
+            assert await uow.artifacts.list_for_workspace("other-vws") == ()
             assert await uow.change_events.get_by_fingerprint("fingerprint-1") == change
             assert await uow.change_events.list_for_workspace("vws-1") == (change,)
             assert await uow.analysis_jobs.list_for_change("change-1") == (job,)

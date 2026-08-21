@@ -68,6 +68,10 @@ from .source_auth import SessionSourceAuthorizer, SourceResourceScope
 from .source_bindings import DriveMountConnectionLookup, GitHubMountConnectionLookup
 from .source_completion import ProductSourceCompletionRedirect
 from .source_registration import SourceRegistrationService
+from .source_initialization import (
+    DriveInitialChangePublisher,
+    GitHubInitialChangePublisher,
+)
 
 
 def build_google_cloud_runtime_composer(foundation):
@@ -262,6 +266,11 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
         mount_connection_lookup=DriveMountConnectionLookup(source.pending),
         tracking_scope_store=source.drive_tracking,
         mount_creation_callback=registration,
+        initial_change_sync=DriveInitialChangePublisher(
+            control_facade=context.control_facade,
+            adapter=source.drive_adapter,
+            change_sink=sink,
+        ),
         connection_authz_dependency=connection_auth,
         mount_authz_dependency=mount_auth,
         workspace_authz_dependency=workspace_auth,
@@ -288,6 +297,11 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
         connection_installation_lookup=registration,
         tracking_scope_store=source.github_tracking,
         mount_creation_callback=registration,
+        initial_change_sync=GitHubInitialChangePublisher(
+            control_facade=context.control_facade,
+            adapter=source.github_adapter,
+            change_sink=sink,
+        ),
         connection_authz_dependency=connection_auth,
         workspace_authz_dependency=workspace_auth,
     )

@@ -52,6 +52,12 @@ class DriveMountCreationCallback(Protocol):
     ) -> DriveMountCreationResponse: ...
 
 
+class DriveInitialChangeSync(Protocol):
+    async def initialize(
+        self, *, mount_id: str, selected_file_ids: list[str]
+    ) -> None: ...
+
+
 def create_drive_mounts_router(
     *,
     provider_factory: DriveProviderFactory,
@@ -60,11 +66,33 @@ def create_drive_mounts_router(
     mount_connection_lookup: DriveConnectionLookup | None = None,
     tracking_scope_store,
     mount_creation_callback: DriveMountCreationCallback,
+    initial_change_sync: DriveInitialChangeSync | None = None,
     connection_authz_dependency: AuthzDependency = deny_all_authz,
     mount_authz_dependency: AuthzDependency = deny_all_authz,
     workspace_authz_dependency: AuthzDependency = deny_all_authz,
 ) -> APIRouter:
     router = APIRouter()
+
+    async def initialize_selection(
+        *, mount_id: str, selected_file_ids: list[str]
+    ) -> None:
+        if initial_change_sync is None:
+            return
+        try:
+            await initial_change_sync.initialize(
+                mount_id=mount_id,
+                selected_file_ids=selected_file_ids,
+            )
+        except SourceConnectorError as exc:
+            raise HTTPException(
+                status_code=503 if exc.retryable else 502,
+                detail={
+                    "code": "DRIVE_INITIAL_SYNC_FAILED",
+                    "operation": "drive_file_metadata",
+                    "provider_error": exc.category.value,
+                    "retryable": exc.retryable,
+                },
+            ) from exc
 
     async def issue_picker_session(credential_ref) -> PickerSessionResponse:
         raw_token = await credential_vault.get(credential_ref)
@@ -143,6 +171,11 @@ def create_drive_mounts_router(
             ),
         )
 
+        await initialize_selection(
+            mount_id=result.server_mount_id,
+            selected_file_ids=result.selected_file_ids or body.selected_file_ids,
+        )
+
         return result
 
     @router.post(
@@ -178,6 +211,10 @@ def create_drive_mounts_router(
                     result.selected_file_ids or body.selected_file_ids,
                 ),
             ),
+        )
+        await initialize_selection(
+            mount_id=result.server_mount_id,
+            selected_file_ids=result.selected_file_ids or body.selected_file_ids,
         )
         return result
 

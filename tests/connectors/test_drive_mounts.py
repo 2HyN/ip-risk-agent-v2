@@ -71,11 +71,33 @@ class FakeMountCreationCallback:
         return DriveMountCreationResponse(server_mount_id="server-mount-1", source_workspace_id="sw-1")
 
 
+class FakeInitialChangeSync:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def initialize(self, *, mount_id, selected_file_ids) -> None:
+        self.calls.append(
+            {"mount_id": mount_id, "selected_file_ids": selected_file_ids}
+        )
+
+
+class FailingInitialChangeSync:
+    async def initialize(self, *, mount_id, selected_file_ids) -> None:
+        from ip_risk_agent.connectors.common.errors import TemporaryUnavailableError
+
+        raise TemporaryUnavailableError(
+            provider="google_drive",
+            safe_message="drive_file_metadata failed",
+            retryable=False,
+        )
+
+
 async def _setup(
     provider: FakeDriveProvider | None = None,
     *,
     mount_authz=allow_all_authz,
     workspace_authz=allow_all_authz,
+    initial_change_sync=None,
 ):
     vault = InMemoryCredentialVault()
     cred_scope = CredentialScope(provider=SourceType.GOOGLE_DRIVE, connection_id="conn-1", secret_name="tok")
@@ -105,6 +127,7 @@ async def _setup(
         mount_connection_lookup=mount_lookup,
         tracking_scope_store=tracking_scope_store,
         mount_creation_callback=callback,
+        initial_change_sync=initial_change_sync,
         connection_authz_dependency=allow_all_authz,
         mount_authz_dependency=mount_authz,
         workspace_authz_dependency=workspace_authz,
@@ -183,6 +206,57 @@ def test_create_mount_saves_tracking_scope_and_calls_callback():
         assert scope.selected_file_ids == ["file-1", "file-2"]
         assert scope.contains("file-1")
         assert not scope.contains("file-3")
+
+    asyncio.run(scenario())
+
+
+def test_create_mount_publishes_initial_changes_after_tracking_scope_is_saved():
+    async def scenario():
+        sync = FakeInitialChangeSync()
+        client, _, tracking_scope_store, _, _ = await _setup(
+            initial_change_sync=sync
+        )
+
+        response = client.post(
+            "/api/v1/source-connections/conn-1/drive/mounts",
+            json={
+                "risk_workspace_id": "rw1",
+                "selected_file_ids": ["file-1", "file-2"],
+            },
+        )
+
+        assert response.status_code == 200
+        assert await tracking_scope_store.load("server-mount-1") is not None
+        assert sync.calls == [{
+            "mount_id": "server-mount-1",
+            "selected_file_ids": ["file-1", "file-2"],
+        }]
+
+    asyncio.run(scenario())
+
+
+def test_provider_method_error_is_a_safe_gateway_error_not_422():
+    async def scenario():
+        client, _, tracking_scope_store, _, _ = await _setup(
+            initial_change_sync=FailingInitialChangeSync()
+        )
+
+        response = client.post(
+            "/api/v1/source-mounts/mount-1/drive/mounts",
+            json={"risk_workspace_id": "rw1", "selected_file_ids": ["file-3"]},
+        )
+
+        assert response.status_code == 502
+        assert response.json() == {
+            "detail": {
+                "code": "DRIVE_INITIAL_SYNC_FAILED",
+                "operation": "drive_file_metadata",
+                "provider_error": "TEMPORARY_UNAVAILABLE",
+                "retryable": False,
+            }
+        }
+        assert await tracking_scope_store.load("server-mount-1") is not None
+        assert "file-3" not in response.text
 
     asyncio.run(scenario())
 

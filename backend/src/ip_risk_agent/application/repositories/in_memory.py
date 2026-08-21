@@ -444,6 +444,19 @@ class InMemoryArtifactRepository(_Repository):
             raise _missing("artifact state", state.artifact_id)
         self._state.artifact_states[state.artifact_id] = state
 
+    async def list_for_workspace(
+        self, risk_workspace_id: str
+    ) -> tuple[Artifact, ...]:
+        self._open()
+        return _sorted(
+            [
+                artifact
+                for artifact in self._state.artifacts.values()
+                if artifact.risk_workspace_id == risk_workspace_id
+            ],
+            key=lambda artifact: artifact.id,
+        )
+
 
 class InMemoryChangeEventRepository(_Repository):
     async def get(self, change_event_id: str) -> ChangeEvent | None:

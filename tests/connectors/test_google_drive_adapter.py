@@ -318,6 +318,52 @@ def test_reconcile_persists_cursor_when_final_page():
     asyncio.run(scenario())
 
 
+def test_initial_changes_publish_only_picker_scoped_files_with_provider_revisions():
+    async def scenario():
+        files = {
+            "file-1": DriveFile(
+                file_id="file-1", name="Claims.txt", mime_type="text/plain",
+                modified_time="t1", revision_id="rev-1", web_view_link=None,
+            ),
+            "file-2": DriveFile(
+                file_id="file-2", name="Prior art.pdf", mime_type="application/pdf",
+                modified_time="t2", revision_id="rev-2", web_view_link=None,
+            ),
+        }
+        provider = FakeDriveProvider(files=files)
+        adapter, _, _, _ = await _build_adapter(
+            provider,
+            tracked_ids=["file-1", "file-2"],
+        )
+
+        changes = await adapter.initial_changes(_mount(), ["file-1", "file-2"])
+
+        assert [change.artifact.source_artifact_id for change in changes] == [
+            "file-1",
+            "file-2",
+        ]
+        assert [change.artifact.display_name for change in changes] == [
+            "Claims.txt",
+            "Prior art.pdf",
+        ]
+        assert [change.revision for change in changes] == ["rev-1", "rev-2"]
+        assert all(change.change_type is ChangeType.CREATE for change in changes)
+        assert provider.export_called is True
+
+    asyncio.run(scenario())
+
+
+def test_initial_changes_reject_files_outside_picker_scope():
+    async def scenario():
+        provider = FakeDriveProvider()
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=["file-1"])
+
+        with pytest.raises(PermissionDeniedError):
+            await adapter.initial_changes(_mount(), ["file-2"])
+
+    asyncio.run(scenario())
+
+
 def test_watch_renewal_persists_channel_and_reconcile_preserves_it():
     async def scenario():
         now = datetime(2026, 8, 21, 12, tzinfo=timezone.utc)

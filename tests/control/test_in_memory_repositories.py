@@ -276,6 +276,10 @@ def test_artifact_change_event_and_risk_unique_keys_are_enforced() -> None:
         duplicate_artifact, duplicate_state = make_artifact("artifact-2", "path:main.py")
         async with store() as uow:
             await uow.artifacts.add(first_artifact, first_state)
+            assert await uow.artifacts.list_for_workspace("vws-1") == (
+                first_artifact,
+            )
+            assert await uow.artifacts.list_for_workspace("other-vws") == ()
             with pytest.raises(UniqueConstraintViolation, match="source artifact identity"):
                 await uow.artifacts.add(duplicate_artifact, duplicate_state)
             await uow.change_events.add(make_change("change-1", "fingerprint-1"))

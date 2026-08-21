@@ -93,6 +93,7 @@ export class SourceApiClient {
     connectionId: string,
     riskWorkspaceId: string,
     selectedFileIds: string[],
+    displayMetadataByFile: Record<string, { name: string }> = {},
   ): Promise<MountCreationResponse> {
     const response = await this.client.request<MountCreationApiResponse>(
       `/api/v1/source-connections/${encodeURIComponent(connectionId)}/drive/mounts`,
@@ -101,7 +102,7 @@ export class SourceApiClient {
         body: JSON.stringify({
           risk_workspace_id: riskWorkspaceId,
           selected_file_ids: selectedFileIds,
-          display_metadata_by_file: {},
+          display_metadata_by_file: displayMetadataByFile,
         }),
       },
     );
@@ -112,6 +113,7 @@ export class SourceApiClient {
     mountId: string,
     riskWorkspaceId: string,
     selectedFileIds: string[],
+    displayMetadataByFile: Record<string, { name: string }> = {},
   ): Promise<MountCreationResponse> {
     const response = await this.client.request<MountCreationApiResponse>(
       `/api/v1/source-mounts/${encodeURIComponent(mountId)}/drive/mounts`,
@@ -120,7 +122,7 @@ export class SourceApiClient {
         body: JSON.stringify({
           risk_workspace_id: riskWorkspaceId,
           selected_file_ids: selectedFileIds,
-          display_metadata_by_file: {},
+          display_metadata_by_file: displayMetadataByFile,
         }),
       },
     );
