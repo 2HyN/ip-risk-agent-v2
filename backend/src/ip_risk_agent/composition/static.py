@@ -13,6 +13,7 @@ API 호출이 404 대신 HTML 을 받아, 프론트엔드에서 "JSON 파싱 실
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 
@@ -49,13 +50,37 @@ def is_reserved(path: str) -> bool:
     )
 
 
-def sources_path(risk_workspace_id: str) -> str:
+def sources_path(
+    risk_workspace_id: str,
+    connection_id: str | None = None,
+    provider: str | None = None,
+) -> str:
     """Source 연결을 마친 뒤 브라우저를 돌려보낼 SPA 경로.
 
-    workspace id 를 그대로 끼워 넣으면 경로 구분자가 섞일 수 있으므로
+    연결만 만들어진 상태로는 아직 감시할 대상이 정해지지 않았다. 화면이
+    저장소·폴더 선택으로 이어가려면 **어떤 연결인지** 알아야 하므로 함께
+    싣는다. id 를 그대로 끼워 넣으면 경로·질의 구분자가 섞일 수 있어
     인코딩한다.
     """
-    return f"/w/{quote(risk_workspace_id, safe='')}/sources"
+    path = f"/w/{quote(risk_workspace_id, safe='')}/sources"
+    params = [
+        (name, value)
+        for name, value in (("connection", connection_id), ("provider", provider))
+        if value
+    ]
+    if not params:
+        return path
+    query = "&".join(f"{name}={quote(value, safe='')}" for name, value in params)
+    return f"{path}?{query}"
+
+
+def connected_redirect(provider: str) -> Callable[[str, str], str]:
+    """provider 콜백이 끝난 뒤 돌아갈 곳을 만든다."""
+
+    def redirect(risk_workspace_id: str, connection_id: str) -> str:
+        return sources_path(risk_workspace_id, connection_id, provider)
+
+    return redirect
 
 
 def install_frontend(app: FastAPI, dist_dir: Path) -> bool:
@@ -99,5 +124,6 @@ __all__ = [
     "RESERVED_PREFIXES",
     "install_frontend",
     "is_reserved",
+    "connected_redirect",
     "sources_path",
 ]

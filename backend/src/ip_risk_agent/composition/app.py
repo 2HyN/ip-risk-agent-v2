@@ -34,7 +34,7 @@ from ip_risk_agent.connectors.local.routes import create_local_desktop_router
 
 from . import authz
 from .container import Container, build_container
-from .static import install_frontend, sources_path
+from .static import connected_redirect, install_frontend
 
 # 어떤 provider 라우터가 왜 빠졌는지 사람이 읽을 수 있게 남긴다.
 SKIP_REASONS = {
@@ -116,7 +116,7 @@ def _mount_drive(
             # provider 가 브라우저를 콜백으로 보낸다. Web UI 가 있으면
             # 원시 JSON 대신 Sources 화면으로 돌려보낸다. 번들이 없는
             # 배포에서는 돌려보낼 화면이 없으므로 JSON 을 유지한다.
-            success_redirect=sources_path if spa else None,
+            success_redirect=connected_redirect("google_drive") if spa else None,
         )
     )
     mounted.append("google_drive:oauth")
@@ -193,7 +193,7 @@ def _mount_github(
             # provider 가 브라우저를 콜백으로 보낸다. Web UI 가 있으면
             # 원시 JSON 대신 Sources 화면으로 돌려보낸다. 번들이 없는
             # 배포에서는 돌려보낼 화면이 없으므로 JSON 을 유지한다.
-            success_redirect=sources_path if spa else None,
+            success_redirect=connected_redirect("github") if spa else None,
         )
     )
     mounted.append("github:install")

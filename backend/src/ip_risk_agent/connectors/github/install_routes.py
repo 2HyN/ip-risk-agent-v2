@@ -43,7 +43,7 @@ def create_github_install_router(
     state_store: OAuthStateStore,
     connection_creation_callback: GitHubConnectionCreationCallback,
     authz_dependency: AuthzDependency = allow_all_authz,
-    success_redirect: Callable[[str], str] | None = None,
+    success_redirect: Callable[[str, str], str] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -80,7 +80,7 @@ def create_github_install_router(
             # provider 가 브라우저를 여기로 보낸다. JSON 을 그대로 두면
             # 사용자가 원시 응답 화면에 갇힌다.
             return RedirectResponse(
-                success_redirect(context["risk_workspace_id"]), status_code=303
+                success_redirect(context["risk_workspace_id"], connection_id), status_code=303
             )
 
         return GitHubInstallCallbackResponse(

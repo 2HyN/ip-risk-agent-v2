@@ -137,14 +137,21 @@ def test_hashed_assets_stay_cacheable(web_client: TestClient) -> None:
     ).headers.get("cache-control", "")
 
 
-def test_oauth_callback_returns_to_the_app_when_the_ui_is_served(dist) -> None:
+def test_oauth_callback_returns_to_the_app_when_the_ui_is_served() -> None:
     """provider 는 브라우저를 콜백으로 보낸다.
 
     JSON 만 돌려주면 사용자가 원시 응답 화면에 갇힌다. Web UI 가 있으면
     Sources 화면으로 돌려보내야 한다.
     """
-    from ip_risk_agent.composition.static import sources_path
+    from ip_risk_agent.composition.static import connected_redirect, sources_path
 
     assert sources_path("workspace_abc") == "/w/workspace_abc/sources"
-    # 경로 구분자가 섞이면 엉뚱한 화면으로 간다.
+    # 경로·질의 구분자가 섞이면 엉뚱한 화면으로 간다.
     assert sources_path("a/b") == "/w/a%2Fb/sources"
+
+    # 연결만 만들어진 상태로는 감시 대상이 아직 없다. 화면이 저장소 선택으로
+    # 이어가려면 어떤 연결인지 알아야 한다.
+    landing = connected_redirect("github")("workspace_abc", "conn:1&x")
+    assert landing == (
+        "/w/workspace_abc/sources?connection=conn%3A1%26x&provider=github"
+    )
