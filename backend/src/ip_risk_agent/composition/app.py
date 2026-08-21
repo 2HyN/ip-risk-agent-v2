@@ -298,6 +298,7 @@ def _mount_source_routers(
             authz_dependency=authz.workspace_scoped(
                 facade.authorize_vws_action, PublicVwsAction.SOURCE_MOUNT
             ),
+            fail_analysis=facade.fail_analysis,
         )
     )
 

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -17,10 +18,14 @@ from ip_risk_agent.application.process_change.models import ChangeEventStatus
 from ip_risk_agent.composition.retry_failed import create_retry_failed_router
 
 
+NOW = datetime.now(UTC)
+
+
 @dataclass
 class Event:
     id: str
     status: ChangeEventStatus
+    updated_at: datetime = NOW
 
 
 @dataclass
@@ -61,10 +66,14 @@ class FakeSink:
         self.persisted.append(change)
 
 
-def build_client(events, relay, sink, authz_calls=None):
+def build_client(events, relay, sink, authz_calls=None, failed_events=None):
     async def authz(request, resource_id: str) -> None:
         if authz_calls is not None:
             authz_calls.append(resource_id)
+
+    async def fail_analysis(change_event_id: str, *, failure_safe: str) -> None:
+        if failed_events is not None:
+            failed_events.append((change_event_id, failure_safe))
 
     uow = FakeUow(change_events=FakeChangeEvents(events))
     app = FastAPI()
@@ -74,6 +83,7 @@ def build_client(events, relay, sink, authz_calls=None):
             change_relay=relay,
             change_sink=sink,
             authz_dependency=authz,
+            fail_analysis=fail_analysis,
         )
     )
     return TestClient(app)
@@ -141,3 +151,49 @@ def test_the_route_is_behind_workspace_authz() -> None:
     client.post("/api/v1/workspaces/vws-1/analyses/retry-failed")
 
     assert calls == ["vws-1"]
+
+
+def test_stale_processing_zombies_are_failed_then_requeued() -> None:
+    """워커가 분석 도중 죽으면 이벤트는 PROCESSING 에 갇힌다.
+
+    그 좀비는 FAILED 필터·재선택·큐 재시도 어디에도 걸리지 않는다 —
+    프롬프트 누락 사고에서 특허 배치가 실제로 그렇게 갇혔다.
+    """
+    failed_calls: list = []
+    sink = FakeSink()
+    client = build_client(
+        [
+            Event(
+                "evt-zombie",
+                ChangeEventStatus.PROCESSING,
+                updated_at=NOW - timedelta(hours=1),
+            ),
+        ],
+        FakeRelay({"evt-zombie": "change-z"}),
+        sink,
+        failed_events=failed_calls,
+    )
+
+    body = client.post("/api/v1/workspaces/vws-1/analyses/retry-failed").json()
+
+    assert failed_calls == [("evt-zombie", "STUCK_PROCESSING")]
+    assert body["requeued"] == 1
+    assert sink.persisted == ["change-z"]
+
+
+def test_recent_processing_is_left_running() -> None:
+    """방금 시작한 분석을 죽이면 안 된다. 오래 머문 것만 좀비로 본다."""
+    failed_calls: list = []
+    sink = FakeSink()
+    client = build_client(
+        [Event("evt-live", ChangeEventStatus.PROCESSING, updated_at=NOW)],
+        FakeRelay({"evt-live": "change-l"}),
+        sink,
+        failed_events=failed_calls,
+    )
+
+    body = client.post("/api/v1/workspaces/vws-1/analyses/retry-failed").json()
+
+    assert failed_calls == []
+    assert body == {"requeued": 0, "expired": 0}
+    assert sink.persisted == []

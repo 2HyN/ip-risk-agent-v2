@@ -15,6 +15,7 @@ FAILED_REQUEUED 경로가 처리하므로 — 성공분(DONE)은 건너뛰고 �
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -31,12 +32,19 @@ class RetryFailedResponse(BaseModel):
     expired: int
 
 
+# 이 시간보다 오래 PROCESSING 에 머문 이벤트는 워커가 도중에 죽은 것으로
+# 본다. 정상 분석은 길어야 수 분이다. 너무 짧게 잡으면 진행 중인 분석을
+# 죽이고, 안 잡으면 좀비가 영원히 남는다.
+STALE_PROCESSING_AFTER = timedelta(minutes=15)
+
+
 def create_retry_failed_router(
     *,
     unit_of_work_factory,
     change_relay,
     change_sink,
     authz_dependency,
+    fail_analysis=None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -52,6 +60,27 @@ def create_retry_failed_router(
         failed = [
             event for event in events if event.status is ChangeEventStatus.FAILED
         ]
+
+        # 워커가 분석 도중 죽으면 이벤트는 FAILED 가 아니라 PROCESSING 에
+        # 갇힌다. 그 좀비는 재시도·재선택·이 버튼의 FAILED 필터 어디에도
+        # 걸리지 않으므로, 오래 머문 것을 FAILED 로 내려 되살린다.
+        if fail_analysis is not None:
+            stale_before = datetime.now(UTC) - STALE_PROCESSING_AFTER
+            for event in events:
+                if event.status is not ChangeEventStatus.PROCESSING:
+                    continue
+                if event.updated_at > stale_before:
+                    continue  # 아직 진행 중일 수 있다. 죽이지 않는다.
+                try:
+                    await fail_analysis(event.id, failure_safe="STUCK_PROCESSING")
+                except Exception:
+                    # 그 사이 상태가 바뀌었을 수 있다. 이 건만 넘어간다.
+                    logger.exception(
+                        "retry-failed: could not fail a stuck event (event=%s)",
+                        event.id,
+                    )
+                    continue
+                failed.append(event)
 
         requeued = 0
         expired = 0

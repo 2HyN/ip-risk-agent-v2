@@ -13,6 +13,8 @@ Intelligence Plane 사이에 직접 호출 경로가 없다는 규칙을 지키�
 
 from __future__ import annotations
 
+import logging
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
@@ -116,11 +118,30 @@ class AnalysisPipeline:
                 change_event_id, True, True, 0, "no_analyzer_supports_artifact"
             )
 
-        accepted = 0
-        for result in await self._intelligence.analyze(artifact):
-            await self._facade.accept_analysis_result(result)
-            accepted += 1
+        try:
+            accepted = 0
+            for result in await self._intelligence.analyze(artifact):
+                await self._facade.accept_analysis_result(result)
+                accepted += 1
+        except Exception:
+            # 분석기 예외를 FAILED 로 남기지 않으면 이벤트가 PROCESSING 에
+            # 갇힌다. FAILED 는 재실행 버튼과 재선택이 되살릴 수 있지만,
+            # PROCESSING 좀비는 어느 경로에도 걸리지 않는다 — 프롬프트 누락
+            # 사고에서 특허 배치가 실제로 그렇게 갇혔다.
+            try:
+                await self._facade.fail_analysis(
+                    change_event_id, failure_safe="ANALYZER_ERROR"
+                )
+            except Exception:  # noqa: BLE001 - 원래 예외를 삼키면 안 된다
+                logger.exception(
+                    "failed to mark the analysis FAILED (event=%s)",
+                    change_event_id,
+                )
+            raise
         return PipelineOutcome(change_event_id, True, True, accepted)
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = ["AnalysisPipeline", "PipelineOutcome", "SourceAdapterLike"]
