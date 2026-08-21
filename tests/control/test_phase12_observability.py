@@ -179,3 +179,75 @@ def test_explicit_host_cors_and_local_rate_limit_hardening() -> None:
 def test_hardening_config_fails_closed(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         ApplicationHardeningConfig(**kwargs)  # type: ignore[arg-type]
+
+
+def test_intake_failure_reason_is_reported_as_a_safe_label():
+    """클래스 이름만으로는 어떤 불변조건이 깨졌는지 알 수 없다.
+
+    배포에서 `SourceChangeIntakeError` 만 보이고 사유가 없어 원인을 좁히지 못했다.
+    메시지가 상수임을 스스로 보장하는 예외만 사유를 내놓는다.
+    """
+    import json
+
+    from ip_risk_agent.application.observability import (
+        ErrorCategory,
+        SafeErrorDescriptor,
+        StructuredLogger,
+    )
+    from ip_risk_agent.application.process_change.service import SourceChangeIntakeError
+
+    written: list[dict] = []
+
+    class Sink:
+        def write(self, record: dict) -> None:
+            written.append(record)
+
+    logger = StructuredLogger(Sink())
+    logger.error(
+        SafeErrorDescriptor(
+            category=ErrorCategory.INVALID_RESPONSE,
+            public_code="safe_error",
+            public_message="Safe error response",
+            diagnostic_code="domain_validation_failed",
+        ),
+        exception=SourceChangeIntakeError(
+            "analysis-bearing ChangeEvent must have exactly one AnalysisJob"
+        ),
+        status_code=422,
+    )
+
+    record = written[-1]
+    assert record["provider_status_category"] == "SourceChangeIntakeError"
+    assert record["diagnostic_reason"].startswith("analysis-bearing-ChangeEvent")
+    # 레이블은 공백을 허용하지 않는다. 직렬화가 깨지면 안 된다.
+    json.dumps(record)
+
+
+def test_an_exception_without_safe_reason_reports_no_reason():
+    """opt-in 이 아닌 예외는 종전과 같다. 임의 메시지를 흘리지 않는다."""
+    from ip_risk_agent.application.observability import (
+        ErrorCategory,
+        SafeErrorDescriptor,
+        StructuredLogger,
+    )
+
+    written: list[dict] = []
+
+    class Sink:
+        def write(self, record: dict) -> None:
+            written.append(record)
+
+    StructuredLogger(Sink()).error(
+        SafeErrorDescriptor(
+            category=ErrorCategory.INTERNAL,
+            public_code="safe_error",
+            public_message="Safe error response",
+            diagnostic_code="unexpected_control_error",
+        ),
+        exception=ValueError("token=secret-value-should-not-appear"),
+        status_code=500,
+    )
+
+    record = written[-1]
+    assert "diagnostic_reason" not in record
+    assert "secret-value-should-not-appear" not in str(record)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -14,6 +16,8 @@ from ip_risk_agent.intelligence.common.errors import IntelligenceError
 from ip_risk_agent.core.common import DomainInvariantError
 
 from .analyzer_completeness import AnalyzerCompletenessError
+
+logger = logging.getLogger(__name__)
 from .providers import ProviderRegistryError, SourceAdapterRegistry
 
 
@@ -189,6 +193,24 @@ class AnalysisPipeline:
         safe_code: str,
         retryable: bool,
     ) -> PipelineResult:
+        # 실패 코드는 canonical 기록에만 남아 있었다. 배포에서 화면은 FAILED 인데
+        # 로그에는 아무것도 없어 분류를 되짚을 수 없었다. 코드는 개발자가 쓴
+        # 상수이므로 그대로 남긴다.
+        logger.info(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "event": "analysis_pipeline_failed",
+                    "analysis_job_id": analysis_job_id,
+                    "event_id": change_event_id,
+                    "failure_safe": safe_code,
+                    "retryable": retryable,
+                },
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
         await self._control.fail_analysis(
             change_event_id,
             failure_safe=safe_code,

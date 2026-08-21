@@ -43,6 +43,18 @@ def _safe_label(value: str | None, field_name: str) -> str | None:
     return value
 
 
+def _slug(value: object) -> str | None:
+    """사유를 안전한 레이블로 정규화한다.
+
+    레이블은 공백을 허용하지 않으므로 허용 문자 외에는 `-` 로 바꾸고 길이를 자른다.
+    값 자체가 상수인 것은 호출부가 보장한다.
+    """
+    if not isinstance(value, str):
+        return None
+    slug = re.sub(r"[^A-Za-z0-9._:@+-]+", "-", value).strip("-")[:127]
+    return slug or None
+
+
 @dataclass(frozen=True, slots=True)
 class CorrelationIds:
     request_id: str | None = None
@@ -113,6 +125,7 @@ class StructuredLogger:
         prompt_version: str | None = None,
         error_category: ErrorCategory | None = None,
         diagnostic_code: str | None = None,
+        diagnostic_reason: str | None = None,
         status_code: int | None = None,
     ) -> None:
         record: dict[str, object] = {
@@ -129,6 +142,7 @@ class StructuredLogger:
             "model_version": model_version,
             "prompt_version": prompt_version,
             "diagnostic_code": diagnostic_code,
+            "diagnostic_reason": diagnostic_reason,
         }
         for field_name, value in labels.items():
             try:
@@ -162,14 +176,19 @@ class StructuredLogger:
         correlation: CorrelationIds | None = None,
         status_code: int | None = None,
     ) -> None:
-        # Only the exception class name is diagnostic.  str(exception), args,
-        # traceback locals, and provider payloads are deliberately excluded.
+        # str(exception), args, traceback locals, provider payloads 은 그대로
+        # 제외한다. 다만 클래스 이름만으로는 "어떤 불변조건이 깨졌는지" 를 알 수
+        # 없어 배포에서 원인을 좁히지 못했다. 그래서 **메시지가 개발자가 쓴 상수임을
+        # 스스로 보장하는 예외**만 `safe_reason` 으로 사유를 내놓게 하고, 그것도
+        # 슬러그로 정규화해 싣는다. opt-in 이 아닌 예외는 종전과 같다.
         exception_type = None if exception is None else type(exception).__name__
+        reason = None if exception is None else getattr(exception, "safe_reason", None)
         self.event(
             "control_error",
             correlation=correlation,
             error_category=descriptor.category,
             diagnostic_code=descriptor.diagnostic_code,
+            diagnostic_reason=_slug(reason),
             provider_status_category=exception_type,
             status_code=status_code,
         )

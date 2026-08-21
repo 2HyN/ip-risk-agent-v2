@@ -60,7 +60,16 @@ class SourceChangeDisposition(StrEnum):
 
 
 class SourceChangeIntakeError(DomainInvariantError):
-    pass
+    """이 예외의 메시지는 모두 개발자가 쓴 상수다.
+
+    그래서 진단 로그에 사유를 노출해도 사용자 데이터나 provider 페이로드가 새지
+    않는다. 클래스 이름만 남기면 어떤 불변조건이 깨졌는지 알 수 없어 배포에서
+    원인을 좁힐 수 없었다.
+    """
+
+    @property
+    def safe_reason(self) -> str:
+        return str(self)
 
 
 @dataclass(frozen=True, slots=True)
