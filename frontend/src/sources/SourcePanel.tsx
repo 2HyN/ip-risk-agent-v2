@@ -11,9 +11,13 @@
  *
  * 화면은 두 단계다. **연결**(OAuth/App 설치)이 끝나면 provider 가 브라우저를
  * 콜백으로 보내고, 백엔드가 `?connection=&provider=` 를 붙여 이 화면으로
- * 돌려보낸다. 그때부터가 **감시 대상 선택**이다. 연결만으로는 아무것도
- * 감시하지 않으므로 이 단계를 건너뛰면 사용자는 "연결했는데 아무 일도
- * 없다"는 상태에 놓인다.
+ * 돌려보낸다. 그때부터가 **감시 대상 선택**이다.
+ *
+ * 선택 단계는 URL 질의에만 두면 안 된다. 사용자가 GitHub 설정 페이지를
+ * 다녀오거나, 새로고침하거나, 앱 안에서 다른 화면을 들렀다 오면 질의가
+ * 사라진다. 연결은 서버에 멀쩡히 살아 있는데 화면만 그것을 잊어버려,
+ * "연결했는데 고를 방법이 없는" 상태에 갇힌다. 그래서 진행 중인 선택을
+ * sessionStorage 에 남겨 두고, Mount 를 만들거나 사용자가 취소할 때 지운다.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -33,6 +37,48 @@ export type SourcePanelProps = {
   apiBaseUrl?: string;
 };
 
+type PendingConnection = {
+  connectionId: string;
+  provider: string;
+};
+
+/** 워크스페이스마다 따로 둔다. 다른 VWS 의 선택 단계가 새어 오면 안 된다. */
+function pendingKey(workspaceId: string): string {
+  return `iprisk:pending-connection:${workspaceId}`;
+}
+
+function readPending(workspaceId: string): PendingConnection | null {
+  try {
+    const raw = sessionStorage.getItem(pendingKey(workspaceId));
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      typeof (parsed as PendingConnection).connectionId === "string" &&
+      typeof (parsed as PendingConnection).provider === "string"
+    ) {
+      return parsed as PendingConnection;
+    }
+  } catch {
+    // storage 접근이 막힌 환경(사생활 보호 모드 일부)에서는 질의 기반으로만
+    // 동작한다. 기능이 죽는 것보다 낫다.
+  }
+  return null;
+}
+
+function writePending(workspaceId: string, value: PendingConnection | null): void {
+  try {
+    if (value === null) {
+      sessionStorage.removeItem(pendingKey(workspaceId));
+    } else {
+      sessionStorage.setItem(pendingKey(workspaceId), JSON.stringify(value));
+    }
+  } catch {
+    // 위와 같은 이유로 조용히 넘어간다.
+  }
+}
+
 export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
   const { workspace } = useWorkspace();
   const platform = useMemo(() => detectPlatformAdapter(), []);
@@ -47,6 +93,9 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
   const [mounts, setMounts] = useState<Mount[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingConnection | null>(() =>
+    readPending(workspace.id),
+  );
 
   const refresh = useCallback(async () => {
     setListError(null);
@@ -65,19 +114,39 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
     void refresh();
   }, [refresh]);
 
-  // provider 콜백이 남긴 값. 이 연결로 무엇을 감시할지 이어서 고른다.
-  const connectionId = searchParams.get("connection");
-  const provider = searchParams.get("provider");
+  // 워크스페이스를 오가면 그 워크스페이스의 진행 상태를 다시 읽는다.
+  useEffect(() => {
+    setPending(readPending(workspace.id));
+  }, [workspace.id]);
+
+  // 콜백이 남긴 질의를 durable 한 진행 상태로 승격시킨다. 질의는 새로고침과
+  // 화면 이동에서 살아남지 못하므로 URL 은 진실의 원본이 될 수 없다.
+  useEffect(() => {
+    const connectionId = searchParams.get("connection");
+    const provider = searchParams.get("provider");
+    if (!connectionId || !provider) return;
+
+    const next = { connectionId, provider };
+    writePending(workspace.id, next);
+    setPending(next);
+
+    // 저장했으니 URL 은 정리한다. 남겨 두면 이 주소를 북마크하거나 공유했을
+    // 때 이미 끝난 선택 화면이 다시 뜬다.
+    const cleaned = new URLSearchParams(searchParams);
+    cleaned.delete("connection");
+    cleaned.delete("provider");
+    setSearchParams(cleaned, { replace: true });
+  }, [searchParams, setSearchParams, workspace.id]);
+
+  const clearPending = useCallback(() => {
+    writePending(workspace.id, null);
+    setPending(null);
+  }, [workspace.id]);
 
   const finishConnecting = useCallback(() => {
-    // 선택이 끝나면 질의를 지운다. 남겨 두면 새로고침할 때마다 이미 끝난
-    // 선택 화면이 다시 뜬다.
-    const next = new URLSearchParams(searchParams);
-    next.delete("connection");
-    next.delete("provider");
-    setSearchParams(next, { replace: true });
+    clearPending();
     void refresh();
-  }, [refresh, searchParams, setSearchParams]);
+  }, [clearPending, refresh]);
 
   return (
     <div className="content">
@@ -91,13 +160,20 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
 
       <ConnectedSourceList mounts={mounts} loading={loading} error={listError} />
 
-      {connectionId && provider === "github" ? (
-        <GithubRepositoryPicker
-          api={sourcesApi}
-          connectionId={connectionId}
-          riskWorkspaceId={workspace.id}
-          onMounted={finishConnecting}
-        />
+      {pending?.provider === "github" ? (
+        <>
+          <GithubRepositoryPicker
+            api={sourcesApi}
+            connectionId={pending.connectionId}
+            riskWorkspaceId={workspace.id}
+            onMounted={finishConnecting}
+          />
+          <p>
+            <button type="button" onClick={clearPending}>
+              저장소 선택 그만두기
+            </button>
+          </p>
+        </>
       ) : (
         <>
           <AddSourceChooser
@@ -111,12 +187,15 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
         </>
       )}
 
-      {connectionId && provider === "google_drive" && (
+      {pending?.provider === "google_drive" && (
         // Drive 는 파일 선택에 Google Picker 가 필요하다. 아직 붙이지 않았다.
         // 연결은 만들어졌으므로 그 사실만은 정확히 알린다.
         <p>
-          Google Drive 연결은 만들어졌지만, 폴더를 고르는 화면이 아직
-          준비되지 않았습니다.
+          Google Drive 연결은 만들어졌지만, 폴더를 고르는 화면이 아직 준비되지
+          않았습니다.{" "}
+          <button type="button" onClick={clearPending}>
+            확인
+          </button>
         </p>
       )}
     </div>
