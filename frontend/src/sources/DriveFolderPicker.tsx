@@ -90,6 +90,10 @@ const openGooglePicker: PickFiles = async ({ accessToken, apiKey, appId }) => {
     // appId 는 drive.file 접근 허가를 이 앱(프로젝트)으로 귀속시킨다.
     // 없으면 고른 파일이 앱에 열리지 않아, 선택은 됐는데 수집이 막힌다.
     if (appId) builder.setAppId(appId);
+    // Picker 는 Google 도메인의 iframe 에서 돈다. origin 을 명시해야 키의
+    // referrer 검증이 이 페이지 기준으로 이뤄진다. 빼면 키에 referrer
+    // 제한을 걸었을 때 "developer key is invalid" 로 거부된다.
+    builder.setOrigin(window.location.origin);
     builder.build().setVisible(true);
   });
 };
