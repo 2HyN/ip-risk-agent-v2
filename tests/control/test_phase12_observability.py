@@ -251,3 +251,37 @@ def test_an_exception_without_safe_reason_reports_no_reason():
     record = written[-1]
     assert "diagnostic_reason" not in record
     assert "secret-value-should-not-appear" not in str(record)
+
+
+def test_any_domain_invariant_reports_its_reason() -> None:
+    """불변조건 위반은 121 곳에서 올라온다.
+
+    클래스 이름만 남기면 전부 하나로 뭉뚱그려져 배포에서 원인을 좁힐 수 없다.
+    이 예외의 메시지는 불변조건과 필드 이름만 담고 값은 담지 않으므로 노출해도
+    안전하다.
+    """
+    from ip_risk_agent.application.observability import (
+        ErrorCategory,
+        SafeErrorDescriptor,
+        StructuredLogger,
+    )
+    from ip_risk_agent.core.common import DomainInvariantError
+
+    written: list[dict] = []
+
+    class Sink:
+        def write(self, record: dict) -> None:
+            written.append(record)
+
+    StructuredLogger(Sink()).error(
+        SafeErrorDescriptor(
+            category=ErrorCategory.INVALID_RESPONSE,
+            public_code="safe_error",
+            public_message="Safe error response",
+            diagnostic_code="domain_validation_failed",
+        ),
+        exception=DomainInvariantError("result revision is no longer canonical latest"),
+        status_code=422,
+    )
+
+    assert written[-1]["diagnostic_reason"] == "result-revision-is-no-longer-canonical-latest"

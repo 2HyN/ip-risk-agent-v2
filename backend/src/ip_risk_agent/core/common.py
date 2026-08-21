@@ -12,7 +12,20 @@ from typing import Iterable, Mapping
 
 
 class DomainInvariantError(ValueError):
-    """Raised when constructing or transitioning an invalid domain value."""
+    """Raised when constructing or transitioning an invalid domain value.
+
+    메시지는 **불변조건과 필드 이름만** 담는다. 값은 담지 않는다 — 보간하는 경우도
+    `field_name` 처럼 개발자가 쓴 상수뿐이다. 그 성질 덕분에 진단 로그에 사유를
+    노출해도 사용자 데이터나 provider 페이로드가 새지 않는다.
+
+    클래스 이름만 남기면 121 곳의 서로 다른 불변조건이 하나로 뭉뚱그려져 배포에서
+    원인을 좁힐 수 없다. 실제로 `CONTRACT:CANONICAL_INTAKE_REJECTED` 만 보고 세 번
+    추측해야 했다. 새 메시지를 쓸 때도 값이 아니라 이름을 쓴다.
+    """
+
+    @property
+    def safe_reason(self) -> str:
+        return str(self)
 
 
 class ActorType(StrEnum):

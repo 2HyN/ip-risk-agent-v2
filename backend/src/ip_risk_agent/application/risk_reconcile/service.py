@@ -88,10 +88,6 @@ class AnalysisResultIntakeError(DomainInvariantError):
     원인을 좁힐 수 없었다.
     """
 
-    @property
-    def safe_reason(self) -> str:
-        return str(self)
-
 
 @dataclass(frozen=True, slots=True)
 class AnalysisResultAcceptance:
