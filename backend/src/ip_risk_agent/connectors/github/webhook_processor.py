@@ -122,6 +122,7 @@ class GitHubWebhookProcessor:
                     change_type = ChangeType.UPDATE
 
                 fingerprint = github_change_fingerprint(
+                    mount_id=scope.mount_id,
                     repository_id=repository_id,
                     tracked_branch=branch,
                     commit_sha=sha,

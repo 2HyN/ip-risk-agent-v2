@@ -31,22 +31,40 @@ def compute_fingerprint(*parts: str) -> str:
 
 def github_change_fingerprint(
     *,
+    mount_id: str,
     repository_id: str,
     tracked_branch: str,
     commit_sha: str,
     changed_path: str,
 ) -> str:
-    """Agent 2 Spec 20번: repo + tracked branch + commit SHA + changed path."""
+    """repo + tracked branch + commit SHA + changed path, **mount 범위 안에서**.
+
+    mount 를 넣지 않으면 같은 repository 를 두 Risk Workspace 에 연결했을 때 두
+    mount 가 같은 fingerprint 를 만든다. canonical intake 는 fingerprint 로 기존
+    ChangeEvent 를 찾은 뒤 workspace/mount 일치를 요구하므로 그대로 실패한다.
+    Local 은 처음부터 mount 를 포함하고 있었다.
+    """
 
     return compute_fingerprint(
-        "GITHUB", repository_id, tracked_branch, commit_sha, changed_path
+        "GITHUB", mount_id, repository_id, tracked_branch, commit_sha, changed_path
     )
 
 
-def drive_change_fingerprint(*, file_id: str, resolved_revision: str) -> str:
-    """Agent 2 Spec 12번: file_id + resolved revision/version."""
+def drive_change_fingerprint(
+    *, mount_id: str, file_id: str, resolved_revision: str
+) -> str:
+    """file_id + resolved revision/version, **mount 범위 안에서**.
 
-    return compute_fingerprint("GOOGLE_DRIVE", file_id, resolved_revision)
+    mount 를 넣지 않으면 같은 Drive 파일이 어느 workspace 에 붙든 같은 fingerprint
+    가 된다. 그래서 한 번 분석한 파일은 **다른 workspace 에서 다시 연결할 수
+    없었다** — 운영에서 mount 는 만들어지고 초기 스캔의 intake 가
+    SourceChangeIntakeError 로 422 를 냈다.
+
+    같은 mount 안에서의 중복 전달(webhook 재시도 + reconciliation)은 여전히 같은
+    fingerprint 로 수렴하므로 멱등성은 그대로다.
+    """
+
+    return compute_fingerprint("GOOGLE_DRIVE", mount_id, file_id, resolved_revision)
 
 
 def local_change_fingerprint(

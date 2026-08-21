@@ -253,6 +253,7 @@ class GoogleDriveAdapter:
                 drive_file = provider.get_file(file_id)
                 revision = drive_file.revision_id or drive_file.modified_time or "unknown"
                 fingerprint = drive_change_fingerprint(
+                    mount_id=mount.mount_id,
                     file_id=file_id,
                     resolved_revision=revision,
                 )
@@ -366,7 +367,9 @@ class GoogleDriveAdapter:
                 continue
             change_type = ChangeType.DELETE if item.removed else ChangeType.UPDATE
             revision = item.revision_id or "unknown"
-            fingerprint = drive_change_fingerprint(file_id=item.file_id, resolved_revision=revision)
+            fingerprint = drive_change_fingerprint(
+                mount_id=mount.mount_id, file_id=item.file_id, resolved_revision=revision
+            )
             changes.append(
                 SourceChange(
                     contract_version="1",

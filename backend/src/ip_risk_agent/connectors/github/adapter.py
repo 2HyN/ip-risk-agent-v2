@@ -192,6 +192,7 @@ class GitHubAdapter:
             if is_denied_by_ipriskignore(file.path, ignored):
                 continue
             fingerprint = github_change_fingerprint(
+                mount_id=mount.mount_id,
                 repository_id=repository_id,
                 tracked_branch=scope.tracked_branch,
                 commit_sha=file.sha,
