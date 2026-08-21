@@ -101,7 +101,14 @@ async def test_a_folder_expands_to_every_file_inside_recursively() -> None:
 
     assert {f.file_id for f in files} == {"doc-1", "doc-2", "doc-3"}
     # 폴더 자체는 감시 목록에 남지 않는다. 내용이 없어 분석할 수 없다.
-    assert all(f.mime_type != FOLDER for f in files)
+    assert all(f.file.mime_type != FOLDER for f in files)
+    # 경로가 없으면 페르소나 폴더마다 있는 같은 이름의 파일을 구분할 수 없다.
+    # 직접 고른 폴더 이름은 빼고, 하위 폴더부터 경로에 남긴다.
+    assert {f.path for f in files} == {
+        "페르소나.docx",
+        "v1/요구사항.md",
+        "v1/회의록.txt",
+    }
 
 
 @pytest.mark.asyncio

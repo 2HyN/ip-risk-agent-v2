@@ -15,12 +15,30 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from ip_risk_agent.connectors.common.errors import SourceConnectorError
 
 logger = logging.getLogger(__name__)
 
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+
+
+@dataclass(frozen=True, slots=True)
+class ExpandedFile:
+    """확장 결과 하나. 파일 메타데이터에 **폴더 상대 경로**를 붙인다.
+
+    파일 이름만 남기면 페르소나 폴더마다 있는 requirements.txt 가 화면에서
+    전부 같은 이름으로 보여, 어느 폴더의 위반인지 알 수 없게 된다. 경로는
+    걷는 동안만 알 수 있으므로 여기서 붙여서 내보낸다.
+    """
+
+    file: object
+    path: str
+
+    @property
+    def file_id(self) -> str:
+        return self.file.file_id
 
 # 폭주 방지. 사용자가 계정 루트급 폴더를 고르면 수천 파일이 쏟아질 수 있다.
 # 잘라낸 사실은 반드시 로그로 남긴다 — 조용히 자르면 "전부 검사했다"로 읽힌다.
@@ -46,10 +64,17 @@ class DriveSelectionExpander:
         raw_token = await self._credential_vault.get(credential_ref)
         provider = self._provider_factory.create(json.loads(raw_token))
 
-        files: dict[str, object] = {}
+        files: dict[str, ExpandedFile] = {}
         truncated = False
 
-        def walk(file_id: str, depth: int) -> None:
+        def keep(file, path: str) -> None:
+            # 폴더와 개별 파일을 함께 골랐을 때는 경로가 있는 쪽(폴더 내부)이
+            # 더 많은 정보를 담는다.
+            existing = files.get(file.file_id)
+            if existing is None or ("/" in path and "/" not in existing.path):
+                files[file.file_id] = ExpandedFile(file=file, path=path)
+
+        def walk(file_id: str, depth: int, prefix: str) -> None:
             nonlocal truncated
             if len(files) >= MAX_FILES:
                 truncated = True
@@ -62,7 +87,7 @@ class DriveSelectionExpander:
                 logger.warning("selection expand: lookup failed for one item")
                 return
             if file.mime_type != FOLDER_MIME_TYPE:
-                files[file.file_id] = file
+                keep(file, f"{prefix}{file.name}" if prefix else file.name)
                 return
             if depth >= MAX_DEPTH:
                 truncated = True
@@ -72,6 +97,9 @@ class DriveSelectionExpander:
             except SourceConnectorError:
                 logger.warning("selection expand: folder listing failed")
                 return
+            # 직접 고른 폴더 이름은 경로에 넣지 않는다. Mount alias 가 이미
+            # 그 맥락을 담고, 하위 폴더부터가 파일을 구분해 주는 정보다.
+            child_prefix = prefix if depth == 0 else f"{prefix}{file.name}/"
             # 이름순으로 걷는다. 같은 폴더면 같은 목록·같은 순서가 나와야
             # Mount 식별 키가 재시도에도 안정적이다.
             for child in sorted(children, key=lambda item: (item.name, item.file_id)):
@@ -79,12 +107,12 @@ class DriveSelectionExpander:
                     truncated = True
                     return
                 if child.mime_type == FOLDER_MIME_TYPE:
-                    walk(child.file_id, depth + 1)
+                    walk(child.file_id, depth + 1, child_prefix)
                 else:
-                    files[child.file_id] = child
+                    keep(child, f"{child_prefix}{child.name}")
 
         for file_id in selected_file_ids:
-            walk(file_id, 0)
+            walk(file_id, 0, "")
 
         if truncated:
             logger.warning(
@@ -100,4 +128,10 @@ class DriveSelectionExpander:
         return list(files.values())
 
 
-__all__ = ["DriveSelectionExpander", "FOLDER_MIME_TYPE", "MAX_DEPTH", "MAX_FILES"]
+__all__ = [
+    "DriveSelectionExpander",
+    "ExpandedFile",
+    "FOLDER_MIME_TYPE",
+    "MAX_DEPTH",
+    "MAX_FILES",
+]

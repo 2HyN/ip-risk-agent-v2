@@ -125,6 +125,7 @@ class Container:
     github: GitHubProviderBundle | None = field(default=None)
     bindings: Any | None = field(default=None)
     drive_selection_expander: Any | None = field(default=None)
+    drive_initial_scanner: Any | None = field(default=None)
 
     @property
     def backend(self) -> str:
@@ -370,8 +371,8 @@ def build_container(
     )
     github = build_github_bundle(settings, bindings=bindings)
 
-    drive_scanner = None
     drive_selection_expander = None
+    drive_initial_scanner = None
     if drive is not None:
         from .drive_selection import DriveSelectionExpander  # noqa: PLC0415
         from .initial_scan import DriveInitialScanner  # noqa: PLC0415
@@ -381,10 +382,7 @@ def build_container(
             credential_vault=source_ports.credential_vault,
             provider_factory=drive.provider_factory,
         )
-        drive_scanner = DriveInitialScanner(
-            connection_lookup=drive.connection_lookup,
-            credential_vault=source_ports.credential_vault,
-            provider_factory=drive.provider_factory,
+        drive_initial_scanner = DriveInitialScanner(
             change_sink=source_ports.change_sink,
         )
 
@@ -393,7 +391,6 @@ def build_container(
         connections=connections,
         devices=devices,
         bindings=bindings,
-        drive_scanner=drive_scanner,
     )
 
     return Container(
@@ -410,6 +407,7 @@ def build_container(
         github=github,
         bindings=bindings,
         drive_selection_expander=drive_selection_expander,
+        drive_initial_scanner=drive_initial_scanner,
     )
 
 

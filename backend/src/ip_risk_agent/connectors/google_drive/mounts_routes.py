@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Protocol
 
 from collections.abc import Sequence
@@ -15,6 +16,8 @@ from ..common.credential_vault import SourceCredentialVault
 from ..common.errors import NotFoundError, SourceConnectorError
 from .connection_lookup import DriveConnectionCredentialLookup
 from .tracking_scope import DriveTrackingScope
+
+logger = logging.getLogger(__name__)
 
 
 class DriveProviderFactory(Protocol):
@@ -31,6 +34,19 @@ class SelectionExpander(Protocol):
     async def expand(
         self, connection_id: str, selected_file_ids: list[str]
     ) -> Sequence: ...
+
+
+class InitialScan(Protocol):
+    """확장된 파일들을 분석 파이프라인에 넣는다 (기존 파일 초기 분석)."""
+
+    async def __call__(
+        self,
+        *,
+        risk_workspace_id: str,
+        mount_id: str,
+        source_workspace_id: str,
+        files: Sequence,
+    ) -> int: ...
 
 
 class PickerSessionResponse(BaseModel):
@@ -77,6 +93,7 @@ def create_drive_mounts_router(
     picker_api_key: str | None = None,
     picker_app_id: str | None = None,
     selection_expander: SelectionExpander | None = None,
+    initial_scan: InitialScan | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -122,13 +139,19 @@ def create_drive_mounts_router(
 
         selected_file_ids = body.selected_file_ids
         display_metadata = dict(body.display_metadata_by_file)
+        files: Sequence = ()
         if selection_expander is not None:
             files = await selection_expander.expand(
                 connection_id, body.selected_file_ids
             )
             selected_file_ids = [f.file_id for f in files]
             for f in files:
-                display_metadata.setdefault(f.file_id, {"name": f.name})
+                # 경로가 이름을 이긴다. 폴더마다 있는 같은 이름의 파일을
+                # 이름만으로는 구분할 수 없다.
+                display_metadata[f.file_id] = {
+                    **display_metadata.get(f.file_id, {}),
+                    "name": f.path,
+                }
             if not selected_file_ids:
                 raise HTTPException(
                     status_code=409,
@@ -155,6 +178,23 @@ def create_drive_mounts_router(
                 display_metadata_by_file=display_metadata,
             ),
         )
+
+        if initial_scan is not None and files:
+            # 이미 있던 파일에는 변경 이벤트가 오지 않는다. 여기서 파이프라인에
+            # 넣지 않으면 "기획서가 있는데 위험이 안 뜨는" 상태가 된다.
+            # Mount 는 이미 만들어진 사실이므로 스캔 실패가 생성 성공을
+            # 실패로 둔갑시키면 안 된다.
+            try:
+                await initial_scan(
+                    risk_workspace_id=body.risk_workspace_id,
+                    mount_id=result.server_mount_id,
+                    source_workspace_id=result.source_workspace_id,
+                    files=files,
+                )
+            except Exception:
+                logger.exception(
+                    "drive initial scan failed (mount=%s)", result.server_mount_id
+                )
 
         return result
 
