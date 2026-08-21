@@ -34,6 +34,7 @@ from ip_risk_agent.gcp_contract import (
     WORKER_BASE_URL,
     WORKER_SERVICE_ACCOUNT,
 )
+from ip_risk_agent.intelligence.license.reference_gate import CORPUS_SUBJECT_COVERAGE
 from ip_risk_agent.persistence.core_firestore.schema import REQUIRED_COMPOSITE_INDEXES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -197,6 +198,7 @@ def validate(root: Path = ROOT) -> list[str]:
         errors.append("Docker build context must not re-include environment files")
 
     _validate_wheel_package_data(root, errors)
+    _validate_rag_subject_coverage(root, errors)
 
     indexes = json.loads((deploy / "firestore.indexes.json").read_text("utf-8"))
     actual = {
@@ -632,6 +634,35 @@ def _condition_resource(expression: object) -> str | None:
     if not expression.startswith(prefix) or not expression.endswith('"'):
         return None
     return expression[len(prefix) : -1]
+
+
+def _validate_rag_subject_coverage(root: Path, errors: list[str]) -> None:
+    """RAG 참조 게이트의 주제 표가 corpus manifest 와 일치하는지 확인한다.
+
+    ``rag-corpus/`` 는 런타임 이미지에 없으므로 커버리지 표는 코드가 들고 있다.
+    표와 manifest 가 어긋나면 게이트가 조용히 잘못 판정한다 — 관련 문서를
+    버리거나, 더 나쁘게는 관련 없는 문서를 통과시킨다.
+    """
+    manifest_path = root / "rag-corpus" / "manifest.yaml"
+    if not manifest_path.is_file():
+        return
+    document = yaml.safe_load(manifest_path.read_text("utf-8")) or {}
+    declared = {
+        str(source["source_id"]): frozenset(source.get("covers") or ())
+        for source in document.get("sources", ())
+        if source.get("approved_for_rag")
+    }
+    if declared != CORPUS_SUBJECT_COVERAGE:
+        errors.append(
+            "RAG subject coverage mismatch between manifest and "
+            "intelligence.license.reference_gate.CORPUS_SUBJECT_COVERAGE"
+        )
+    empty = sorted(name for name, covers in declared.items() if not covers)
+    if empty:
+        errors.append(
+            "approved RAG sources must declare the licenses they cover: "
+            + ", ".join(empty)
+        )
 
 
 def _validate_wheel_package_data(root: Path, errors: list[str]) -> None:

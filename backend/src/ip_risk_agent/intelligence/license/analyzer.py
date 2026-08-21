@@ -24,6 +24,7 @@ from ..common.evidence import package_metadata_id, rag_chunk_id
 from ..common.validation import validate_artifact
 from . import lockfiles, manifests, policy, spdx
 from .dependency_models import DependencyDeclaration, DependencySet, Ecosystem
+from . import reference_gate
 from .explanation import LicenseExplainer, ReferenceRetriever, reference_query
 from .package_metadata import PackageMetadataProvider
 
@@ -206,8 +207,16 @@ class LicenseAnalyzer:
             builder.record_failure(failure)
             return True
 
+        # 임베딩 검색은 관련 문서가 없어도 항상 top_k 개를 돌려준다. 주제가 맞는
+        # 것만 남긴다 — 근거가 없는 것보다 틀린 근거가 붙는 것이 나쁘다.
+        relevant = reference_gate.select_relevant(chunks, expression)
+        if not relevant:
+            # 참조를 못 붙였다는 것이 실패는 아니다. 근거 없이 policy 고정 문구로
+            # 간다. corpus 커버리지 밖의 라이선스에서는 정상 경로다.
+            return False
+
         versions["rag_corpus_version"] = self._retriever.corpus_version
-        for chunk in chunks:
+        for chunk in relevant:
             evidence_ids.append(
                 builder.ledger.add(
                     rag_chunk_id(chunk.source_id, chunk.chunk_id),
@@ -226,7 +235,7 @@ class LicenseAnalyzer:
                 package=declaration.name,
                 license_expression=expression,
                 outcome=outcome,
-                references=chunks,
+                references=relevant,
             )
         except ProviderFailureError as failure:
             builder.record_failure(failure)

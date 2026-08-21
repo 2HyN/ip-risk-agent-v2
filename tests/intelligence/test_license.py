@@ -84,7 +84,7 @@ class FakeRetriever:
     def __init__(self, chunks: list[ReferenceChunk] | None = None, *, fail: bool = False):
         self._chunks = chunks or [
             ReferenceChunk(
-                source_id="spdx",
+                source_id="agpl-3.0-obligations",
                 chunk_id="agpl-3.0:obligations",
                 text="네트워크를 통해 서비스를 제공하는 경우에도 소스코드를 제공해야 한다.",
                 canonical_reference="https://spdx.org/licenses/AGPL-3.0-only.html",

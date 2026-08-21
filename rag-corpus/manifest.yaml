@@ -12,6 +12,9 @@ sources:
   - license
   - obligation
   approved_for_rag: true
+  covers:
+  - AGPL-3.0-only
+  - AGPL-3.0-or-later
 - source_id: lgpl-2.1-obligations
   version: '2026-08-14'
   source_type: OBLIGATION_GUIDE
@@ -23,6 +26,9 @@ sources:
   - license
   - obligation
   approved_for_rag: true
+  covers:
+  - LGPL-2.1-only
+  - LGPL-2.1-or-later
 - source_id: permissive-notice
   version: '2026-08-14'
   source_type: OBLIGATION_GUIDE
@@ -34,3 +40,9 @@ sources:
   - license
   - obligation
   approved_for_rag: true
+  covers:
+  - MIT
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - Apache-2.0
+  - ISC

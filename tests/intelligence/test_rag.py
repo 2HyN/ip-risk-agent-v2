@@ -32,14 +32,14 @@ CORPUS_ROOT = Path(__file__).resolve().parents[2] / "rag-corpus"
 
 CHUNKS = [
     ReferenceChunk(
-        "spdx",
+        "agpl-3.0-obligations",
         "agpl:network",
         "네트워크를 통해 서비스를 제공하는 경우에도 소스코드를 제공해야 한다.",
         "https://spdx.org/licenses/AGPL-3.0-only.html",
         {"family": "gpl"},
     ),
     ReferenceChunk(
-        "spdx",
+        "permissive-notice",
         "mit:notice",
         "배포물에 라이선스 사본과 저작권 고지를 포함한다.",
         "https://spdx.org/licenses/MIT.html",
@@ -220,4 +220,9 @@ def test_facade_runs_license_analysis_with_rag_evidence():
     results = asyncio.run(facade.analyze(artifact))
     assert len(results) == 1
     assert results[0].versions.rag_corpus_version == "2026-08-14.1"
-    assert any(e.evidence_id.startswith("rag:") for e in results[0].evidence)
+    rag_evidence = [e.evidence_id for e in results[0].evidence if e.evidence_id.startswith("rag:")]
+    assert rag_evidence
+    # AGPL 분석이므로 AGPL 문서만 근거로 붙는다. 검색이 함께 돌려준 MIT 고지
+    # 문서는 주제가 달라 제외되어야 한다 — 틀린 근거는 없는 것보다 나쁘다.
+    assert any("agpl" in e for e in rag_evidence)
+    assert not any("mit:notice" in e for e in rag_evidence)

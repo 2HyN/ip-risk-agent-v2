@@ -35,6 +35,9 @@ class CorpusSource(BaseModel):
     canonical_reference: str
     checksum: str
     tags: list[str] = Field(default_factory=list)
+    # 이 문서가 실제로 다루는 SPDX 식별자. 참조 게이트가 주제 일치를 판정할 때
+    # 쓰며, 배포 validator 가 코드의 커버리지 표와 교차 검증한다.
+    covers: list[str] = Field(default_factory=list)
     jurisdiction: str | None = None
     approved_for_rag: bool = False
     path: str | None = None
