@@ -50,6 +50,7 @@ from ip_risk_agent.gcp.operational_firestore import (
     FirestoreRuntimeStore,
 )
 from ip_risk_agent.intelligence.gemini.client import GoogleGenAIClient
+from ip_risk_agent.intelligence.license.gemini_explainer import GeminiLicenseExplainer
 from ip_risk_agent.intelligence.license.package_metadata import HttpPackageMetadataProvider
 from ip_risk_agent.intelligence.patent.kipris import KiprisClient
 from ip_risk_agent.intelligence.public import IntelligenceFacade, create_analyzer_registry
@@ -394,6 +395,9 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             model_client=model,
             search_provider=kipris,
             retriever=retriever,
+            # 설명이 없으면 라이선스 판정이 정책 고정 문구로만 읽힌다. 판정 자체는
+            # 규칙 엔진이 하고, 이 구현은 참조 자료에 근거해 이유만 붙인다.
+            explainer=GeminiLicenseExplainer(model),
         )
     )
     return RuntimeComposition(
