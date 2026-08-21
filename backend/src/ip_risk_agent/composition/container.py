@@ -362,19 +362,31 @@ def build_container(
         connections=connections,
         devices=devices,
     )
-    source_registration = SourceRegistrationService(
-        facade.register_source_metadata,
-        connections=connections,
-        devices=devices,
-        bindings=bindings,
-    )
-
     drive = build_drive_bundle(
         settings,
         credential_vault=source_ports.credential_vault,
         bindings=bindings,
     )
     github = build_github_bundle(settings, bindings=bindings)
+
+    drive_scanner = None
+    if drive is not None:
+        from .initial_scan import DriveInitialScanner  # noqa: PLC0415
+
+        drive_scanner = DriveInitialScanner(
+            connection_lookup=drive.connection_lookup,
+            credential_vault=source_ports.credential_vault,
+            provider_factory=drive.provider_factory,
+            change_sink=source_ports.change_sink,
+        )
+
+    source_registration = SourceRegistrationService(
+        facade.register_source_metadata,
+        connections=connections,
+        devices=devices,
+        bindings=bindings,
+        drive_scanner=drive_scanner,
+    )
 
     return Container(
         settings=settings,

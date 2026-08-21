@@ -12,6 +12,7 @@ ID 로 바꾸므로, 매번 새 값을 만들면 재시도마다 다른 Mount �
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -36,6 +37,8 @@ from ip_risk_agent.connectors.local.routes import (
 )
 
 from .authz import current_user_id
+
+logger = logging.getLogger(__name__)
 
 
 class SourceBindingStore(Protocol):
@@ -178,11 +181,13 @@ class SourceRegistrationService:
         connections: ConnectionRegistry,
         devices: DeviceRegistry,
         bindings: SourceBindingStore | None = None,
+        drive_scanner=None,
     ) -> None:
         self._register = register_metadata
         self._connections = connections
         self._devices = devices
         self._bindings = bindings
+        self._drive_scanner = drive_scanner
 
     # ------------------------------------------------------------ 공통 도구
 
@@ -248,23 +253,24 @@ class SourceRegistrationService:
         source_type: SourceType,
         connection_id: str,
         repository_full_name: str | None = None,
-    ) -> None:
+    ) -> MountRef:
         """webhook 이 provider 식별자로 Mount 를 되짚을 수 있게 기록한다.
 
         이것이 없으면 push 가 와도 어떤 Mount 인지 몰라 분석이 시작되지 않는다.
         """
-        if self._bindings is None:
-            return
-        await self._bindings.bind_mount(
-            MountRef(
-                risk_workspace_id=risk_workspace_id,
-                mount_id=registration.mount_id,
-                source_workspace_id=registration.source_workspace_id,
-                source_type=source_type,
-            ),
-            connection_id=connection_id,
-            repository_full_name=repository_full_name,
+        mount_ref = MountRef(
+            risk_workspace_id=risk_workspace_id,
+            mount_id=registration.mount_id,
+            source_workspace_id=registration.source_workspace_id,
+            source_type=source_type,
         )
+        if self._bindings is not None:
+            await self._bindings.bind_mount(
+                mount_ref,
+                connection_id=connection_id,
+                repository_full_name=repository_full_name,
+            )
+        return mount_ref
 
     # ---------------------------------------------------------------- Drive
 
@@ -323,12 +329,23 @@ class SourceRegistrationService:
                 },
             )
         )
-        await self._bind_mount(
+        mount_ref = await self._bind_mount(
             registration,
             risk_workspace_id=risk_workspace_id,
             source_type=SourceType.GOOGLE_DRIVE,
             connection_id=connection_id,
         )
+        if self._drive_scanner is not None:
+            # 이미 있던 파일에는 변경 이벤트가 오지 않는다. 여기서 파이프라인에
+            # 넣지 않으면 "기획서가 있는데 위험이 안 뜨는" 상태가 된다.
+            # 스캔은 최선 노력이다 — Mount 는 이미 만들어진 사실이므로,
+            # 스캔 실패가 생성 성공을 실패로 둔갑시키면 안 된다.
+            try:
+                await self._drive_scanner.scan(mount_ref, selected_file_ids)
+            except Exception:
+                logger.exception(
+                    "drive initial scan failed (mount=%s)", mount_ref.mount_id
+                )
         return DriveMountCreationResponse(
             server_mount_id=registration.mount_id,
             source_workspace_id=registration.source_workspace_id,
