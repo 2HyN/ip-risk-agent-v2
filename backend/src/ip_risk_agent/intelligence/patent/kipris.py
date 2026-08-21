@@ -76,6 +76,41 @@ class PatentSearchProvider(Protocol):
         ...
 
 
+def _require_successful_result(root: Element) -> None:
+    """오류 본문을 "결과 0건" 으로 넘기지 않는다.
+
+    KIPRIS 는 인증/등록 실패도 **HTTP 200** 으로 돌려주고 본문에만 사유를 남긴다.
+
+        <resultCode>30</resultCode>
+        <resultMsg>AccessKey&ServiceID Is Not Registerd Error</resultMsg>
+
+    이것을 그대로 파싱하면 ``searchResult`` 가 0 개라 "검색은 정상이고 결과가
+    없었다" 로 처리된다. 그러면 특허 분석이 coverage=COMPLETE 로 끝나며 **없는
+    권위를 주장한다.** 운영에서 실제로 그랬다 — 모든 질의가 hit_total=0,
+    search_failures=0 이었고 실은 한 번도 검색되지 않았다.
+
+    성공 응답의 정확한 코드 값은 문서화되어 있지 않으므로 ``resultMsg`` 가 비어
+    있지 않으면 실패로 본다. 판정이 한쪽으로 틀린다면 **거짓 실패**여야 한다.
+    거짓 성공은 "Risk 없음" 으로 읽히고, 거짓 실패는 coverage 를 낮출 뿐이다.
+    """
+    # 두 값은 <header> 아래에 중첩되어 온다. 직계 자식만 보면 놓친다.
+    message = (root.findtext(".//resultMsg") or "").strip()
+    if not message:
+        return
+    code = (root.findtext(".//resultCode") or "").strip()
+    lowered = message.casefold()
+    category = (
+        FailureCategory.AUTH
+        if any(token in lowered for token in ("accesskey", "serviceid", "not registerd", "unauthorized"))
+        else FailureCategory.UNAVAILABLE
+    )
+    raise ProviderFailureError(
+        PROVIDER,
+        category,
+        f"KIPRIS rejected the request (resultCode={code or 'unknown'})",
+    )
+
+
 def _text(element: Element, tag: str) -> str:
     return (element.findtext(tag) or "").strip()
 
@@ -206,11 +241,13 @@ class KiprisClient:
 
         # 외부에서 받은 XML 이다. 엔티티 확장 공격을 막는 파서를 쓴다.
         try:
-            return fromstring(response.content)
+            root = fromstring(response.content)
         except ParseError as exc:
             raise ProviderFailureError(
                 PROVIDER, FailureCategory.MALFORMED_OUTPUT, "response was not valid XML"
             ) from exc
+        _require_successful_result(root)
+        return root
 
 
 class StaticPatentSearchProvider:

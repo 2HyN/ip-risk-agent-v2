@@ -357,3 +357,62 @@ def test_previous_extraction_prompt_is_kept_for_provenance():
     from ip_risk_agent.intelligence.gemini.client import PromptLibrary
 
     assert PromptLibrary().get("patent_extract_v1").prompt_version == "patent_extract_v1"
+
+
+def test_kipris_error_body_is_a_provider_failure_not_an_empty_result():
+    """KIPRIS 는 인증/등록 실패도 HTTP 200 으로 돌려주고 본문에만 사유를 남긴다.
+
+    그것을 결과 0 건으로 넘기면 특허 분석이 coverage=COMPLETE 로 끝나며 없는
+    권위를 주장한다. 운영에서 모든 질의가 hit_total=0, search_failures=0 이었고
+    실은 한 번도 검색되지 않았다.
+    """
+    import asyncio
+
+    import httpx
+
+    from ip_risk_agent.intelligence.common.errors import (
+        FailureCategory,
+        ProviderFailureError,
+    )
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    body = (
+        b"<response><header><resultCode>30</resultCode>"
+        b"<resultMsg>AccessKey&amp;ServiceID Is Not Registerd Error</resultMsg>"
+        b"</header><body><totalSearchCount></totalSearchCount></body></response>"
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body))
+    client = KiprisClient("unused-key", client=httpx.AsyncClient(transport=transport))
+
+    async def scenario():
+        with pytest.raises(ProviderFailureError) as failure:
+            await client.search("음성")
+        assert failure.value.category is FailureCategory.AUTH
+        # 사유는 남기되 키는 절대 남기지 않는다.
+        assert "resultCode=30" in failure.value.safe_message
+        assert "unused-key" not in failure.value.safe_message
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_kipris_success_without_hits_is_still_an_empty_result():
+    """진짜 0 건 검색은 실패가 아니다. 둘을 섞으면 안 된다."""
+    import asyncio
+
+    import httpx
+
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    body = (
+        b"<response><header><resultCode>00</resultCode><resultMsg></resultMsg></header>"
+        b"<body><totalSearchCount>0</totalSearchCount></body></response>"
+    )
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=body))
+    client = KiprisClient("unused-key", client=httpx.AsyncClient(transport=transport))
+
+    async def scenario():
+        assert await client.search("음성") == []
+        await client.aclose()
+
+    asyncio.run(scenario())
