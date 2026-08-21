@@ -70,6 +70,10 @@ export class ControlApi {
     this.client.request<Page<Mount>>(
       `/api/v1/workspaces/${id}/mounts${queryString({ cursor })}`,
     );
+  removeMount = (id: string, mountId: string) =>
+    this.client.request<void>(`/api/v1/workspaces/${id}/mounts/${mountId}`, {
+      method: "DELETE",
+    });
   risks = (
     id: string,
     filters: Record<string, string>,

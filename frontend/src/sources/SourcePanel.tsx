@@ -31,6 +31,7 @@ import { ConnectLocalSource } from "./ConnectLocalSource.js";
 import { DriveFolderPicker } from "./DriveFolderPicker.js";
 import { GithubRepositoryPicker } from "./GithubRepositoryPicker.js";
 import { detectPlatformAdapter } from "./platform/PlatformAdapter.js";
+import { useSession } from "../auth/session";
 import { useWorkspace } from "../workspace/workspace-context";
 
 export type SourcePanelProps = {
@@ -82,6 +83,9 @@ function writePending(workspaceId: string, value: PendingConnection | null): voi
 
 export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
   const { workspace } = useWorkspace();
+  // 제거는 Control 라우트라 CSRF 토큰이 필요하다. 세션의 클라이언트가
+  // 그 토큰을 들고 있으므로 이 경로만 세션 API 를 쓴다.
+  const { api: controlApi } = useSession();
   const platform = useMemo(() => detectPlatformAdapter(), []);
   const connectionApiClient = useMemo(
     () => new HttpConnectionApiClient(apiBaseUrl),
@@ -97,6 +101,7 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
   const [pending, setPending] = useState<PendingConnection | null>(() =>
     readPending(workspace.id),
   );
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setListError(null);
@@ -149,6 +154,32 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
     void refresh();
   }, [clearPending, refresh]);
 
+  const removeMount = useCallback(
+    async (mount: Mount) => {
+      // 원본은 건드리지 않는다 — 감시만 중단된다. 그래도 목록에서 사라지는
+      // 조작이므로 한 번 확인한다.
+      if (
+        !window.confirm(
+          `"${mount.alias}" 감시를 중단할까요?
+원본 저장소/파일은 삭제되지 않습니다.`,
+        )
+      ) {
+        return;
+      }
+      setRemoveError(null);
+      try {
+        await controlApi.removeMount(workspace.id, mount.id);
+        await refresh();
+      } catch (cause) {
+        console.error(cause);
+        setRemoveError(
+          "감시를 중단하지 못했습니다. 이 워크스페이스의 OWNER 인지 확인해 주세요.",
+        );
+      }
+    },
+    [controlApi, refresh, workspace.id],
+  );
+
   return (
     <div className="content">
       <header>
@@ -159,7 +190,13 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
         </p>
       </header>
 
-      <ConnectedSourceList mounts={mounts} loading={loading} error={listError} />
+      <ConnectedSourceList
+        mounts={mounts}
+        loading={loading}
+        error={listError}
+        onRemove={removeMount}
+      />
+      {removeError && <p style={{ color: "red" }}>{removeError}</p>}
 
       {pending?.provider === "github" ? (
         <>

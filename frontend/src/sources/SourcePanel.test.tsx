@@ -11,6 +11,13 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// SourcePanel 은 제거 경로에만 세션 API(CSRF 보유)를 쓴다. 테스트에서는
+// 로그인 흐름 전체를 세우는 대신 그 API 만 대체한다.
+const removeMountSpy = vi.fn(async () => undefined);
+vi.mock("../auth/session", () => ({
+  useSession: () => ({ api: { removeMount: removeMountSpy } }),
+}));
+
 import { SourcePanel } from "./SourcePanel.js";
 import { WorkspaceProvider, type WorkspaceState } from "../workspace/workspace-context";
 
@@ -75,6 +82,7 @@ beforeEach(() => {
   sessionStorage.clear();
   vi.unstubAllGlobals();
   stubFetch();
+  removeMountSpy.mockClear();
 });
 
 afterEach(() => {
@@ -124,4 +132,54 @@ test("다른 워크스페이스의 진행 상태는 새어 오지 않는다", as
 
   expect(await screen.findByText("Add Source")).toBeTruthy();
   expect(screen.queryByText("감시할 저장소 선택")).toBeNull();
+});
+
+
+function stubFetchWithMounts() {
+  const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/mounts")) {
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "mount-1",
+              risk_workspace_id: WORKSPACE_ID,
+              source_workspace_id: "sws-1",
+              alias: "Drive (31 items)",
+              mounted_by_user_id: "user-1",
+              source_connection_id: "conn-1",
+              status: "ACTIVE",
+              created_at: "2026-08-21T06:06:40Z",
+              updated_at: "2026-08-21T06:06:40Z",
+            },
+          ],
+          next_cursor: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchImpl);
+}
+
+test("감시 중단은 확인을 거쳐 Control 제거 API 를 부른다", async () => {
+  stubFetchWithMounts();
+  vi.stubGlobal("confirm", vi.fn(() => true));
+
+  renderPanel(`/sources`);
+  await userEvent.click(await screen.findByRole("button", { name: "감시 중단" }));
+
+  expect(removeMountSpy).toHaveBeenCalledWith(WORKSPACE_ID, "mount-1");
+});
+
+test("확인을 취소하면 아무것도 지우지 않는다", async () => {
+  stubFetchWithMounts();
+  vi.stubGlobal("confirm", vi.fn(() => false));
+
+  renderPanel(`/sources`);
+  await userEvent.click(await screen.findByRole("button", { name: "감시 중단" }));
+
+  expect(removeMountSpy).not.toHaveBeenCalled();
 });

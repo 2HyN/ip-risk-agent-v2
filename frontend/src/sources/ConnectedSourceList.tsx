@@ -19,12 +19,15 @@ export type ConnectedSourceListProps = {
   mounts: Mount[];
   loading: boolean;
   error: string | null;
+  /** 없으면 제거 열을 그리지 않는다. 권한 판단은 backend 가 한다. */
+  onRemove?: (mount: Mount) => void;
 };
 
 export function ConnectedSourceList({
   mounts,
   loading,
   error,
+  onRemove,
 }: ConnectedSourceListProps) {
   if (loading) {
     return <p>연결된 Source 를 불러오는 중입니다…</p>;
@@ -48,6 +51,7 @@ export function ConnectedSourceList({
           <th scope="col">이름</th>
           <th scope="col">상태</th>
           <th scope="col">연결된 시각</th>
+          {onRemove && <th scope="col">관리</th>}
         </tr>
       </thead>
       <tbody>
@@ -57,6 +61,13 @@ export function ConnectedSourceList({
             {/* 모르는 상태값을 빈칸으로 두면 장애를 정상으로 오해한다. */}
             <td>{STATUS_LABEL[mount.status] ?? mount.status}</td>
             <td>{new Date(mount.createdAt).toLocaleString()}</td>
+            {onRemove && (
+              <td>
+                <button type="button" onClick={() => onRemove(mount)}>
+                  감시 중단
+                </button>
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
