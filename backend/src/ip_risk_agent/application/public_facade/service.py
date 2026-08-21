@@ -594,6 +594,7 @@ class ControlPlaneFacade:
                 source_workspace_id
             )
             created_source_workspace = source_workspace is None
+            updated_tracking = False
             if source_workspace is None:
                 source_workspace = SourceWorkspace(
                     id=source_workspace_id,
@@ -609,6 +610,17 @@ class ControlPlaneFacade:
                 await uow.source_metadata.add_source_workspace(source_workspace)
             else:
                 _require_source_workspace_match(source_workspace, connection_id, command)
+                if source_workspace.tracking_config_safe != command.tracking_config_safe:
+                    # 추적 범위는 정체성이 아니라 상태다. 사용자가 같은 source 에
+                    # 파일을 더 추가하거나 빼면 정당하게 바뀐다. 이것을 collision 으로
+                    # 거부하면 한 번 만든 source workspace 에 아무것도 더할 수 없다.
+                    source_workspace = replace(
+                        source_workspace,
+                        tracking_config_safe=command.tracking_config_safe,
+                        updated_at=occurred_at,
+                    )
+                    await uow.source_metadata.save_source_workspace(source_workspace)
+                    updated_tracking = True
 
             mount = await uow.mounts.get(mount_id)
             created_mount = mount is None
@@ -671,6 +683,7 @@ class ControlPlaneFacade:
                 or created_source_workspace
                 or created_mount
                 or rotated_credential
+                or updated_tracking
             ):
                 await uow.commit()
         return SourceMetadataRegistration(
@@ -738,7 +751,6 @@ def _require_source_workspace_match(
         or source_workspace.source_type is not command.source_type
         or source_workspace.external_scope_id != command.external_scope_id
         or source_workspace.display_name != command.source_workspace_display_name
-        or source_workspace.tracking_config_safe != command.tracking_config_safe
     ):
         raise DomainInvariantError("source workspace registration key collision")
 

@@ -159,16 +159,11 @@ def create_drive_mounts_router(
             selected_file_ids=body.selected_file_ids,
         )
 
-        await tracking_scope_store.save(
-            result.server_mount_id,
-            DriveTrackingScope(
-                mount_id=result.server_mount_id,
-                selected_file_ids=result.selected_file_ids or body.selected_file_ids,
-                display_metadata_by_file=_selected_metadata(
-                    body.display_metadata_by_file,
-                    result.selected_file_ids or body.selected_file_ids,
-                ),
-            ),
+        await _merge_tracking_scope(
+            tracking_scope_store,
+            mount_id=result.server_mount_id,
+            added_file_ids=result.selected_file_ids or body.selected_file_ids,
+            display_metadata_by_file=body.display_metadata_by_file,
         )
 
         await initialize_selection(
@@ -201,16 +196,11 @@ def create_drive_mounts_router(
             risk_workspace_id=body.risk_workspace_id,
             selected_file_ids=body.selected_file_ids,
         )
-        await tracking_scope_store.save(
-            result.server_mount_id,
-            DriveTrackingScope(
-                mount_id=result.server_mount_id,
-                selected_file_ids=result.selected_file_ids or body.selected_file_ids,
-                display_metadata_by_file=_selected_metadata(
-                    body.display_metadata_by_file,
-                    result.selected_file_ids or body.selected_file_ids,
-                ),
-            ),
+        await _merge_tracking_scope(
+            tracking_scope_store,
+            mount_id=result.server_mount_id,
+            added_file_ids=result.selected_file_ids or body.selected_file_ids,
+            display_metadata_by_file=body.display_metadata_by_file,
         )
         await initialize_selection(
             mount_id=result.server_mount_id,
@@ -219,6 +209,36 @@ def create_drive_mounts_router(
         return result
 
     return router
+
+
+async def _merge_tracking_scope(
+    tracking_scope_store,
+    *,
+    mount_id: str,
+    added_file_ids: list[str],
+    display_metadata_by_file: dict[str, SafeMetadata],
+) -> None:
+    """추적 범위에 새 선택을 **더한다**.
+
+    Drive source workspace 는 계정 단위로 하나이므로 mount 도 하나다. 이번에 새로
+    고른 file id 만 저장하면 이전에 추적하던 파일이 감시 대상에서 사라진다.
+    변경 감지는 이 범위 안의 file id 로만 동작하므로, 덮어쓰면 조용히 감시가 끊긴다.
+    """
+    existing: DriveTrackingScope | None = await tracking_scope_store.load(mount_id)
+    file_ids = list(existing.selected_file_ids) if existing is not None else []
+    metadata = dict(existing.display_metadata_by_file) if existing is not None else {}
+    for file_id in added_file_ids:
+        if file_id not in file_ids:
+            file_ids.append(file_id)
+    metadata.update(_selected_metadata(display_metadata_by_file, added_file_ids))
+    await tracking_scope_store.save(
+        mount_id,
+        DriveTrackingScope(
+            mount_id=mount_id,
+            selected_file_ids=file_ids,
+            display_metadata_by_file=metadata,
+        ),
+    )
 
 
 def _selected_metadata(

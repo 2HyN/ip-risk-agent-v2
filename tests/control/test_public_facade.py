@@ -287,6 +287,38 @@ def test_source_connection_identity_mismatch_is_still_a_collision() -> None:
     run(scenario())
 
 
+def test_source_workspace_tracking_scope_grows_without_collision() -> None:
+    """추적 범위는 정체성이 아니라 상태다.
+
+    사용자가 같은 source 에 파일을 더 추가하면 tracking 이 정당하게 바뀐다.
+    이것을 registration key collision 으로 거부하면 한 번 만든 source workspace 에
+    아무것도 더할 수 없다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+
+        first = await facade.register_source_metadata(source_command())
+        widened = replace(
+            source_command(),
+            tracking_config_safe={"branch": "main", "include": ["src/**", "docs/**"]},
+        )
+        second = await facade.register_source_metadata(widened)
+
+        assert second.source_workspace_id == first.source_workspace_id
+        assert second.mount_id == first.mount_id
+        assert not second.created_source_workspace
+
+        context = await facade.get_source_workspace_context(second.source_workspace_id)
+        assert tuple(context.tracking_config_safe["include"]) == ("src/**", "docs/**")
+
+    run(scenario())
+
+
 def test_public_authorization_actions_match_canonical_actions() -> None:
     assert {action.value for action in PublicVwsAction} == {
         action.value for action in VwsAction

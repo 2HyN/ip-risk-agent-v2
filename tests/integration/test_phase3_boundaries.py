@@ -121,6 +121,7 @@ class FakeControl:
         self.registration_calls = []
         self.allowed = True
         self.source_contexts: dict[str, object] = {}
+        self.scope_ids: dict[str, int] = {}
 
     async def authorize_vws_action(self, **values):
         self.auth_calls.append(values)
@@ -136,11 +137,15 @@ class FakeControl:
 
     async def register_source_metadata(self, command):
         self.registration_calls.append(command)
-        index = len(self.registration_calls)
-        source_workspace_id = (
-            "canonical-source-1" if index == 1 else f"canonical-source-{index}"
-        )
-        mount_id = "canonical-mount-1" if index == 1 else f"canonical-mount-{index}"
+        # 실제 Control 은 source workspace id 를 (connection, external_scope_id) 에서,
+        # mount id 를 (risk_workspace_id, source_workspace_id) 에서 파생한다. 같은
+        # scope 면 같은 id 로 수렴하므로 fake 도 그 불변조건을 지켜야 한다.
+        if command.external_scope_id not in self.scope_ids:
+            self.scope_ids[command.external_scope_id] = len(self.scope_ids) + 1
+        index = self.scope_ids[command.external_scope_id]
+        source_workspace_id = f"canonical-source-{index}"
+        mount_id = f"canonical-mount-{index}"
+        created = source_workspace_id not in self.source_contexts
         self.source_contexts[source_workspace_id] = SimpleNamespace(
             tracking_config_safe=command.tracking_config_safe
         )
@@ -148,9 +153,9 @@ class FakeControl:
             connection_id="canonical-connection-1",
             source_workspace_id=source_workspace_id,
             mount_id=mount_id,
-            created_connection=True,
-            created_source_workspace=True,
-            created_mount=True,
+            created_connection=created,
+            created_source_workspace=created,
+            created_mount=created,
         )
 
     async def get_source_workspace_context(self, source_workspace_id: str):
@@ -278,22 +283,29 @@ def test_pending_connection_is_idempotent_and_mounts_only_after_selection() -> N
             risk_workspace_id="vws-1",
             selected_file_ids=["file-2", "file-3"],
         )
-        assert additional.server_mount_id == "canonical-mount-2"
+        # Drive source workspace 는 연결된 계정 하나다. 파일을 더 고르면 새 mount 가
+        # 생기는 것이 아니라 같은 mount 의 추적 범위가 넓어진다.
+        assert additional.server_mount_id == result.server_mount_id
+        assert additional.source_workspace_id == result.source_workspace_id
         assert additional.selected_file_ids == ["file-3"]
         assert len(control.registration_calls) == 2
-        assert control.registration_calls[1].mount_alias != command.mount_alias
+        assert control.registration_calls[1].mount_alias == command.mount_alias
+        assert control.registration_calls[1].external_scope_id == command.external_scope_id
         assert tuple(control.registration_calls[1].tracking_config_safe["selected_file_ids"]) == (
+            "file-1",
+            "file-2",
             "file-3",
         )
 
-        with pytest.raises(HTTPException) as duplicate:
-            await service.create_drive_mount(
-                request(),
-                connection_id=first,
-                risk_workspace_id="vws-1",
-                selected_file_ids=["file-3", "file-2"],
-            )
-        assert duplicate.value.status_code == 409
+        # 이미 전부 추적 중인 조합은 실패가 아니라 멱등 응답이다. canonical 상태가
+        # 바뀌지 않으므로 Control 재등록도 일어나지 않는다.
+        duplicate = await service.create_drive_mount(
+            request(),
+            connection_id=first,
+            risk_workspace_id="vws-1",
+            selected_file_ids=["file-3", "file-2"],
+        )
+        assert duplicate.server_mount_id == result.server_mount_id
         assert len(control.registration_calls) == 2
 
         other_service = SourceRegistrationService(
@@ -489,5 +501,125 @@ def test_analyzer_sets_and_result_identity_must_be_exact() -> None:
             )
             with pytest.raises(AnalyzerCompletenessError):
                 await guarded.analyze(artifact())
+
+    run(scenario())
+
+
+def _drive_service(store, control, clock):
+    return SourceRegistrationService(
+        store=store,
+        control_facade=control,
+        principal_resolver=FakePrincipalResolver(principal()),
+        clock=clock,
+        ttl=timedelta(minutes=5),
+    )
+
+
+def _drive_credential(key_id: str = "secret-version-1") -> CredentialRef:
+    return CredentialRef(
+        provider=SourceType.GOOGLE_DRIVE,
+        connection_id="oauth-state-1",
+        secret_name="drive-oauth-token",
+        key_id=key_id,
+    )
+
+
+def test_drive_source_workspace_is_stable_per_account_across_reconnect() -> None:
+    """Source workspace 는 연결된 Drive 계정이지 이번에 고른 파일 묶음이 아니다.
+
+    운영에서 같은 Google 계정으로 다시 연결할 때마다 새 source workspace 가 생겨
+    같은 계정의 파일이 흩어졌다. 등록 키를 계정 기준으로 두면 pending 이 새로
+    발급돼도 같은 canonical source workspace 로 수렴해야 한다.
+    """
+
+    async def scenario() -> None:
+        clock = Clock()
+        store = InMemoryPendingConnectionStore()
+        control = FakeControl()
+        service = _drive_service(store, control, clock)
+
+        first = await service.create_drive_connection(
+            request("GET"),
+            risk_workspace_id="vws-1",
+            provider_subject="google-subject-1",
+            provider_email="owner@example.com",
+            credential_ref=_drive_credential(),
+        )
+        initial = await service.create_drive_mount(
+            request(),
+            connection_id=first,
+            risk_workspace_id="vws-1",
+            selected_file_ids=["file-1"],
+        )
+
+        # pending 이 만료되어 재연결이 새 operational handle 을 발급하는 상황.
+        await store.save_pending(
+            replace(store.pending[first], status=PendingConnectionStatus.EXPIRED)
+        )
+        second = await service.create_drive_connection(
+            request("GET"),
+            risk_workspace_id="vws-1",
+            provider_subject="google-subject-1",
+            provider_email="owner@example.com",
+            credential_ref=_drive_credential("secret-version-2"),
+        )
+        assert second != first
+
+        added = await service.create_drive_mount(
+            request(),
+            connection_id=second,
+            risk_workspace_id="vws-1",
+            selected_file_ids=["file-2"],
+        )
+
+        assert added.source_workspace_id == initial.source_workspace_id
+        assert added.server_mount_id == initial.server_mount_id
+        assert added.selected_file_ids == ["file-2"]
+        latest = control.registration_calls[-1]
+        assert tuple(latest.tracking_config_safe["selected_file_ids"]) == (
+            "file-1",
+            "file-2",
+        )
+        assert latest.external_scope_id == "drive-account:google-subject-1"
+        assert latest.mount_alias == control.registration_calls[0].mount_alias
+
+    run(scenario())
+
+
+def test_two_drive_accounts_stay_separate_source_workspaces() -> None:
+    """계정 단위로 안정화해도 서로 다른 계정은 섞이지 않아야 한다."""
+
+    async def scenario() -> None:
+        clock = Clock()
+        store = InMemoryPendingConnectionStore()
+        control = FakeControl()
+        service = _drive_service(store, control, clock)
+
+        ids = []
+        for subject, email in (
+            ("google-subject-1", "owner@example.com"),
+            ("google-subject-2", "second@example.com"),
+        ):
+            connection = await service.create_drive_connection(
+                request("GET"),
+                risk_workspace_id="vws-1",
+                provider_subject=subject,
+                provider_email=email,
+                credential_ref=_drive_credential(),
+            )
+            ids.append(
+                await service.create_drive_mount(
+                    request(),
+                    connection_id=connection,
+                    risk_workspace_id="vws-1",
+                    selected_file_ids=["file-1"],
+                )
+            )
+
+        assert ids[0].source_workspace_id != ids[1].source_workspace_id
+        first_call, second_call = control.registration_calls
+        assert first_call.external_scope_id != second_call.external_scope_id
+        # alias 는 VWS 안에서 유일해야 한다.
+        assert first_call.mount_alias != second_call.mount_alias
 
     run(scenario())

@@ -252,65 +252,71 @@ class SourceRegistrationService:
         ):
             raise HTTPException(status_code=403, detail="pending connection scope mismatch")
         normalized_file_ids = sorted(selected_file_ids)
-        scope = ",".join(normalized_file_ids)
-        exact_scope_id = f"drive-selection:{_digest(scope)}"
-        exact_key = stable_key(
-            "source-registration",
-            (pending.id, risk_workspace_id, exact_scope_id),
-        )
-        exact_binding = await self._store.get_binding(exact_key)
-        if exact_binding is not None:
-            return DriveMountCreationResponse(
-                server_mount_id=exact_binding.mount_id,
-                source_workspace_id=exact_binding.source_workspace_id,
-                selected_file_ids=normalized_file_ids,
-            )
 
-        tracked_file_ids = await self._tracked_drive_file_ids(pending)
+        # Source workspace 는 "이번에 고른 파일 묶음" 이 아니라 **연결된 Drive 계정** 이다.
+        # 선택 집합 digest 를 정체성으로 쓰면 Picker 세션마다 새 workspace/mount 가
+        # 생겨 같은 계정의 파일이 흩어지고 alias 도 의미 없는 digest 가 된다.
+        # GitHub 이 `owner/repo@branch` 라는 안정된 정체성을 쓰는 것과 같은 자리다.
+        external_scope_id = f"drive-account:{pending.provider_subject}"
+        # 재연결하면 pending.id 가 바뀐다. 등록 키를 계정 기준으로 두어야 재연결
+        # 뒤에도 같은 canonical source workspace 로 수렴한다.
+        registration_scope = f"{SourceType.GOOGLE_DRIVE.value}:{pending.provider_subject}"
+        registration_key = stable_key(
+            "source-registration",
+            (registration_scope, risk_workspace_id, external_scope_id),
+        )
+
+        tracked_file_ids = await self._tracked_drive_file_ids(registration_key)
         new_file_ids = [
             file_id for file_id in normalized_file_ids if file_id not in tracked_file_ids
         ]
         if not new_file_ids:
-            raise HTTPException(status_code=409, detail="selected files are already tracked")
+            # 요청한 파일이 이미 전부 추적 중이다. 같은 요청의 재시도와 구별되지
+            # 않으므로 오류가 아니라 **멱등 응답**으로 끝낸다. 아무것도 실패하지
+            # 않았고 canonical 상태도 그대로다.
+            binding = await self._store.get_binding(registration_key)
+            if binding is None:  # 추적 중인데 binding 이 없을 수는 없다.
+                raise HTTPException(
+                    status_code=409, detail="selected files are already tracked"
+                )
+            return DriveMountCreationResponse(
+                server_mount_id=binding.mount_id,
+                source_workspace_id=binding.source_workspace_id,
+                selected_file_ids=normalized_file_ids,
+            )
 
-        scope = ",".join(new_file_ids)
-        scope_digest = _digest(scope)
-        alias_digest = _digest(f"{pending.id}\0{scope}")
+        merged_file_ids = sorted(tracked_file_ids | set(normalized_file_ids))
         registration = await self._mount(
             request,
             connection_id=pending.id,
+            registration_scope=registration_scope,
             risk_workspace_id=risk_workspace_id,
             source_type=SourceType.GOOGLE_DRIVE,
-            external_scope_id=f"drive-selection:{scope_digest}",
-            display_name="Google Drive selection",
-            mount_alias=f"Google Drive {alias_digest[:8]}",
-            tracking={"selected_file_ids": new_file_ids},
+            external_scope_id=external_scope_id,
+            display_name=_drive_display_name(pending),
+            mount_alias=_drive_mount_alias(pending),
+            tracking={"selected_file_ids": merged_file_ids},
         )
         return DriveMountCreationResponse(
             server_mount_id=registration.mount_id,
             source_workspace_id=registration.source_workspace_id,
+            # 이번에 새로 추가된 것만 돌려준다. 초기 스캔이 이미 분석한 파일을
+            # 다시 훑지 않도록 하는 경계다.
             selected_file_ids=new_file_ids,
         )
 
-    async def _tracked_drive_file_ids(
-        self, pending: PendingSourceConnection
-    ) -> set[str]:
-        if pending.canonical_connection_id is None:
+    async def _tracked_drive_file_ids(self, registration_key: str) -> set[str]:
+        """이 Drive 계정 source workspace 가 현재 추적 중인 file id 집합."""
+        binding = await self._store.get_binding(registration_key)
+        if binding is None:
             return set()
-        tracked: set[str] = set()
-        bindings = await self._store.get_bindings_for_connection(
-            pending.canonical_connection_id
+        context = await self._control.get_source_workspace_context(
+            binding.source_workspace_id
         )
-        for binding in bindings:
-            if binding.pending_connection_id != pending.id:
-                continue
-            context = await self._control.get_source_workspace_context(
-                binding.source_workspace_id
-            )
-            values = context.tracking_config_safe.get("selected_file_ids", ())
-            if isinstance(values, (list, tuple)):
-                tracked.update(value for value in values if isinstance(value, str))
-        return tracked
+        values = context.tracking_config_safe.get("selected_file_ids", ())
+        if not isinstance(values, (list, tuple)):
+            return set()
+        return {value for value in values if isinstance(value, str)}
 
     async def create_github_mount(
         self,
@@ -349,19 +355,23 @@ class SourceRegistrationService:
         display_name: str,
         mount_alias: str,
         tracking: dict[str, object],
+        registration_scope: str | None = None,
     ):
         principal = await self._principal(request)
         pending = await self._require_pending(connection_id, source_type)
         if pending.owner_user_id != principal.user.id or pending.risk_workspace_id != risk_workspace_id:
             raise HTTPException(status_code=403, detail="pending connection scope mismatch")
+        # 기본은 pending connection 기준이다. 재연결해도 같은 canonical source 로
+        # 수렴해야 하는 provider 는 계정 기준 scope 를 넘긴다.
         registration_key = stable_key(
             "source-registration",
-            (connection_id, risk_workspace_id, external_scope_id),
+            (registration_scope or connection_id, risk_workspace_id, external_scope_id),
         )
         async with self._lock:
-            binding = await self._store.get_binding(registration_key)
-            if binding is not None:
-                return _RegistrationView(binding.source_workspace_id, binding.mount_id)
+            # 기존 binding 이 있어도 Control 재등록을 건너뛰지 않는다. 등록 키가
+            # 계정 단위로 안정적이므로, 건너뛰면 넓어진 추적 범위가 canonical 쪽에
+            # 영원히 반영되지 않는다. register_source_metadata 는 멱등이며 바뀐 것이
+            # 없으면 쓰기도 audit 도 남기지 않는다.
             credential = (
                 None
                 if pending.credential_ref is None
@@ -437,3 +447,21 @@ __all__ = [
     "SourceMountBinding",
     "SourceRegistrationService",
 ]
+
+
+def _drive_display_name(pending: PendingSourceConnection) -> str:
+    """연결된 Drive 계정을 가리키는 이름. 계정당 하나로 안정적이다."""
+    return pending.provider_account_label or "Google Drive"
+
+
+def _drive_mount_alias(pending: PendingSourceConnection) -> str:
+    """VWS 안에서 유일하고 사람이 읽을 수 있는 alias.
+
+    alias 는 VWS 단위로 유일해야 한다. 계정 라벨(이메일)이 있으면 그대로 쓰고,
+    없으면 계정 subject digest 로 안정된 값을 만든다. 선택 집합에서 파생하지
+    않으므로 파일을 더 추가해도 alias 가 바뀌지 않는다.
+    """
+    label = pending.provider_account_label
+    if label:
+        return f"Google Drive {label}"
+    return f"Google Drive {_digest(pending.provider_subject)[:8]}"
