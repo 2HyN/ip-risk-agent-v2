@@ -223,6 +223,70 @@ def test_source_metadata_callbacks_are_authorized_idempotent_and_opaque() -> Non
     run(scenario())
 
 
+def test_provider_reconnection_rotates_the_credential_instead_of_colliding() -> None:
+    """같은 계정으로 provider 를 다시 연결하면 Mount 가 계속 만들어져야 한다.
+
+    canonical connection id 는 ``(source_type, provider_subject)`` 에서 파생되므로
+    재연결해도 그대로다. 반면 자격증명은 새로 발급되어 ``credential_ref`` 만 바뀐다.
+    이것을 registration key collision 으로 거부하면 재연결 이후 어떤 Mount 도
+    만들 수 없고, 사용자에게는 mount 요청이 422 로 보인다 — 실제로 그렇게 막혔다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+
+        first = await facade.register_source_metadata(source_command())
+
+        rotated = replace(
+            source_command(),
+            credential_ref="secret-ref:github-installation-1-rotated",
+        )
+        second = await facade.register_source_metadata(rotated)
+
+        assert second.connection_id == first.connection_id
+        assert second.mount_id == first.mount_id
+        assert not second.created_connection
+
+        # 옛 참조를 남겨 두면 이후 조회가 폐기된 secret 을 가리킨다.
+        context = await facade.get_source_workspace_context(second.source_workspace_id)
+        assert context.credential_ref == "secret-ref:github-installation-1-rotated"
+
+    run(scenario())
+
+
+def test_source_connection_identity_mismatch_is_still_a_collision() -> None:
+    """자격증명 회전을 허용해도 정체성 불일치는 계속 거부해야 한다."""
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        await facade.register_source_metadata(source_command())
+
+        for field_name, value in (
+            ("actor_user_id", "reviewer-1"),
+            ("provider_subject", "installation-2"),
+            ("provider_account_label", "other-org"),
+        ):
+            impostor = replace(source_command(), **{field_name: value})
+            try:
+                await facade.register_source_metadata(impostor)
+            except DomainInvariantError:
+                continue
+            except PermissionError:
+                # actor 가 바뀌면 권한 검사에서 먼저 걸릴 수 있다. 그래도 거부다.
+                continue
+            raise AssertionError(f"{field_name} mismatch must not be accepted")
+
+    run(scenario())
+
+
 def test_public_authorization_actions_match_canonical_actions() -> None:
     assert {action.value for action in PublicVwsAction} == {
         action.value for action in VwsAction

@@ -560,6 +560,7 @@ class ControlPlaneFacade:
 
             connection = await uow.source_metadata.get_connection(connection_id)
             created_connection = connection is None
+            rotated_credential = False
             if connection is None:
                 connection = SourceConnection(
                     id=connection_id,
@@ -575,6 +576,19 @@ class ControlPlaneFacade:
                 await uow.source_metadata.add_connection(connection)
             else:
                 _require_connection_match(connection, command)
+                if (
+                    command.credential_ref is not None
+                    and connection.credential_ref != command.credential_ref
+                ):
+                    # 재연결로 재발급된 자격증명이다. 옛 참조를 그대로 두면 이후의
+                    # 조회가 폐기된 secret 을 가리킨다.
+                    connection = replace(
+                        connection,
+                        credential_ref=command.credential_ref,
+                        updated_at=occurred_at,
+                    )
+                    await uow.source_metadata.save_connection(connection)
+                    rotated_credential = True
 
             source_workspace = await uow.source_metadata.get_source_workspace(
                 source_workspace_id
@@ -650,7 +664,14 @@ class ControlPlaneFacade:
                         },
                     )
                 )
-            if created_connection or created_source_workspace or created_mount:
+            # 자격증명 회전만 일어난 재연결도 반드시 커밋해야 한다. 빼면 새 참조가
+            # 조용히 버려지고 이후 조회가 폐기된 secret 을 계속 가리킨다.
+            if (
+                created_connection
+                or created_source_workspace
+                or created_mount
+                or rotated_credential
+            ):
                 await uow.commit()
         return SourceMetadataRegistration(
             connection_id=connection_id,
@@ -690,12 +711,19 @@ def _require_connection_match(
     connection: SourceConnection,
     command: SourceMetadataRegistrationCommand,
 ) -> None:
+    """같은 registration key 를 **다른 정체성**이 쓰려는 것만 막는다.
+
+    ``credential_ref`` 는 비교하지 않는다. canonical connection id 는
+    ``(source_type, provider_subject)`` 에서 파생되므로, 사용자가 같은 계정으로
+    provider 를 다시 연결하면 정체성은 그대로인 채 자격증명만 재발급된다.
+    그것을 충돌로 거부하면 **재연결 이후 어떤 Mount 도 만들 수 없다.**
+    자격증명 회전은 호출부에서 저장값을 갱신하는 것으로 처리한다.
+    """
     if (
         connection.provider is not command.source_type
         or connection.authorized_by_user_id != command.actor_user_id
         or connection.provider_subject != command.provider_subject
         or connection.provider_account_label != command.provider_account_label
-        or connection.credential_ref != command.credential_ref
     ):
         raise DomainInvariantError("source connection registration key collision")
 
