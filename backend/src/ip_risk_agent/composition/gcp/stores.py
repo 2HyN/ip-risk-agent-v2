@@ -150,6 +150,7 @@ class FirestoreMountBindingStore:
         source_type: SourceType,
         risk_workspace_id: str,
         owner_user_id: str,
+        connection_key: str,
         credential_ref: CredentialRef | None = None,
         installation_id: str | None = None,
     ) -> None:
@@ -160,6 +161,9 @@ class FirestoreMountBindingStore:
                 "source_type": source_type.value,
                 "risk_workspace_id": risk_workspace_id,
                 "owner_user_id": owner_user_id,
+                # Mount 를 등록할 때 Control 에 넘길 provider 키.
+                # 이것이 없으면 연결부터 다시 해야 한다.
+                "connection_key": connection_key,
                 "credential_ref": (
                     credential_ref.model_dump(mode="json") if credential_ref else None
                 ),

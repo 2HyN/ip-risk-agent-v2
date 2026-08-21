@@ -346,8 +346,12 @@ def build_container(
         observer=observer,
     )
 
-    connections = ConnectionRegistry()
     devices = DeviceRegistry()
+    bindings = _build_bindings(settings)
+    # 연결 문맥은 프로세스 메모리만으로는 부족하다. Cloud Run 은 인스턴스를
+    # 여러 개 띄우므로, 연결을 만든 인스턴스와 저장소 목록을 묻는 인스턴스가
+    # 다를 수 있다. 그러면 방금 만든 연결이 "없는 연결"이 된다.
+    connections = ConnectionRegistry(store=bindings)
     change_relay = _build_change_relay(settings)
     source_ports = SourcePorts(
         change_sink=ControlSourceChangeSink(facade, relay=change_relay),
@@ -362,9 +366,9 @@ def build_container(
         facade.register_source_metadata,
         connections=connections,
         devices=devices,
+        bindings=bindings,
     )
 
-    bindings = _build_bindings(settings)
     drive = build_drive_bundle(
         settings,
         credential_vault=source_ports.credential_vault,
