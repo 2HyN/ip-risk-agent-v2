@@ -9,7 +9,6 @@
     "chalk": "^5.3.0"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "iprisk-nonexistent-sample-package": "0.0.1"
+    "typescript": "5.9.3"
   }
 }

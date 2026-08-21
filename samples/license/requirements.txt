@@ -20,8 +20,19 @@ requests==2.32.3
 click==8.1.7
 
 # VERSION_RANGE_NOT_PINNED — 확정 버전이 아니라 범위다.
-# `==` 만 확정으로 보므로 이 줄은 진단이 붙는다.
+# `==` 만 확정으로 보므로 이 줄은 진단이 붙는다. provider 조회는 성공하므로
+# coverage 는 COMPLETE 를 유지한다.
 urllib3>=2.0.0
 
-# NOT_FOUND — 존재하지 않는 패키지. 실패를 "위험 없음" 으로 바꾸지 않는지 확인한다.
-iprisk-nonexistent-sample-package==0.0.1
+# ---------------------------------------------------------------------------
+# 아래 줄은 기본적으로 꺼 둔다.
+#
+# 존재하지 않는 패키지는 NOT_FOUND provider failure 를 만들고, 그러면 이 파일의
+# coverage 가 PARTIAL 이 된다. Risk 생성은 `analysis_is_authoritative()` 가
+# SUCCEEDED + COMPLETE 일 때만 일어나므로, 이 한 줄 때문에 pymupdf 의
+# POLICY_CONFLICT 를 포함한 **나머지 후보 전부가 Risk 로 승격되지 않는다.**
+#
+# 실패를 "위험 없음" 으로 바꾸지 않는 동작을 확인하려면 이 줄만 켜고 별도로 돌린다.
+# 그때 기대값은 Analysis INCONCLUSIVE + 0 risks 다.
+#
+# iprisk-nonexistent-sample-package==0.0.1

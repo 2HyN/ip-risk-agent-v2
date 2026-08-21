@@ -47,17 +47,46 @@ PDF·DOCX·이미지는 읽지 않는다.
 정책 판정은 `intelligence/license/policy.py` 의 전역 정책
 `global-license-policy-2026-08-14.1` 기준이다.
 
-| 항목 | 노리는 판정 | 비고 |
-|---|---|---|
-| `pymupdf==1.24.0` | `POLICY_CONFLICT` | deps.dev 는 non-standard 로 답한다. PyPI 원문에서 `AGPL-3.0-only` 를 복원하는 **폴백 경로**까지 함께 검증한다 |
-| `certifi`, `psycopg2` | `REVIEW_REQUIRED` | 결합 방식에 따라 의무가 달라지는 계열 |
-| `requests==2.32.3` | `NOTICE_REQUIRED` | Apache-2.0 |
-| `express@4.19.2`, `lodash` | `NOTICE_REQUIRED` | MIT |
-| `urllib3>=2.0.0`, `chalk@^5.3.0` | `VERSION_RANGE_NOT_PINNED` 진단 | `==` 만 확정 버전으로 본다 |
-| `iprisk-nonexistent-sample-package` | `NOT_FOUND` / `UNKNOWN` | **실패를 "위험 없음" 으로 바꾸지 않는지** 확인하는 줄 |
+아래는 **실제 deps.dev / PyPI / npm 에 붙여 확인한 결과**다 (2026-08-21).
 
-> 라이선스 식별자는 deps.dev / PyPI / npm 레지스트리의 **실시간 응답**에서 온다.
-> 위 표는 기대값이지 계약이 아니다. 실제 결과가 다르면 그 자체가 관찰 결과다.
+`requirements.txt` — `SUCCEEDED / COMPLETE`, 후보 6건, provider 실패 0건
+
+| 패키지 | 식별된 라이선스 | 판정 | 비고 |
+|---|---|---|---|
+| `pymupdf==1.24.0` | `AGPL-3.0-only` | `POLICY_CONFLICT` | deps.dev 는 non-standard 로 답한다. PyPI 원문에서 복원하는 **폴백 경로**를 함께 태운다 (`LICENSE_INFERRED_FROM_FREE_TEXT`) |
+| `certifi==2024.7.4` | `MPL-2.0` | `REVIEW_REQUIRED` | |
+| `psycopg2==2.9.9` | `LGPL-2.1-only WITH exceptions` | `REVIEW_REQUIRED` | |
+| `requests==2.32.3` | `Apache-2.0` | `NOTICE_REQUIRED` | |
+| `click==8.1.7` | `BSD-3-Clause` | `NOTICE_REQUIRED` | |
+| `urllib3>=2.0.0` | `UNKNOWN` | `UNKNOWN` | `VERSION_RANGE_NOT_PINNED`. 조회는 성공하므로 coverage 는 유지된다 |
+
+`package.json` — `SUCCEEDED / COMPLETE`, 후보 4건, provider 실패 0건
+(`express`·`lodash`·`chalk` MIT, `typescript` Apache-2.0, 모두 `NOTICE_REQUIRED`.
+`chalk` 는 `VERSION_RANGE_NOT_PINNED`.)
+
+> 라이선스 식별자는 레지스트리의 **실시간 응답**에서 온다. 실제 결과가 위와 다르면
+> 그 자체가 관찰 결과다.
+
+### ⚠ provider 실패 1건이 그 파일의 Risk 를 전부 없앤다
+
+Risk 생성은 `core/risk/transitions.py::analysis_is_authoritative()` 가 참일 때만 일어난다.
+
+```python
+return status is AnalysisStatus.SUCCEEDED and coverage is AnalysisCoverage.COMPLETE
+```
+
+provider 조회가 **하나라도** 실패하면 coverage 가 `PARTIAL` 이 되고, 그 결과 전체가
+비권위적으로 취급되어 `_reconcile()` 이 아예 호출되지 않는다. 즉 존재하지 않는 패키지
+한 줄 때문에 같은 파일의 `POLICY_CONFLICT` 를 포함한 **나머지 후보 전부가 Risk 로
+승격되지 않는다.**
+
+"불완전한 분석이 Risk 의 진실을 바꾸지 못한다" 는 의도된 설계다. 다만 판정 단위가
+**파일 전체**라서, 무관한 의존성 하나의 조회 실패가 확인된 다른 위반까지 덮는다.
+이 입자도를 후보 단위로 낮출지는 별도 결정 사항이다.
+
+그래서 NOT_FOUND 확인용 줄은 `requirements.txt` 안에 **주석으로 꺼 두었다.**
+그 동작만 따로 보고 싶으면 그 줄만 켜서 별도로 돌린다. 기대값은
+`Analysis INCONCLUSIVE + 0 risks` 다.
 
 ## Patent 분석 샘플
 
