@@ -167,7 +167,8 @@ async def test_choosing_a_repository_registers_and_binds_it(service) -> None:
 
     command = registrar.commands[0]
     assert command.external_scope_id == "Sora3780/ip-risk-agent@main"
-    assert command.mount_alias == "Sora3780/ip-risk-agent (main)"
+    # alias 에는 경로 구분자를 넣을 수 없다. Control 이 거부한다.
+    assert command.mount_alias == "Sora3780:ip-risk-agent (main)"
     assert bindings.mounts == [
         {
             "mount_id": "mount-1",
@@ -268,3 +269,46 @@ async def test_drive_carries_its_credential_to_mount_registration(service) -> No
     assert command.credential_ref == "drive-token-1"
     # 선택 순서가 달라도 같은 Mount 로 수렴해야 재시도가 안전하다.
     assert command.external_scope_id == "file-a,file-b"
+
+
+@pytest.mark.parametrize(
+    "owner,repo,branch",
+    [
+        ("Sora3780", "ip-risk-agent", "main"),
+        ("some-org", "deep.name", "release/2026"),
+    ],
+)
+def test_mount_alias_is_a_single_path_segment(owner, repo, branch) -> None:
+    """Control 은 alias 에 경로 구분자를 금지한다.
+
+    provider 의 자연스러운 이름은 경로 모양이다(``owner/repo``). 그대로 넘기면
+    등록이 422 로 막혀 저장소를 하나도 붙일 수 없다. Control 의 정규화 함수를
+    그대로 불러 검사해, 두 쪽 규칙이 갈라지면 여기서 깨지게 한다.
+    """
+    from ip_risk_agent.composition.source_callbacks import _alias
+    from ip_risk_agent.core.mounts.models import normalize_mount_alias
+
+    alias = _alias(f"{owner}/{repo} ({branch})")
+    assert normalize_mount_alias(alias) == alias
+    assert owner in alias and repo in alias, "무엇을 감시하는지 알아볼 수 있어야 한다"
+
+
+@pytest.mark.asyncio
+async def test_registering_a_repository_produces_an_acceptable_alias(service) -> None:
+    """실제 등록 경로가 만들어 내는 alias 도 Control 을 통과해야 한다."""
+    from ip_risk_agent.core.mounts.models import normalize_mount_alias
+
+    registration, registrar, _ = service
+    connection_id = await registration.create_github_connection(
+        _request(), risk_workspace_id="vws-1", installation_id="155363987"
+    )
+    await registration.create_github_mount(
+        _request(),
+        connection_id=connection_id,
+        risk_workspace_id="vws-1",
+        owner="Sora3780",
+        repo="ip-risk-agent",
+        tracked_branch="main",
+    )
+    alias = registrar.commands[0].mount_alias
+    assert normalize_mount_alias(alias) == alias

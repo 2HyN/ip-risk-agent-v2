@@ -132,6 +132,18 @@ class DeviceRegistry:
         return self._user_by_device.get(device_id)
 
 
+def _alias(text: str) -> str:
+    r"""Mount alias 는 경로 한 조각이어야 한다.
+
+    Control 의 ``normalize_mount_alias`` 가 ``/`` 와 ``\`` 를 거부한다.
+    그런데 provider 의 자연스러운 이름은 경로 모양이다 — GitHub 는
+    ``owner/repo``, Drive 파일명에도 ``/`` 가 들어갈 수 있다. 그대로 넘기면
+    등록이 422 로 막히고, 화면에는 "연결하지 못했습니다"로만 보인다.
+    """
+    cleaned = text.replace("\\", ":").replace("/", ":").strip(": ")
+    return cleaned or "source"
+
+
 def _credential_key(stored: object) -> str | None:
     """바인딩에 담긴 credential_ref 에서 Control 에 넘길 키를 꺼낸다.
 
@@ -304,7 +316,7 @@ class SourceRegistrationService:
                 source_workspace_display_name=(
                     f"Drive ({len(selected_file_ids)} items)"
                 ),
-                mount_alias=f"Drive ({len(selected_file_ids)} items)",
+                mount_alias=_alias(f"Drive ({len(selected_file_ids)} items)"),
                 credential_ref=_credential_key(context.get("credential_ref")),
                 tracking_config_safe={
                     "selected_file_count": len(selected_file_ids)
@@ -363,7 +375,7 @@ class SourceRegistrationService:
                 source_workspace_key=f"{connection_id}:{scope_id}",
                 external_scope_id=scope_id,
                 source_workspace_display_name=f"{owner}/{repo}",
-                mount_alias=f"{owner}/{repo} ({tracked_branch})",
+                mount_alias=_alias(f"{owner}/{repo} ({tracked_branch})"),
                 provider_subject=installation_id if installation_id else None,
                 provider_account_label=(
                     f"installation {installation_id}" if installation_id else None
@@ -415,7 +427,7 @@ class SourceRegistrationService:
                 source_workspace_key=f"local:{scope_id}",
                 external_scope_id=scope_id,
                 source_workspace_display_name=f"Local device {body.device_id}",
-                mount_alias=f"Local device {body.device_id}",
+                mount_alias=_alias(f"Local device {body.device_id}"),
                 provider_subject=body.device_id,
                 tracking_config_safe={
                     "include_pattern_count": len(body.include_patterns),
