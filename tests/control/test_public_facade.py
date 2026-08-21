@@ -395,3 +395,46 @@ def test_facade_redacts_worker_failure_before_persistence() -> None:
         assert "abcdefghijklmnop" not in (job.failure_safe or "")
 
     run(scenario())
+
+
+def test_reconnecting_a_provider_rotates_the_stored_credential() -> None:
+    """재연결은 자격증명 재발급이다. 충돌이 아니다.
+
+    사용자가 같은 계정으로 provider 를 다시 연결하면 connection_key 는 그대로
+    이고 credential_ref 만 새로 발급된다. 이것을 key collision 으로 거부하면
+    재연결 뒤 어떤 Mount 도 만들 수 없게 된다 — 운영에서 Drive 스코프를
+    넓히고 재연결하자 실제로 그렇게 막혔다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+
+        first = await facade.register_source_metadata(source_command())
+
+        rotated = replace(
+            source_command(),
+            registration_key="registration-2",
+            source_workspace_key="repo-77",
+            external_scope_id="repo-77",
+            mount_alias="Frontend",
+            credential_ref="secret-ref:rotated",
+        )
+        second = await facade.register_source_metadata(rotated)
+
+        # 같은 연결로 수렴하고, 새 Mount 는 만들어진다.
+        assert second.connection_id == first.connection_id
+        assert not second.created_connection
+        assert second.created_mount
+
+        # 저장된 자격증명 참조는 최신 것으로 회전된다. 옛 참조를 남겨 두면
+        # 그 뒤의 조회가 파기된 secret 을 가리킨다.
+        context = await facade.get_source_workspace_context(
+            second.source_workspace_id
+        )
+        assert context.credential_ref == "secret-ref:rotated"
+
+    run(scenario())
