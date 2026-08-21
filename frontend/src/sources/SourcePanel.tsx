@@ -28,6 +28,7 @@ import { HttpSourcesApi, type Mount } from "./api/sourcesClient.js";
 import { AddSourceChooser, type SourceProviderType } from "./AddSourceChooser.js";
 import { ConnectedSourceList } from "./ConnectedSourceList.js";
 import { ConnectLocalSource } from "./ConnectLocalSource.js";
+import { DriveFolderPicker } from "./DriveFolderPicker.js";
 import { GithubRepositoryPicker } from "./GithubRepositoryPicker.js";
 import { detectPlatformAdapter } from "./platform/PlatformAdapter.js";
 import { useWorkspace } from "../workspace/workspace-context";
@@ -188,15 +189,19 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
       )}
 
       {pending?.provider === "google_drive" && (
-        // Drive 는 파일 선택에 Google Picker 가 필요하다. 아직 붙이지 않았다.
-        // 연결은 만들어졌으므로 그 사실만은 정확히 알린다.
-        <p>
-          Google Drive 연결은 만들어졌지만, 폴더를 고르는 화면이 아직 준비되지
-          않았습니다.{" "}
-          <button type="button" onClick={clearPending}>
-            확인
-          </button>
-        </p>
+        <>
+          <DriveFolderPicker
+            api={sourcesApi}
+            connectionId={pending.connectionId}
+            riskWorkspaceId={workspace.id}
+            onMounted={finishConnecting}
+          />
+          <p>
+            <button type="button" onClick={clearPending}>
+              폴더 선택 그만두기
+            </button>
+          </p>
+        </>
       )}
     </div>
   );

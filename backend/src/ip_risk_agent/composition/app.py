@@ -128,6 +128,8 @@ def _mount_drive(
 
     app.include_router(
         create_drive_mounts_router(
+            picker_api_key=source.drive_picker_api_key,
+            picker_app_id=source.drive_picker_app_id,
             provider_factory=bundle.provider_factory,
             credential_vault=ports.credential_vault,
             connection_credential_lookup=bundle.credential_lookup,

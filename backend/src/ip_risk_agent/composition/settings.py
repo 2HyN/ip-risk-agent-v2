@@ -84,6 +84,10 @@ class SourceSettings:
     drive_redirect_uri: str | None = None
     drive_webhook_base_url: str | None = None
     drive_watch_channel_token: str | None = field(default=None, repr=False)
+    # Google Picker 는 브라우저에서 열리지만 API 키와 앱 번호는 서버 설정이다.
+    # 키를 번들에 굽지 않아야 재발급 때 재빌드가 필요 없다.
+    drive_picker_api_key: str | None = field(default=None, repr=False)
+    drive_picker_app_id: str | None = None
     github_app_id: str | None = None
     github_app_slug: str | None = None
     github_app_private_key_secret_id: str | None = None
@@ -200,6 +204,8 @@ class Settings:
                 drive_redirect_uri=_clean(env, "GOOGLE_DRIVE_REDIRECT_URI"),
                 drive_webhook_base_url=_clean(env, "GOOGLE_DRIVE_WEBHOOK_BASE_URL"),
                 drive_watch_channel_token=_clean(env, "DRIVE_WATCH_CHANNEL_TOKEN"),
+                drive_picker_api_key=_clean(env, "GOOGLE_PICKER_API_KEY"),
+                drive_picker_app_id=_clean(env, "GOOGLE_PICKER_APP_ID"),
                 github_app_id=_clean(env, "GITHUB_APP_ID"),
                 github_app_slug=_clean(env, "GITHUB_APP_SLUG"),
                 github_app_private_key_secret_id=_clean(env, "GITHUB_APP_PRIVATE_KEY_SECRET_ID"),

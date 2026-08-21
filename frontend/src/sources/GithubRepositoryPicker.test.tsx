@@ -19,6 +19,12 @@ function api(overrides: Partial<SourcesApi> = {}): SourcesApi {
       },
     ]),
     createGithubMount: vi.fn(async () => ({ mountId: "mount-1" })),
+    createDrivePickerSession: vi.fn(async () => ({
+      accessToken: "tok",
+      apiKey: null,
+      appId: null,
+    })),
+    createDriveMount: vi.fn(async () => ({ mountId: "mount-1" })),
     ...overrides,
   };
 }

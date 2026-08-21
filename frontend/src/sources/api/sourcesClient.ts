@@ -63,6 +63,13 @@ type RepositoriesApiResponse = {
   }>;
 };
 
+export type DrivePickerSession = {
+  accessToken: string;
+  /** 없으면 이 배포에서 Picker 를 열 수 없다. 화면이 그 사실을 말해야 한다. */
+  apiKey: string | null;
+  appId: string | null;
+};
+
 export interface SourcesApi {
   listMounts(riskWorkspaceId: string): Promise<Mount[]>;
   listGithubRepositories(connectionId: string): Promise<GithubRepository[]>;
@@ -71,6 +78,12 @@ export interface SourcesApi {
     riskWorkspaceId: string;
     owner: string;
     repo: string;
+  }): Promise<{ mountId: string }>;
+  createDrivePickerSession(connectionId: string): Promise<DrivePickerSession>;
+  createDriveMount(input: {
+    connectionId: string;
+    riskWorkspaceId: string;
+    selectedFileIds: string[];
   }): Promise<{ mountId: string }>;
 }
 
@@ -126,6 +139,41 @@ export class HttpSourcesApi implements SourcesApi {
           risk_workspace_id: input.riskWorkspaceId,
           owner: input.owner,
           repo: input.repo,
+        }),
+      }
+    );
+    return { mountId: data.server_mount_id };
+  }
+
+  async createDrivePickerSession(connectionId: string): Promise<DrivePickerSession> {
+    const data = await this.request<{
+      access_token: string;
+      api_key?: string | null;
+      app_id?: string | null;
+    }>(
+      `/api/v1/source-connections/${encodeURIComponent(connectionId)}/drive/picker-session`,
+      { method: "POST" }
+    );
+    return {
+      accessToken: data.access_token,
+      apiKey: data.api_key ?? null,
+      appId: data.app_id ?? null,
+    };
+  }
+
+  async createDriveMount(input: {
+    connectionId: string;
+    riskWorkspaceId: string;
+    selectedFileIds: string[];
+  }): Promise<{ mountId: string }> {
+    const data = await this.request<{ server_mount_id: string }>(
+      `/api/v1/source-connections/${encodeURIComponent(input.connectionId)}/drive/mounts`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          risk_workspace_id: input.riskWorkspaceId,
+          selected_file_ids: input.selectedFileIds,
         }),
       }
     );

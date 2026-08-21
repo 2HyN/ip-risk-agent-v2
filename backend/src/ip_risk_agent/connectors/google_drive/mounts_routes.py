@@ -21,6 +21,10 @@ class DriveProviderFactory(Protocol):
 
 class PickerSessionResponse(BaseModel):
     access_token: str
+    # Google Picker 를 브라우저에서 여는 데 필요한 공개 설정. 없으면 화면이
+    # Picker 를 열 수 없다는 사실을 사용자에게 정확히 알려야 한다.
+    api_key: str | None = None
+    app_id: str | None = None
 
 
 class DriveMountCreationRequest(BaseModel):
@@ -56,6 +60,8 @@ def create_drive_mounts_router(
     tracking_scope_store,
     mount_creation_callback: DriveMountCreationCallback,
     authz_dependency: AuthzDependency = allow_all_authz,
+    picker_api_key: str | None = None,
+    picker_app_id: str | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -84,7 +90,11 @@ def create_drive_mounts_router(
 
         await credential_vault.update(credential_ref, json.dumps(provider.export_token()))
 
-        return PickerSessionResponse(access_token=access_token)
+        return PickerSessionResponse(
+            access_token=access_token,
+            api_key=picker_api_key,
+            app_id=picker_app_id,
+        )
 
     @router.post(
         "/api/v1/source-connections/{connection_id}/drive/mounts",
