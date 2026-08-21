@@ -173,12 +173,29 @@ function DriveCompletion({
   async function pick(): Promise<void> {
     setBusy(true);
     setError(null);
+    let selectedFiles: DrivePickerFile[];
     try {
       const accessToken = await sourceApi.createDrivePickerSession(connectionId);
-      setFiles(await drivePicker.pick(accessToken));
+      selectedFiles = await drivePicker.pick(accessToken);
     } catch {
-      setError("Google Drive Picker를 열지 못했습니다. 연결을 다시 승인해 주세요.");
-    } finally {
+      setError("Google Drive Picker 선택 결과를 확인하지 못했습니다. 다시 선택해 주세요.");
+      setBusy(false);
+      return;
+    }
+    setFiles(selectedFiles);
+    if (selectedFiles.length === 0) {
+      setBusy(false);
+      return;
+    }
+    try {
+      await sourceApi.createDriveMount(
+        connectionId,
+        riskWorkspaceId,
+        selectedFiles.map((file) => file.id),
+      );
+      onComplete();
+    } catch {
+      setError("선택한 Drive 파일을 mount로 만들지 못했습니다.");
       setBusy(false);
     }
   }
@@ -200,15 +217,22 @@ function DriveCompletion({
     <div className="source-completion">
       <p className="eyebrow">Google Drive connected</p>
       <h2>Select files to track</h2>
-      <p>Picker가 반환한 명시적 file ID만 tracking scope에 저장됩니다.</p>
+      <p>Picker에서 Select하면 명시적으로 선택한 file ID만 즉시 tracking scope에 저장됩니다.</p>
       {!drivePicker.available ? <p className="source-error">Drive Picker runtime configuration is unavailable.</p> : null}
       <Button type="button" variant="secondary" disabled={!drivePicker.available || busy} onClick={() => void pick()}>
         Select in Google Drive
       </Button>
       {files.map((file) => <p key={file.id} className="source-selection">{file.name}</p>)}
-      <Button type="button" disabled={files.length === 0 || busy} onClick={() => void mount()}>
-        Track selected files
-      </Button>
+      {files.length === 0 ? null : (
+        <p className="source-selection" role="status">
+          {busy ? "선택한 Drive 파일을 연결하는 중입니다." : `${files.length}개 파일이 선택되었습니다.`}
+        </p>
+      )}
+      {files.length === 0 || error === null ? null : (
+        <Button type="button" disabled={busy} onClick={() => void mount()}>
+          Retry tracking selected files
+        </Button>
+      )}
       {error === null ? null : <p className="source-error" role="alert">{error}</p>}
     </div>
   );

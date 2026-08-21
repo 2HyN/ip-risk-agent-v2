@@ -13,16 +13,8 @@ export interface DrivePickerAdapter {
 
 type RuntimeConfigProvider = () => Promise<DrivePickerRuntimeConfig>;
 
-type PickerDocument = {
-  id?: unknown;
-  name?: unknown;
-  mimeType?: unknown;
-};
-
-type PickerCallbackData = {
-  action?: unknown;
-  docs?: unknown;
-};
+type PickerDocument = Record<string, unknown>;
+type PickerCallbackData = Record<string, unknown>;
 
 interface PickerInstance {
   setVisible(visible: boolean): void;
@@ -45,7 +37,9 @@ interface DocsViewInstance {
 }
 
 interface GooglePickerRuntime {
-  Action: { PICKED: string };
+  Action: { CANCEL: string; ERROR: string; PICKED: string };
+  Response: { ACTION: string; DOCUMENTS: string };
+  Document: { ID: string; MIME_TYPE: string; NAME: string };
   Feature: { MULTISELECT_ENABLED: string };
   ViewId: { DOCS: string };
   DocsView: new (viewId: string) => DocsViewInstance;
@@ -91,14 +85,31 @@ export class GoogleDrivePickerAdapter implements DrivePickerAdapter {
           .setAppId(config.cloudProjectNumber!)
           .setOrigin(window.location.origin)
           .setCallback((data) => {
-            if (data.action !== picker.Action.PICKED) {
+            const action = data[picker.Response.ACTION];
+            if (action === picker.Action.CANCEL) {
               resolve([]);
               return;
             }
+            if (action === picker.Action.ERROR) {
+              reportPickerDiagnostic("picker_error");
+              reject(new Error("Google Drive Picker reported an error"));
+              return;
+            }
+            if (action !== picker.Action.PICKED) {
+              reportPickerDiagnostic("invalid_action");
+              reject(new Error("Google Drive Picker returned an invalid action"));
+              return;
+            }
             try {
-              resolve(validateDocuments(data.docs));
-            } catch (reason) {
-              reject(reason);
+              resolve(
+                validateDocuments(
+                  data[picker.Response.DOCUMENTS],
+                  picker.Document,
+                ),
+              );
+            } catch {
+              reportPickerDiagnostic("invalid_documents");
+              reject(new Error("Google Drive Picker returned invalid documents"));
             }
           })
           .build()
@@ -136,19 +147,34 @@ function loadPickerRuntime(): Promise<void> {
   return pickerScript;
 }
 
-function validateDocuments(value: unknown): DrivePickerFile[] {
-  if (!Array.isArray(value)) throw new Error("Drive Picker returned invalid documents");
+function validateDocuments(
+  value: unknown,
+  fields: GooglePickerRuntime["Document"],
+): DrivePickerFile[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("Drive Picker returned no documents for PICKED action");
+  }
   const ids = new Set<string>();
   return value.map((raw) => {
+    if (typeof raw !== "object" || raw === null) {
+      throw new Error("Drive Picker returned an invalid document");
+    }
     const item = raw as PickerDocument;
-    if (typeof item.id !== "string" || !item.id || ids.has(item.id)) {
+    const id = item[fields.ID];
+    const name = item[fields.NAME];
+    const mimeType = item[fields.MIME_TYPE];
+    if (typeof id !== "string" || !id || ids.has(id)) {
       throw new Error("Drive Picker returned an invalid or duplicate file ID");
     }
-    ids.add(item.id);
+    ids.add(id);
     return {
-      id: item.id,
-      name: typeof item.name === "string" && item.name ? item.name : "Selected Drive file",
-      mimeType: typeof item.mimeType === "string" ? item.mimeType : null,
+      id,
+      name: typeof name === "string" && name ? name : "Selected Drive file",
+      mimeType: typeof mimeType === "string" ? mimeType : null,
     };
   });
+}
+
+function reportPickerDiagnostic(code: string): void {
+  console.error(`[DrivePicker] callback rejected: ${code}`);
 }

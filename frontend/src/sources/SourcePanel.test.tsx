@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ControlPlaneApp } from "../app/control-plane-app.js";
 import { SourcePanel } from "./SourcePanel.js";
-import type { DrivePickerAdapter } from "./platform/DrivePickerAdapter.js";
+import {
+  GoogleDrivePickerAdapter,
+  type DrivePickerAdapter,
+  type DrivePickerFile,
+} from "./platform/DrivePickerAdapter.js";
 import type {
   ConnectLocalMountParams,
   PlatformAdapter,
@@ -36,6 +40,8 @@ class FakePlatform implements PlatformAdapter {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  delete window.google;
+  delete window.gapi;
   window.location.hash = "";
 });
 
@@ -51,8 +57,58 @@ function baseResponse(path: string): Response | null {
   return null;
 }
 
+function googlePicker(selected: DrivePickerFile[]): GoogleDrivePickerAdapter {
+  const response = { ACTION: "action", DOCUMENTS: "docs" };
+  const document = { ID: "id", MIME_TYPE: "mimeType", NAME: "name" };
+  const action = { CANCEL: "cancel", ERROR: "error", PICKED: "picked" };
+  class DocsView {
+    setIncludeFolders() { return this; }
+    setSelectFolderEnabled() { return this; }
+  }
+  class PickerBuilder {
+    private callback: ((data: Record<string, unknown>) => void) | null = null;
+    addView() { return this; }
+    enableFeature() { return this; }
+    setOAuthToken() { return this; }
+    setDeveloperKey() { return this; }
+    setAppId() { return this; }
+    setOrigin() { return this; }
+    setCallback(value: (data: Record<string, unknown>) => void) {
+      this.callback = value;
+      return this;
+    }
+    build() {
+      const callbackData = {
+        [response.ACTION]: action.PICKED,
+        [response.DOCUMENTS]: selected.map((file) => ({
+          [document.ID]: file.id,
+          [document.NAME]: file.name,
+          [document.MIME_TYPE]: file.mimeType,
+        })),
+      };
+      return {
+        setVisible: () => queueMicrotask(() => this.callback?.(callbackData)),
+      };
+    }
+  }
+  window.google = { picker: {
+    Action: action,
+    Response: response,
+    Document: document,
+    Feature: { MULTISELECT_ENABLED: "multiselectEnabled" },
+    ViewId: { DOCS: "all" },
+    DocsView,
+    PickerBuilder,
+  } };
+  return new GoogleDrivePickerAdapter(async () => ({
+    enabled: true,
+    browserApiKey: "restricted-browser-key",
+    cloudProjectNumber: "123456789012",
+  }));
+}
+
 describe("SourcePanel product integration", () => {
-  it("opens Drive Picker and mounts only the explicitly selected file IDs", async () => {
+  it("mounts Picker-selected Drive files immediately and refreshes source state", async () => {
     window.location.hash = "#/w/vws-1/sources?provider=GOOGLE_DRIVE&connection_id=pending-12345678&status=connected";
     const calls: Array<{ path: string; init: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -64,6 +120,41 @@ describe("SourcePanel product integration", () => {
       if (path.endsWith("/drive/mounts")) return response({ server_mount_id: "mount-7", source_workspace_id: "source-7" });
       return response({ code: "NOT_FOUND" }, 404);
     }));
+    const picker = googlePicker([
+      { id: "file-7", name: "Claims", mimeType: "text/plain" },
+      { id: "file-8", name: "Prior art", mimeType: "application/pdf" },
+    ]);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Select in Google Drive" }));
+
+    expect(await screen.findByText("Google Drive files가 연결되었습니다.")).toBeInTheDocument();
+    const mount = calls.find((call) => call.path.endsWith("/drive/mounts"));
+    expect(mount?.path).toContain("/source-connections/pending-12345678/");
+    expect(JSON.parse(String(mount?.init.body))).toMatchObject({
+      risk_workspace_id: "vws-1",
+      selected_file_ids: ["file-7", "file-8"],
+    });
+    expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary")))
+      .toHaveLength(2);
+  });
+
+  it("keeps the selection and shows a retry action when Drive mount creation fails", async () => {
+    window.location.hash = "#/w/vws-1/sources?provider=GOOGLE_DRIVE&connection_id=pending-12345678&status=connected";
+    let failMount = true;
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      calls.push({ path, init: init ?? {} });
+      const base = baseResponse(path);
+      if (base !== null) return base;
+      if (path.endsWith("/drive/picker-session")) return response({ access_token: "short-lived-picker-token" });
+      if (path.endsWith("/drive/mounts")) {
+        if (failMount) return response({ code: "SOURCE_UNAVAILABLE" }, 503);
+        return response({ server_mount_id: "mount-7", source_workspace_id: "source-7" });
+      }
+      return response({ code: "NOT_FOUND" }, 404);
+    }));
     const picker: DrivePickerAdapter = {
       available: true,
       pick: vi.fn(async () => [{ id: "file-7", name: "Claims", mimeType: "text/plain" }]),
@@ -71,15 +162,39 @@ describe("SourcePanel product integration", () => {
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Select in Google Drive" }));
-    expect(await screen.findByText("Claims")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Track selected files" }));
 
+    expect(await screen.findByRole("alert")).toHaveTextContent("mount로 만들지 못했습니다");
+    expect(screen.getByText("Claims")).toBeInTheDocument();
+    expect(calls.filter((call) => call.path.endsWith("/drive/mounts"))).toHaveLength(1);
+
+    failMount = false;
+    await userEvent.click(screen.getByRole("button", { name: "Retry tracking selected files" }));
     expect(await screen.findByText("Google Drive files가 연결되었습니다.")).toBeInTheDocument();
-    const mount = calls.find((call) => call.path.endsWith("/drive/mounts"));
-    expect(JSON.parse(String(mount?.init.body))).toMatchObject({
-      risk_workspace_id: "vws-1",
-      selected_file_ids: ["file-7"],
-    });
+    expect(calls.filter((call) => call.path.endsWith("/drive/mounts"))).toHaveLength(2);
+  });
+
+  it("shows a safe error and never calls mounts when Picker callback parsing fails", async () => {
+    window.location.hash = "#/w/vws-1/sources?provider=GOOGLE_DRIVE&connection_id=pending-12345678&status=connected";
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      calls.push({ path, init: init ?? {} });
+      const base = baseResponse(path);
+      if (base !== null) return base;
+      if (path.endsWith("/drive/picker-session")) return response({ access_token: "short-lived-picker-token" });
+      return response({ code: "NOT_FOUND" }, 404);
+    }));
+    const picker: DrivePickerAdapter = {
+      available: true,
+      pick: vi.fn(async () => { throw new Error("invalid_documents"); }),
+    };
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Select in Google Drive" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("선택 결과를 확인하지 못했습니다");
+    expect(calls.some((call) => call.path.endsWith("/drive/mounts"))).toBe(false);
+    expect(screen.queryByText("invalid_documents")).not.toBeInTheDocument();
   });
 
   it("completes a GitHub callback with the current workspace and CSRF token", async () => {

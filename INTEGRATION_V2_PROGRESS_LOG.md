@@ -1076,3 +1076,41 @@ validator failure로 확인했다.
 - 새 RC SHA와 clean status는 commit 후 완료 보고에 기록한다.
 - 외부에는 새 image build/deploy와 Worker/API runtime smoke, 기존 Phase 9 live ADC/provider
   E2E가 남아 있다.
+
+## Phase 9 staging Drive Picker → mount frontend blocker
+
+### live evidence와 원인
+
+- Google Login, Drive OAuth, `pending-*` picker-session 및 실제 Picker 표시/선택은 성공했다.
+- 기존 frontend UX는 Picker의 Select에서 `files` state만 설정하고 별도
+  `Track selected files` 버튼을 눌러야 mount POST를 실행했다. 따라서 Picker Select만으로는
+  `/drive/mounts` 요청이나 source refresh가 발생하지 않는 two-step 경계가 live 기대와
+  불일치했다.
+- Picker adapter test double은 공식 `google.picker.Response`와
+  `google.picker.Document` namespace 없이 literal `action/docs/id` payload만 전달했다. 현재
+  field 문자열과 우연히 일치하는 mock이라 공식 enum 기반 callback 경계와 malformed/error
+  처리를 검증하지 못했다.
+
+### frontend 수렴
+
+1. Google Picker callback은 `Response.ACTION`, `Response.DOCUMENTS`, `Action.PICKED/CANCEL/ERROR`,
+   `Document.ID/NAME/MIME_TYPE`으로 해석한다.
+2. `PICKED`에 documents가 없거나 ID가 invalid/duplicate인 경우 더 이상 빈 선택으로
+   성공하지 않고 safe error로 거부한다. console diagnostic은 고정 reason code만 포함하며
+   OAuth token과 raw Drive metadata를 기록하지 않는다. CANCEL은 정상적인 빈 선택이다.
+3. UX를 Picker Select 즉시 `pending-*` connection ID로 mount POST를 실행하는 one-step 흐름으로
+   변경했다. 성공하면 source state를 reload하고, mount 실패 시 선택 파일을 유지한 채 오류와
+   retry action을 표시한다.
+4. `pending-*`는 OAuth 이후 mount registration에 사용하는 의도된 backend handle이다. mount
+   성공 시 backend가 canonical connection을 생성하고 pending record를 ACTIVE로 전환하므로
+   frontend에서 임의 치환하지 않는다.
+
+### 검증 상태
+
+- Google Picker 공식 shape, 복수 ID, CANCEL, ERROR/malformed, PICKED-without-documents,
+  safe diagnostic: 통과.
+- selected IDs → pending connection mount POST, 성공 후 source refresh, 실패 UI/retry: 통과.
+- frontend 전체 test: `39 passed`; typecheck/build: 통과.
+- 관련 backend Drive mount/pending boundary: `9 passed`.
+- backend/API, Drive scope, GCP resource/IAM/OAuth client 계약은 변경하지 않았다.
+- 실제 GCP 명령은 실행하지 않았다.
