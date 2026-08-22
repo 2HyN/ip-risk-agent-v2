@@ -14,7 +14,7 @@
  * 파일이 있는지**를 본다.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -37,4 +37,20 @@ test("main 이 가리키는 preload 경로와 산출물 위치가 같다", () =>
   // 마찬가지로 다리가 놓이지 않는다.
   const fromMain = join(distPreload, "..", "main", "..", "preload", "preload.cjs");
   assert.ok(existsSync(fromMain), `${fromMain} 가 없다`);
+});
+
+
+test("preload 가 노출하는 채널이 허용 목록과 정확히 같다", async () => {
+  // sandbox preload 는 상대 경로 모듈을 부를 수 없어 목록을 안에 적어 두었다.
+  // 두 곳에 있는 값이므로 어긋나면 여기서 잡는다 — 한쪽에만 채널을 더하면 화면이
+  // 그 기능을 부르지 못하거나, 허용하지 않은 것을 부르게 된다.
+  const { ALLOWED_RENDERER_CHANNELS } = await import("./channels.cjs");
+  const source = readFileSync(join(distPreload, "preload.cjs"), "utf8");
+
+  const opened = source.indexOf("ALLOWED_RENDERER_CHANNELS = [");
+  assert.notEqual(opened, -1, "preload 에서 채널 목록을 찾지 못했다");
+  const literal = source.slice(opened, source.indexOf("]", opened));
+  const exposed = [...literal.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
+
+  assert.deepEqual(exposed, [...ALLOWED_RENDERER_CHANNELS]);
 });

@@ -145,6 +145,17 @@ async function bootstrap(): Promise<void> {
       preload: join(currentDir, "../preload/preload.cjs"),
     },
   });
+  // preload 가 실패하면 Electron 은 renderer 콘솔에만 적고 창은 멀쩡히 뜬다.
+  // 그러면 `window.desktopApi` 가 없어 화면이 desktop 을 web 으로 보고 Local
+  // Folder 를 잠그는데, 겉으로는 아무 문제도 없어 보인다. 실제로 그 상태를 한참
+  // 들여다봤다. 터미널에 남긴다.
+  //
+  // 경로 전체는 남기지 않는다 — 사용자의 로컬 절대경로다. 파일 이름과 사유만 적는다.
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    const name = preloadPath.split(/[\/]/u).pop();
+    console.error(`preload failed: ${name}: ${error.message}`);
+  });
+
   applyNavigationPolicy(window, rendererUrl, serverBaseUrl);
   await window.loadURL(rendererUrl);
 }
