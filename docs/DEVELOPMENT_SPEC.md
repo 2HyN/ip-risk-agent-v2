@@ -756,6 +756,7 @@ Drive watch 갱신 · Drive 대조 · 만료 상태 정리 · 소스 상태 갱�
 | 22 | 이전 작업이 남긴 근거가 그대로 붙어 있다 | 판본과 근거의 시점 불일치 | **열림** — 0-H 가 닫지 않는다 (§5.6) |
 | 23 | 런타임 SA 에 `secrets.delete` 가 없어 **workspace 삭제가 끝나지 못한다** | **운영 정지** | §9.4 (배포 영역) |
 | 24 | **외부 사실 변화를 촉발하는 것이 없다** — 파일이 안 바뀌면 라이선스 변경을 영영 모른다 | **핵심 값 미구현** | §7.6 |
+| 25 | 제외 수단 셋이 **서로 다른 매처**를 쓴다. `.ipriskignore` 는 안 맞으면 조용히 0 개를 거른다 | **비용 통제 무력** | §9.1 |
 | — | 좀비 실행을 손으로 못 푼다 | — | **닫힘** (`bfc615d`) |
 | — | Overview 가 실패를 영구 누적 | — | **닫힘** (`5f19ccf`) |
 
@@ -841,8 +842,48 @@ KIPRIS 무료 등급은 **월 1,000 회**다.
 | workspace `global_ignore_text` | 관문이 막아 provider 호출 없음 | 빈 문자열 |
 | `include/exclude patterns` | 스코프 단계 | API 는 받는데 **프론트가 빈 배열** |
 
-**명세** — 폴더 마운트를 열기 전에 최소 하나를 채운다. 기본 제외 목록(`node_modules/`,
-`.venv/`, `dist/`, `vendor/` 등)을 두는 것을 권한다.
+**[확인·실측] 그리고 셋이 서로 다른 매처를 쓴다.**
+
+| 수단 | 구현 | 패턴이 안 맞으면 |
+|---|---|---|
+| source `.ipriskignore` | `connectors/common/ipriskignore.py` — `fnmatch(path, pattern)` | **조용히 0 개를 거른다** |
+| workspace `global_ignore_text` | `application/security_gate/ignore.py` — 정규식 `fullmatch`, 선행 `/` 필수 | `POLICY_INVALID` 로 거부 |
+| tracking scope `exclude_patterns` | `connectors/github/tracking_scope.py:26` — `fnmatch` | 조용히 0 개를 거른다 |
+
+`/backend/node_modules/a/b.js` 로 실측한 결과다.
+
+| 쓴 패턴 | `.ipriskignore` | workspace |
+|---|---|---|
+| `node_modules` | 안 거른다 | 오류 |
+| `**/node_modules/**` | 안 거른다 | 오류 |
+| `*node_modules/*` | **거른다** | 오류 |
+| `/**/node_modules/**` | 안 거른다 | **거른다** |
+
+**두 곳 모두에서 동작하는 문자열이 하나도 없다.** 그리고 사람이 가장 자연스럽게 적는
+`node_modules` 는 어느 쪽에서도 안 걸린다 — 한쪽은 오류로 보이기라도 하지만
+`.ipriskignore` 는 **조용히 아무것도 안 거른다.** 제외 목록을 적어 두고 다 걸러진다고
+믿는 상태가 된다.
+
+**실측이 규모를 보여 준다** (`docs/SOURCE_MEASUREMENT.md`).
+
+| | 특허 경로 파일 | KIPRIS 최대 | 월 한도 대비 |
+|---|---|---|---|
+| 이 저장소, GitHub 마운트 | 417 | 4,587 | **4.6 배** |
+| 이 저장소, Local 마운트 | 20,764 | 228,404 | **228 배** |
+
+GitHub 은 추적 파일만 보므로 `.gitignore` 가 걸러 준다. **Local 은 디스크를 본다** —
+`node_modules`·`.venv`·`.pytest-tmp` 가 전부 들어와 50 배가 벌어진다. 빌드 산출물을 빼면
+228 배가 4.8 배로 내려와 GitHub 과 같은 자리에 오고, 거기서 소스 코드까지 빼야 0.6 배로
+**한도 안에 들어오는 유일한 조합**이 된다.
+
+**명세** — 폴더 마운트를 열기 전에 세 가지를 함께 한다.
+
+1. **매처를 하나로 통일한다.** 세 수단이 같은 문자열을 같게 해석해야 한다. 사람이
+   `node_modules` 라고 적으면 세 곳 모두에서 걸려야 한다.
+2. **안 맞는 패턴을 조용히 넘기지 않는다.** 어느 패턴도 아무것도 거르지 않았다면 그것을
+   말한다. workspace 쪽이 오류로 거부하는 것이 옳은 방향이다.
+3. **기본 제외 목록을 둔다** (`node_modules/`, `.venv/`, `dist/`, `vendor/` 등). 다만
+   1 이 없으면 이 목록도 조용히 아무것도 안 거른다.
 
 ### 9.2 캐시
 
