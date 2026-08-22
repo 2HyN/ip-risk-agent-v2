@@ -1043,22 +1043,22 @@ td small {
 /* ------------------------------------------------ evidence highlight
  * 근거 발췌 안의 위반 지점. 우선순위가 곧 색이다 (v1 의 tier 색과 같은 감각).
  */
+/* v1 의 강조 감각: 배경 칠이 아니라 굵은 색 글자. 배경 칩은 본문 흐름을
+ * 끊고, LOW 를 회색으로 칠하면 아예 안 보인다 — 실제로 그런 피드백을
+ * 받았다. 등급은 색으로만 구분한다: HIGH 빨강, 그 외 주황. */
 .evidence-mark {
-  padding: 0 0.25em;
-  border-radius: 4px;
-  font-weight: 600;
+  background: transparent;
+  padding: 0;
+  font-weight: 700;
 }
 .evidence-mark--high {
-  background: #fdd8d8;
-  color: #8a1f1f;
+  color: #dc2626;
 }
 .evidence-mark--medium {
-  background: #fdeeC8;
-  color: #7a5200;
+  color: #ea580c;
 }
 .evidence-mark--low {
-  background: #e2e8f0;
-  color: #334155;
+  color: #ea580c;
 }
 
 /* ------------------------------------------------ tracked files listing */
@@ -1152,4 +1152,18 @@ td small {
   font-size: 0.8rem;
   color: #64748b;
   word-break: break-all;
+}
+
+
+/* ------------------------------------------------ review panel toggle */
+.review-toggle-panel {
+  margin-bottom: 1rem;
+}
+
+.detail-grid--full {
+  grid-template-columns: minmax(0, 1fr);
+}
+.detail-grid .review-toggle-panel {
+  grid-column: 1 / -1;
+  grid-row: 1;
 }

@@ -36,6 +36,9 @@ export function RiskDetailPage() {
   const [disposition, setDisposition] =
     useState<Risk["review_disposition"]>("UNREVIEWED");
   const [comment, setComment] = useState("");
+  // 검토 패널은 기본으로 접는다. 화면의 주인공은 원문/특허 대조이고,
+  // 사이드로 두면 대조 폭이 절반으로 준다 — 실제로 그런 피드백을 받았다.
+  const [showReview, setShowReview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mutationError, setMutationError] = useState<Error | null>(null);
 
@@ -104,6 +107,12 @@ export function RiskDetailPage() {
             >
               {openLabel} ↗
             </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setShowReview((current) => !current)}
+            >
+              {showReview ? "검토 패널 닫기" : "Reviewer decision"}
+            </Button>
             <Link
               className="button button--secondary"
               to={`/w/${workspace.id}/risks/${risk.id}/timeline`}
@@ -114,7 +123,7 @@ export function RiskDetailPage() {
         }
       />
       {mutationError === null ? null : <ErrorState error={mutationError} />}
-      <div className="detail-grid">
+      <div className={showReview ? "detail-grid" : "detail-grid detail-grid--full"}>
         <div className="detail-main">
           <Card>
             <div className="status-grid">
@@ -218,7 +227,9 @@ export function RiskDetailPage() {
             </dl>
           </Card>
         </div>
-        <aside>
+        {showReview && (
+          <aside className="review-toggle-panel">
+
           {canReview ? (
             <Card className="review-card">
               <p className="eyebrow">Reviewer decision</p>
@@ -272,7 +283,9 @@ export function RiskDetailPage() {
               </p>
             </Card>
           )}
-        </aside>
+
+          </aside>
+        )}
       </div>
     </div>
   );
