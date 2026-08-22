@@ -29,6 +29,9 @@ class EvidenceRetentionPolicy:
     max_metadata_depth: int = 4
     max_metadata_json_bytes: int = 4_096
     max_summary_chars: int = 300
+    # 설명과 권고는 Risk 한 줄 요약과 쓰임이 다르다. 어느 청구항이 문서의 어느
+    # 부분과 어떻게 겹치는지를 적으므로 한 줄에 들어가지 않는다.
+    max_explanation_chars: int = 800
     max_failure_message_chars: int = 512
 
     def __post_init__(self) -> None:
@@ -40,6 +43,7 @@ class EvidenceRetentionPolicy:
             "max_metadata_depth",
             "max_metadata_json_bytes",
             "max_summary_chars",
+            "max_explanation_chars",
             "max_failure_message_chars",
         ):
             if getattr(self, field_name) < 1:
@@ -89,10 +93,43 @@ def sanitize_metadata(
 
 def sanitize_summary(value: str, policy: EvidenceRetentionPolicy) -> str:
     redacted, _ = redact_text(value.strip())
-    summary = redacted[: policy.max_summary_chars]
+    summary = _clip(redacted, policy.max_summary_chars)
     if not summary:
         raise EvidenceRetentionError("risk summary must not be empty")
     return summary
+
+
+def sanitize_explanation(value: str, policy: EvidenceRetentionPolicy) -> str:
+    """설명과 권고를 다듬는다. 한 줄 요약보다 길이를 넉넉히 준다."""
+    redacted, _ = redact_text(value.strip())
+    explanation = _clip(redacted, policy.max_explanation_chars)
+    if not explanation:
+        raise EvidenceRetentionError("risk explanation must not be empty")
+    return explanation
+
+
+#: 문장이 끝난 자리. 닫는 따옴표와 괄호까지 함께 가져간다.
+_SENTENCE_END = re.compile(r"[.!?][\s\"')\]]*")
+
+
+def _clip(text: str, limit: int) -> str:
+    """길이를 넘으면 **문장 경계에서** 자른다.
+
+    글자 수로 끊으면 문장 한가운데서 멈춰, 읽는 사람에게 뜻이 다르게 전달된다.
+    실제로 "…해당 특허 청구범위의 구성" 에서 끊긴 설명이 배포에 나갔다 — 정작
+    무엇이 문제라는 것인지가 잘려 나간 자리에 있었다.
+
+    잘라낼 문장 경계가 앞쪽에만 있으면 대부분을 버리게 되므로, 그때는 한도에서
+    끊고 말줄임표로 **덜 왔다는 것을 보이게** 한다. 조용히 끊는 것보다 낫다.
+    """
+    text = text.rstrip()
+    if len(text) <= limit:
+        return text
+    window = text[:limit]
+    boundaries = list(_SENTENCE_END.finditer(window))
+    if boundaries and boundaries[-1].end() >= limit // 2:
+        return window[: boundaries[-1].end()].rstrip()
+    return window.rstrip() + "…"
 
 
 def sanitize_failure_message(value: str, policy: EvidenceRetentionPolicy) -> str:

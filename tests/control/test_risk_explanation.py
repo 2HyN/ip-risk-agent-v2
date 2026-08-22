@@ -10,6 +10,7 @@ import pytest
 from iprisk_contracts import AnalysisType, ReviewPriority
 
 from ip_risk_agent.application.repositories import InMemoryControlStore
+from ip_risk_agent.application.risk_reconcile.retention import EvidenceRetentionPolicy
 from ip_risk_agent.application.risk_explanation import (
     RiskExplanation,
     RiskExplanationService,
@@ -204,3 +205,54 @@ def test_a_google_doc_is_not_denied_for_its_source_format() -> None:
         "application/vnd.google-apps.spreadsheet", ArtifactKind.DOCUMENT_TEXT, policy
     )
     assert _mime_is_denied("image/png", ArtifactKind.DOCUMENT_TEXT, policy)
+
+
+def test_a_long_explanation_is_cut_at_a_sentence_not_mid_word() -> None:
+    """문장 한가운데서 끊긴 설명은 뜻이 다르게 읽힌다.
+
+    배포에 "…해당 특허 청구범위의 구성" 에서 끊긴 설명이 나갔다. 정작 무엇이
+    문제라는 것인지가 잘려 나간 자리에 있었다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        await seed(store)
+        sentence = "청구항과 문서의 처리 방식이 같은 구성으로 보입니다. "
+        explainer = ScriptedExplainer(
+            RiskExplanation(
+                summary=sentence * 40,
+                recommendation="특허팀 검토를 요청하세요.",
+                reference_evidence_ids=("patent:1:claim:1",),
+            )
+        )
+        await _service(store, explainer).explain_risks(("risk-1",))
+
+        async with store() as uow:
+            risk = await uow.risks.get("risk-1")
+        assert risk.explanation_safe.endswith("다.")
+        # 한 줄 요약보다 길이를 넉넉히 준다. 설명은 쓰임이 다르다.
+        assert len(risk.explanation_safe) > EvidenceRetentionPolicy().max_summary_chars
+
+    run(scenario())
+
+
+def test_an_explanation_with_no_sentence_break_shows_that_it_was_cut() -> None:
+    """자를 문장 경계가 없으면 조용히 끊지 않고 덜 왔다는 것을 보인다."""
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        await seed(store)
+        explainer = ScriptedExplainer(
+            RiskExplanation(
+                summary="겹" * 2_000,
+                recommendation="특허팀 검토를 요청하세요.",
+                reference_evidence_ids=("patent:1:claim:1",),
+            )
+        )
+        await _service(store, explainer).explain_risks(("risk-1",))
+
+        async with store() as uow:
+            risk = await uow.risks.get("risk-1")
+        assert risk.explanation_safe.endswith("\u2026")
+
+    run(scenario())

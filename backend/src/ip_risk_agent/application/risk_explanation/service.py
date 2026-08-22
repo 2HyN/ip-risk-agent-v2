@@ -28,7 +28,7 @@ from typing import Protocol
 from ip_risk_agent.application.repositories import ControlUnitOfWorkFactory
 from ip_risk_agent.application.risk_reconcile.retention import (
     EvidenceRetentionPolicy,
-    sanitize_summary,
+    sanitize_explanation,
 )
 from ip_risk_agent.core.risk import Risk, RiskEvidence
 
@@ -115,8 +115,8 @@ class RiskExplanationService:
                 continue
 
             try:
-                summary = sanitize_summary(explanation.summary, self._retention)
-                recommendation = sanitize_summary(
+                summary = sanitize_explanation(explanation.summary, self._retention)
+                recommendation = sanitize_explanation(
                     explanation.recommendation, self._retention
                 )
             except Exception:  # noqa: BLE001 - 보존 정책을 못 지나면 붙이지 않는다
