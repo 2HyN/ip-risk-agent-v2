@@ -241,6 +241,37 @@ v3 는 지금 배경 칩(`evidence-highlight.tsx`)이고, v1 은 그 길을 가 
 
 ---
 
+## 3-9. Desktop 을 실제로 켜기
+
+한 번도 켜 본 적이 없었다. 켜 보니 코드 문제는 없었고, **설치가 덜 되어 있었다.**
+
+`electron` 은 devDependency 로 선언돼 있지만 **바이너리가 내려받아지지 않은
+상태**였다(`node_modules/.../electron/dist` 없음, `path.txt` 없음). 설치 스크립트가
+건너뛰어진 것으로 보인다. 다음으로 받는다.
+
+```
+pnpm rebuild electron
+```
+
+그다음 서버를 가리켜 켠다. 렌더러는 배포된 웹 앱(`{서버}/app`)을 그대로 띄우므로
+UI 개편이 desktop 에도 그대로 반영된다.
+
+```
+IPRISK_SERVER_BASE_URL=https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app APP_ENV=production pnpm --filter @iprisk/desktop start
+```
+
+`APP_ENV=production` 이면 렌더러 주소가 서버와 같은 origin 이어야 한다는 검사가
+켜진다(`main/index.ts`). 로컬 서버로 붙일 때는 이 변수 없이 켜면
+`http://127.0.0.1:8000` 을 본다.
+
+**주의 — 개발 도구 안에서 켜지 않는다.** VS Code 같은 Electron 기반 도구의
+터미널은 `ELECTRON_RUN_AS_NODE=1` 을 물려준다. 그 값이 있으면 Electron 이 순수
+Node 로 동작해 내장 `electron` 모듈이 없고, 앱은 `app` 이 undefined 라며 죽는다.
+**앱의 결함이 아니다** — 이 자리에서 한 번 잘못 짚어 빌드 방식까지 바꿨다가
+되돌렸다. 별도 터미널에서 켜거나 그 변수를 지우고 켠다.
+
+---
+
 ## 4. 순서
 
 | | 할 일 | 상태 |
