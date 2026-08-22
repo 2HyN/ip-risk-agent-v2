@@ -999,3 +999,87 @@ def test_the_score_reaches_the_candidate_metadata_without_changing_the_grade():
         assert 0.0 <= float(meta["evidence_strength"]) <= 1.0
         # 등급은 여전히 규칙이 정한다.
         assert candidate.suggested_review_priority in set(ReviewPriority)
+
+
+def test_a_fabricated_quote_discards_the_whole_comparison():
+    """인용도 ID 와 같은 원칙으로 다룬다.
+
+    일부가 조작된 결과에서 나머지만 믿을 근거가 없다 (Agent 3 Spec 19).
+    """
+    from ip_risk_agent.intelligence.gemini.schemas import MatchedElement, PatentComparison
+
+    bodies = {
+        "src:seg-1": "코덱 복호화 파라미터를 특징 벡터로 구성한다.",
+        f"patent:{PATENT_A}:abstract": "SMV decoder parameters are used as a feature vector.",
+    }
+    fabricated = PatentComparison(
+        application_number=PATENT_A,
+        matched_elements=[
+            MatchedElement(
+                source_segment_id="seg-1",
+                patent_evidence_id=f"patent:{PATENT_A}:abstract",
+                explanation="겹친다",
+                source_quote="문서에 없는 문장을 지어냈다",
+                patent_quote="",
+            )
+        ],
+    )
+    with pytest.raises(MalformedProviderOutputError):
+        grounding.validate_comparison(
+            fabricated,
+            allowed_segment_ids={"seg-1"},
+            evidence_types={f"patent:{PATENT_A}:abstract": EvidenceType.PATENT_ABSTRACT},
+            evidence_bodies=bodies,
+        )
+
+
+def test_a_real_quote_yields_a_span_into_the_stored_evidence():
+    """조각까지 좁힌 다음, 그 안에서 다시 문장으로 좁힌다."""
+    from ip_risk_agent.intelligence.gemini.schemas import MatchedElement, PatentComparison
+
+    body = "앞 문장이다.\n코덱 복호화  파라미터를 특징 벡터로 구성한다.\n뒤 문장이다."
+    bodies = {"src:seg-1": body, f"patent:{PATENT_A}:abstract": "초록 본문이 여기에 있다."}
+    grounded = grounding.validate_comparison(
+        PatentComparison(
+            application_number=PATENT_A,
+            matched_elements=[
+                MatchedElement(
+                    source_segment_id="seg-1",
+                    patent_evidence_id=f"patent:{PATENT_A}:abstract",
+                    explanation="겹친다",
+                    # 모델은 공백을 다듬어 인용한다. 그래도 찾아야 한다.
+                    source_quote="코덱 복호화 파라미터를 특징 벡터로 구성한다",
+                    patent_quote="초록 본문이 여기에 있다",
+                )
+            ],
+        ),
+        allowed_segment_ids={"seg-1"},
+        evidence_types={f"patent:{PATENT_A}:abstract": EvidenceType.PATENT_ABSTRACT},
+        evidence_bodies=bodies,
+    )
+    span = grounded.quote_spans["src:seg-1"]
+    # 위치는 저장된 원문 기준이어야 화면이 그대로 강조할 수 있다.
+    assert body[span.start : span.end] == "코덱 복호화  파라미터를 특징 벡터로 구성한다"
+    assert f"patent:{PATENT_A}:abstract" in grounded.quote_spans
+
+
+def test_a_missing_quote_is_allowed_and_simply_has_no_highlight():
+    from ip_risk_agent.intelligence.gemini.schemas import MatchedElement, PatentComparison
+
+    grounded = grounding.validate_comparison(
+        PatentComparison(
+            application_number=PATENT_A,
+            matched_elements=[
+                MatchedElement(
+                    source_segment_id="seg-1",
+                    patent_evidence_id=f"patent:{PATENT_A}:abstract",
+                    explanation="겹친다",
+                )
+            ],
+        ),
+        allowed_segment_ids={"seg-1"},
+        evidence_types={f"patent:{PATENT_A}:abstract": EvidenceType.PATENT_ABSTRACT},
+        evidence_bodies={"src:seg-1": "아무 문장", f"patent:{PATENT_A}:abstract": "초록"},
+    )
+    assert grounded.quote_spans == {}
+    assert grounded.match_count == 1

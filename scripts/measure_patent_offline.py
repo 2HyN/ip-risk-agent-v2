@@ -101,6 +101,8 @@ async def run(documents: list[Path]) -> int:
                 f"matched={len(candidate.matched_elements)} "
                 f"claim={meta.get('has_claim_evidence')} "
                 f"truncated={meta.get('evidence_truncated')} "
+                f"strength={meta.get('evidence_strength')} "
+                f"quotes={len(meta.get('quote_spans') or {})} "
                 f"{candidate.normalized_application_number}"
             )
 

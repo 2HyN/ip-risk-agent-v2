@@ -10,11 +10,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 
 from iprisk_contracts.common import EvidenceType, ReviewPriority
 
 from ..common.errors import MalformedProviderOutputError
+from .quote import QuoteSpan, locate_quote
 from ..gemini.schemas import PatentComparison
 
 
@@ -30,6 +31,8 @@ class GroundedComparison:
     has_claim_evidence: bool
     #: 대조가 본 근거가 원문의 일부였는지. 모델에게 묻지 않고 원장이 기록한 사실이다.
     evidence_truncated: bool = False
+    #: 근거 ID -> 그 근거 본문 안에서 강조할 구간. 실재가 확인된 것만 담긴다.
+    quote_spans: dict[str, QuoteSpan] = dataclass_field(default_factory=dict)
 
     @property
     def match_count(self) -> int:
@@ -42,6 +45,7 @@ def validate_comparison(
     allowed_segment_ids: set[str],
     evidence_types: dict[str, EvidenceType],
     truncated_evidence_ids: frozenset[str] = frozenset(),
+    evidence_bodies: dict[str, str] | None = None,
 ) -> GroundedComparison:
     """모델 출력을 검증한다. 통과하지 못하면 결과 전체를 버린다.
 
@@ -51,6 +55,8 @@ def validate_comparison(
     matched: list[str] = []
     evidence_ids: list[str] = []
     has_claim = False
+    bodies = evidence_bodies or {}
+    spans: dict[str, QuoteSpan] = {}
 
     for element in comparison.matched_elements:
         if element.source_segment_id not in allowed_segment_ids:
@@ -70,12 +76,28 @@ def validate_comparison(
             has_claim = True
 
         matched.append(element.explanation.strip())
-        for evidence_id in (
-            f"src:{element.source_segment_id}",
-            element.patent_evidence_id,
+        source_evidence_id = f"src:{element.source_segment_id}"
+        for evidence_id, quote in (
+            (source_evidence_id, element.source_quote),
+            (element.patent_evidence_id, element.patent_quote),
         ):
             if evidence_id not in evidence_ids:
                 evidence_ids.append(evidence_id)
+            if not quote.strip():
+                # 인용을 내지 않은 것은 허용한다. 하이라이트가 없을 뿐이다.
+                continue
+            body = bodies.get(evidence_id)
+            if body is None:
+                continue
+            span = locate_quote(body, quote)
+            if span is None:
+                # 지어낸 인용이다. 일부가 조작된 결과에서 나머지만 믿을 근거가 없다.
+                raise MalformedProviderOutputError(
+                    "GEMINI",
+                    f"comparison quoted text that is not in the evidence for "
+                    f"{comparison.application_number}",
+                )
+            spans.setdefault(evidence_id, span)
 
     return GroundedComparison(
         application_number=comparison.application_number,
@@ -86,6 +108,7 @@ def validate_comparison(
         evidence_truncated=any(
             evidence_id in truncated_evidence_ids for evidence_id in evidence_ids
         ),
+        quote_spans=spans,
     )
 
 

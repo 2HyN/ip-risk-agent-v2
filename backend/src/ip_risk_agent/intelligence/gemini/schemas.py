@@ -38,12 +38,22 @@ class TechnicalExtraction(_Output):
 class MatchedElement(_Output):
     """겹치는 구성 하나. 양쪽 근거를 ID 로 가리킨다.
 
-    인용문을 직접 만들게 하면 지어낸다. ID 로 가리키게 하고 코드가 대조한다.
+    ID 로 가리키게 하고 코드가 대조한다. 인용도 같은 원칙으로 다룬다 — 모델이 낸
+    구절이 본문에 **실제로 있는지 코드가 확인**하고, 없으면 그 대조 전체를 버린다.
+    인용이 필요한 이유는 조각 안에서 다시 문장 단위로 좁혀야 하기 때문이다.
     """
 
     source_segment_id: str
     patent_evidence_id: str
     explanation: str
+    source_quote: str = Field(
+        default="",
+        description="문서 조각에서 그대로 옮긴 구절. 한 글자도 바꾸지 않는다",
+    )
+    patent_quote: str = Field(
+        default="",
+        description="특허 근거에서 그대로 옮긴 구절. 한 글자도 바꾸지 않는다",
+    )
 
 
 class PatentComparison(_Output):

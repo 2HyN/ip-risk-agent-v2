@@ -294,6 +294,14 @@ class PatentAnalyzer:
                 evidence_types=evidence.types,
                 # 잘렸는지는 모델에게 묻지 않는다. 원장이 아는 사실이다.
                 truncated_evidence_ids=builder.ledger.truncated_ids,
+                # 인용이 본문에 실제로 있는지 코드가 확인한다. 양쪽 본문을 넘긴다.
+                evidence_bodies={
+                    **{
+                        source_segment_id(segment.segment_id): segment.text
+                        for segment in artifact.text_segments
+                    },
+                    **evidence.text_by_id,
+                },
             )
         except MalformedProviderOutputError as failure:
             # 지어낸 근거가 섞였다. 이 특허에 대한 판단 전체를 버린다.
@@ -341,6 +349,12 @@ class PatentAnalyzer:
                     "matched_queries": candidate.matched_queries,
                     "review_caveats": grounded.review_caveats,
                     "evidence_truncated": grounded.evidence_truncated,
+                    # 근거 안에서 강조할 구간. 후보마다 다를 수 있으므로 후보에
+                    # 싣는다 — 같은 청구항을 두 후보가 다른 문장으로 인용한다.
+                    "quote_spans": {
+                        evidence_id: {"start": span.start, "end": span.end}
+                        for evidence_id, span in grounded.quote_spans.items()
+                    },
                     **strength.as_metadata(),
                     "has_claim_evidence": grounded.has_claim_evidence,
                 },
