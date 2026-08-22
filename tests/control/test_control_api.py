@@ -555,6 +555,37 @@ def test_control_workspace_risk_history_security_notification_routes() -> None:
         assert read.status_code == 200
         assert read.json()["notification"]["status"] == "READ"
 
+        # 기본 목록에는 제외된 Risk 가 나오지 않는다. 추적이 끊겨 관리가 끝난
+        # 것이라 활성 목록에 섞이면 아직 지켜보는 것처럼 읽힌다.
+        listed = client.get(f"/api/v1/workspaces/{vws_id}/risks")
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()["items"]] == ["risk-1"]
+
+        async def exclude_the_risk() -> None:
+            from dataclasses import replace as _replace
+
+            from ip_risk_agent.core.risk import ReviewDisposition as _Disposition
+
+            async with store() as uow:
+                current = await uow.risks.get("risk-1")
+                await uow.risks.save(
+                    _replace(
+                        current,
+                        review_disposition=_Disposition.EXCLUDED,
+                        review_version=current.review_version + 1,
+                    )
+                )
+                await uow.commit()
+
+        asyncio.run(exclude_the_risk())
+        folded = client.get(f"/api/v1/workspaces/{vws_id}/risks")
+        assert folded.json()["items"] == []
+        # 지운 것이 아니므로 필터로 부르면 나온다. 감사 추적은 온전하다.
+        recalled = client.get(
+            f"/api/v1/workspaces/{vws_id}/risks?review_disposition=EXCLUDED"
+        )
+        assert [item["id"] for item in recalled.json()["items"]] == ["risk-1"]
+        assert client.get(f"/api/v1/workspaces/{vws_id}/risks/risk-1").status_code == 200
 
 def test_unverified_google_email_is_rejected_without_session_or_raw_error() -> None:
     app, _store, _oidc = build_api(

@@ -142,8 +142,13 @@ def create_risks_router(deps: RiskRouterDependencies) -> APIRouter:
                             or risk.lifecycle_state is lifecycle_state
                         )
                         and (
-                            review_disposition is None
-                            or risk.review_disposition is review_disposition
+                            risk.review_disposition is review_disposition
+                            if review_disposition is not None
+                            # 제외된 Risk 는 기본 목록에서 접는다. 추적이 끊겨
+                            # 관리가 끝난 것이라 활성 목록에 섞이면 아직 지켜보는
+                            # 것처럼 읽힌다. 지운 것이 아니므로 필터로 부르면 나온다.
+                            else risk.review_disposition
+                            is not ReviewDisposition.EXCLUDED
                         )
                         and (
                             review_priority is None
