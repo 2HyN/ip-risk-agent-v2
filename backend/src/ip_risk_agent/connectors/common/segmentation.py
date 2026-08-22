@@ -68,17 +68,27 @@ def split_document(text: str) -> list[TextSegment]:
     if len(pieces) > MAX_SEGMENTS:
         pieces = _fold_to_limit(pieces)
 
-    return [
-        TextSegment(
-            segment_id=f"L{start}-{end}",
-            text=body,
-            line_start=start,
-            line_end=end,
-            segment_kind=SegmentKind.FULL,
+    # 한 블록이 여러 조각으로 갈리면 줄 범위가 같아진다. 그대로 두면 segment_id 가
+    # 겹치고, 근거 원장은 같은 ID 에 다른 내용이 오는 것을 거부한다. 같은 범위가
+    # 두 번째부터는 순번을 붙인다.
+    seen: dict[tuple[int, int], int] = {}
+    segments: list[TextSegment] = []
+    for start, end, body in pieces:
+        if not body.strip():
+            continue
+        occurrence = seen.get((start, end), 0) + 1
+        seen[(start, end)] = occurrence
+        suffix = "" if occurrence == 1 else f"#{occurrence}"
+        segments.append(
+            TextSegment(
+                segment_id=f"L{start}-{end}{suffix}",
+                text=body,
+                line_start=start,
+                line_end=end,
+                segment_kind=SegmentKind.FULL,
+            )
         )
-        for start, end, body in pieces
-        if body.strip()
-    ]
+    return segments
 
 
 def _blocks(lines: list[str]) -> list[tuple[int, int, str]]:
@@ -146,7 +156,19 @@ def _split_large(start: int, end: int, body: str) -> list[tuple[int, int, str]]:
             buffer = candidate
     if buffer:
         parts.append((start, end, buffer))
-    return parts or [(start, end, body)]
+
+    # 문장 경계가 없는 덩어리(표 한 줄, 긴 코드 블록)는 위에서 줄지 않는다. 상한을
+    # 넘긴 채로 두면 근거 원장이 뒤를 잘라내고, 잘린 뒤쪽은 검토 화면에 영영
+    # 나타나지 않는다. 하이라이트가 그 부분을 짚어야 할 때 보여 줄 것이 없다.
+    # 그래서 마지막에는 길이로 자른다. 버리는 것보다 낫다.
+    bounded: list[tuple[int, int, str]] = []
+    for piece_start, piece_end, text in parts or [(start, end, body)]:
+        while len(text) > MAX_SEGMENT_CHARS:
+            bounded.append((piece_start, piece_end, text[:MAX_SEGMENT_CHARS]))
+            text = text[MAX_SEGMENT_CHARS:]
+        if text:
+            bounded.append((piece_start, piece_end, text))
+    return bounded
 
 
 def _fold_to_limit(pieces: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:

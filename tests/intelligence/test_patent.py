@@ -686,7 +686,9 @@ def test_a_document_is_split_into_reviewable_segments():
     assert len(segments) > 1, "통짜 하나로 두면 가리킬 곳이 없다"
     assert all(len(s.text) <= MAX_SEGMENT_CHARS for s in segments)
     assert all(s.line_start is not None and s.line_end is not None for s in segments)
-    assert all(s.segment_id == f"L{s.line_start}-{s.line_end}" for s in segments)
+    assert all(s.segment_id.startswith(f"L{s.line_start}-{s.line_end}") for s in segments)
+    # ID 가 겹치면 근거 원장이 같은 ID 에 다른 내용을 받아 거부한다.
+    assert len({s.segment_id for s in segments}) == len(segments)
     # 줄 범위가 겹치지 않고 앞으로만 간다.
     starts = [s.line_start for s in segments]
     assert starts == sorted(starts)
@@ -700,3 +702,40 @@ def test_an_empty_document_yields_no_segments():
 
     assert split_document("") == []
     assert split_document("\n\n   \n") == []
+
+
+def test_a_block_without_sentence_breaks_is_still_bounded_and_uniquely_identified():
+    """문장 경계가 없는 덩어리도 상한 안으로 들어와야 한다.
+
+    상한을 넘긴 채로 두면 근거 원장이 뒤를 잘라내고, 잘린 뒤쪽은 검토 화면에 영영
+    나타나지 않는다. 하이라이트가 그 부분을 짚어야 할 때 보여 줄 것이 없다.
+    그리고 한 블록이 여러 조각으로 갈리면 줄 범위가 같아지므로 ID 가 겹친다.
+    """
+    from ip_risk_agent.connectors.common.segmentation import (
+        MAX_SEGMENT_CHARS,
+        split_document,
+    )
+    from ip_risk_agent.intelligence.common.evidence import EvidenceLedger
+
+    body = "x" * (MAX_SEGMENT_CHARS * 3 + 40)
+    segments = split_document(body)
+    assert len(segments) >= 3
+    assert all(len(s.text) <= MAX_SEGMENT_CHARS for s in segments)
+    assert len({s.segment_id for s in segments}) == len(segments)
+    # 잘려서 사라진 글자가 없어야 한다.
+    assert "".join(s.text for s in segments) == body
+
+    # 원장이 받아들여야 한다. 예전에는 같은 ID 에 다른 내용이 와서 거부됐다.
+    ledger = EvidenceLedger()
+    from iprisk_contracts.common import EvidenceType
+
+    for segment in segments:
+        ledger.add(
+            f"src:{segment.segment_id}",
+            EvidenceType.SOURCE_EXCERPT,
+            segment.text,
+            "sample.md",
+            {},
+        )
+    assert len(ledger) == len(segments)
+    assert ledger.truncated_ids == frozenset()
