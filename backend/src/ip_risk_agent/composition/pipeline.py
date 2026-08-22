@@ -76,6 +76,26 @@ class AnalysisPipeline:
             snapshot = await adapter.fetch_snapshot(claim.source_change)
             snapshot_fetched = True
             _validate_snapshot(snapshot, claim.source_change)
+            if snapshot.resolved_revision != claim.source_change.revision:
+                # 이 실행이 맡은 개정과 지금 소스에 있는 개정이 다르다. 새 내용을
+                # 옛 개정에 붙여 기록하면 이력이 어긋나므로 여기서 멈춘다.
+                #
+                # 버리는 것이 아니다. 소스가 앞서 나갔다는 것은 변경 감지가 곧
+                # (또는 이미) 새 ChangeEvent 를 만든다는 뜻이고, 그쪽이 현재 개정을
+                # 분석한다. 다시 시도해도 결과가 같으므로 retryable 이 아니다.
+                #
+                # 예전에는 이 상황이 한참 뒤 access receipt 검증에서
+                # "source access analysis context is inconsistent" 로 터졌다.
+                # 화면에는 뜻을 알 수 없는 실패만 남았다.
+                result = await self._fail(
+                    change_event_id,
+                    claim.analysis_job_id,
+                    claim.attempt,
+                    safe_code="SOURCE:REVISION_SUPERSEDED",
+                    retryable=False,
+                )
+                await _cleanup(adapter, claim.source_change)
+                return result
             await self._control.register_source_access(
                 SourceAccessReceiptContext(
                     risk_workspace_id=snapshot.risk_workspace_id,

@@ -55,8 +55,11 @@ def now() -> datetime:
 class FakeSourceAdapter:
     source_type = SourceType.GITHUB
 
-    def __init__(self, *, fail_once: bool = False) -> None:
+    def __init__(
+        self, *, fail_once: bool = False, resolved_revision: str | None = None
+    ) -> None:
         self.fail_once = fail_once
+        self.resolved_revision = resolved_revision
         self.fetch_count = 0
         self.cleanup_count = 0
         self.cleanup_probe = None
@@ -78,7 +81,7 @@ class FakeSourceAdapter:
             source_workspace_id=change.source_workspace_id,
             source_type=change.source_type,
             source_artifact_id=change.artifact.source_artifact_id,
-            resolved_revision=change.revision or "missing",
+            resolved_revision=self.resolved_revision or change.revision or "missing",
             retrieved_at=accessed_at,
             display_name=change.artifact.display_name,
             logical_path_hint=change.artifact.path_hint,
@@ -469,3 +472,42 @@ def test_an_unexpected_failure_records_the_exception_class_not_its_message(caplo
     assert failure["failure_safe"] == "INTERNAL:UNEXPECTED_PIPELINE_FAILURE"
     assert failure["failure_reason"] == "_UnexpectedAnalyzerCrash"
     assert "secret value" not in json.dumps(failure)
+
+
+def test_a_superseded_revision_stops_before_the_access_receipt() -> None:
+    """이 실행이 맡은 개정과 지금 소스에 있는 개정이 다르면 멈춘다.
+
+    새 내용을 옛 개정에 붙여 기록하면 이력이 어긋난다. 소스가 앞서 나갔다는 것은
+    변경 감지가 곧 새 ChangeEvent 를 만든다는 뜻이므로 그쪽이 현재 개정을 맡는다.
+
+    예전에는 이 상황이 한참 뒤 access receipt 검증에서
+    "source access analysis context is inconsistent" 로 터져, 화면에는 뜻을 알 수
+    없는 실패만 남았다.
+    """
+    adapter = FakeSourceAdapter(resolved_revision="revision-2")
+    container, adapter = build_worker(adapter=adapter)
+    registered = asyncio.run(seed_execution(container, fingerprint="superseded"))
+
+    with TestClient(create_worker_app(container)) as client:
+        response = client.post(
+            "/internal/tasks/analyze-change",
+            headers={"Authorization": f"Bearer {TASK_TOKEN}"},
+            json={"change_event_id": registered.change_event_id},
+        )
+    assert response.status_code == 200
+    assert response.json()["safe_code"] == "SOURCE:REVISION_SUPERSEDED"
+    # 다시 시도해도 결과가 같으므로 재시도 대상이 아니다.
+    assert response.json()["disposition"] == "TERMINAL_FAILURE"
+    # 가져온 것은 정리한다.
+    assert adapter.cleanup_count == 1
+
+    async def verify() -> None:
+        async with container.unit_of_work_factory() as uow:
+            event = await uow.change_events.get(registered.change_event_id)
+            accesses = await uow.audit.list_source_access("vws-1")
+        assert event is not None
+        assert event.last_error_safe == "SOURCE:REVISION_SUPERSEDED"
+        # 맡지 않은 개정에 대한 열람 기록을 남기지 않는다.
+        assert accesses == ()
+
+    asyncio.run(verify())
