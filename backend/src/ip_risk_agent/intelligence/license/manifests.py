@@ -15,6 +15,7 @@ import re
 import tomllib
 
 from .dependency_models import (
+    DependencyParseError,
     DependencyDeclaration,
     Ecosystem,
     ResolutionKind,
@@ -82,8 +83,8 @@ def parse_setup_cfg(text: str, source_path: str | None = None) -> list[Dependenc
     parser = ConfigParser()
     try:
         parser.read_string(text)
-    except Exception:  # noqa: BLE001 - 못 읽는 설정은 선언이 없는 것과 같다
-        return []
+    except Exception as exc:  # noqa: BLE001 - 어떤 형식 오류든 "못 읽었다" 다
+        raise DependencyParseError("setup.cfg is not readable") from exc
 
     lines: list[str] = []
     if parser.has_option("options", "install_requires"):
@@ -121,8 +122,8 @@ def parse_pyproject_toml(text: str, source_path: str | None = None) -> list[Depe
     """
     try:
         document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return []
+    except tomllib.TOMLDecodeError as exc:
+        raise DependencyParseError("pyproject.toml is not readable") from exc
 
     specs: list[str] = []
     project = document.get("project") or {}
@@ -175,10 +176,10 @@ def parse_package_json(text: str, source_path: str | None = None) -> list[Depend
     """npm 매니페스트."""
     try:
         document = json.loads(text)
-    except json.JSONDecodeError:
-        return []
+    except json.JSONDecodeError as exc:
+        raise DependencyParseError("package.json is not readable") from exc
     if not isinstance(document, dict):
-        return []
+        raise DependencyParseError("package.json is not an object")
 
     found: list[DependencyDeclaration] = []
     for section in _NPM_SECTIONS:

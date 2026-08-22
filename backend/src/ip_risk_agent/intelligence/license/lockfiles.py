@@ -11,6 +11,7 @@ import re
 import tomllib
 
 from .dependency_models import (
+    DependencyParseError,
     DependencyDeclaration,
     Ecosystem,
     ResolutionKind,
@@ -35,10 +36,10 @@ def parse_package_lock_json(text: str, source_path: str | None = None) -> list[D
     """npm ``package-lock.json``. v2/v3 의 ``packages`` 와 v1 의 ``dependencies``."""
     try:
         document = json.loads(text)
-    except json.JSONDecodeError:
-        return []
+    except json.JSONDecodeError as exc:
+        raise DependencyParseError("package-lock.json is not readable") from exc
     if not isinstance(document, dict):
-        return []
+        raise DependencyParseError("package-lock.json is not an object")
 
     found: list[DependencyDeclaration] = []
 
@@ -86,8 +87,8 @@ def parse_uv_lock(text: str, source_path: str | None = None) -> list[DependencyD
     """uv ``uv.lock``. ``[[package]]`` 마다 name 과 version 이 온다."""
     try:
         document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return []
+    except tomllib.TOMLDecodeError as exc:
+        raise DependencyParseError("uv.lock is not readable") from exc
 
     found: list[DependencyDeclaration] = []
     for entry in document.get("package") or []:

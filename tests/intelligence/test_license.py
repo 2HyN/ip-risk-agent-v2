@@ -158,9 +158,41 @@ def test_uv_lock_parser():
     assert found[0].resolution is ResolutionKind.LOCKFILE
 
 
-def test_malformed_manifest_does_not_raise():
-    assert manifests.parse_package_json("{ not json") == []
-    assert lockfiles.parse_uv_lock("[[[broken") == []
+def test_a_file_we_could_not_read_is_not_a_file_with_no_dependencies():
+    """이 시험은 예전에 반대를 고정하고 있었다.
+
+    깨진 입력에 빈 목록을 돌려주는 것을 "예외를 안 낸다" 는 이름으로 지켜 주고 있었는데,
+    그 빈 목록이 ``SUCCEEDED`` + ``COMPLETE`` 로 올라가 **그 파일의 Risk 를 전부
+    해소했다.** 읽지 못한 것이 "위험이 사라졌다" 가 되는 경로였다.
+    """
+    from ip_risk_agent.intelligence.license.dependency_models import (
+        DependencyParseError,
+    )
+
+    with pytest.raises(DependencyParseError):
+        manifests.parse_package_json("{ not json")
+    with pytest.raises(DependencyParseError):
+        lockfiles.parse_uv_lock("[[[broken")
+    with pytest.raises(DependencyParseError):
+        manifests.parse_pyproject_toml("[[[broken")
+
+    # "읽었는데 없었다" 는 그대로 빈 목록이다. 둘을 가르는 것이 요점이다.
+    assert manifests.parse_package_json('{"name": "x"}') == []
+    assert manifests.parse_pyproject_toml("[project]\nname = 'x'\n") == []
+
+
+def test_an_unreadable_file_comes_back_partial_not_complete():
+    """분석기가 그 예외를 삼키지 않는다.
+
+    ``PARTIAL`` 은 해소 권한을 갖지 않으므로(§7.2) 못 읽은 파일이 기존 Risk 를 닫지
+    못한다.
+    """
+    from iprisk_contracts.common import AnalysisCoverage, AnalysisStatus
+
+    result = run(LicenseAnalyzer(PROVIDER).analyze(make_artifact("{ not json", "package.json")))
+    assert result.status is AnalysisStatus.SUCCEEDED
+    assert result.coverage is AnalysisCoverage.PARTIAL
+    assert not result.candidates
 
 
 # --------------------------------------------------------------- SPDX

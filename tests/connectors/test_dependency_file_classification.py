@@ -234,10 +234,21 @@ def test_a_manifest_survives_the_round_trip_that_used_to_lose_it() -> None:
     text = (root / "pyproject.toml").read_text(encoding="utf-8")
     parser = _select_parser("pyproject.toml")
 
-    whole = len(parser(text, "pyproject.toml"))
-    through_segments = sum(
-        len(parser(segment.text, "pyproject.toml")) for segment in split_document(text)
+    from ip_risk_agent.intelligence.license.dependency_models import (
+        DependencyParseError,
     )
+
+    whole = len(parser(text, "pyproject.toml"))
+
+    def _count(fragment: str) -> int:
+        # 조각은 깨진 TOML 이라 이제 파서가 못 읽었다고 말한다. 예전에는 조용히
+        # 0 을 돌려줬고, 그것이 손실이 안 보이던 이유다.
+        try:
+            return len(parser(fragment, "pyproject.toml"))
+        except DependencyParseError:
+            return 0
+
+    through_segments = sum(_count(segment.text) for segment in split_document(text))
     now = sum(
         len(parser(segment.text, "pyproject.toml"))
         for segment in segments_for(text, ArtifactKind.MANIFEST)

@@ -31,7 +31,12 @@ from ..common.errors import FailureCategory, ProviderFailureError
 from ..common.evidence import package_metadata_id, rag_chunk_id
 from ..common.validation import validate_artifact
 from . import lockfiles, manifests, policy, spdx
-from .dependency_models import DependencyDeclaration, DependencySet, Ecosystem
+from .dependency_models import (
+    DependencyDeclaration,
+    DependencyParseError,
+    DependencySet,
+    Ecosystem,
+)
 from . import reference_gate
 from .explanation import ReferenceRetriever, reference_query
 from .package_metadata import PackageMetadataProvider
@@ -143,8 +148,27 @@ class LicenseAnalyzer:
             return builder.skipped(**versions)
 
         dependencies = DependencySet()
+        unreadable = False
         for segment in artifact.text_segments:
-            dependencies.extend(parser(segment.text, artifact.logical_path))
+            try:
+                dependencies.extend(parser(segment.text, artifact.logical_path))
+            except DependencyParseError:
+                # 못 읽은 것은 "선언이 없다" 가 아니다. 여기서 삼키면 결과가
+                # SUCCEEDED + COMPLETE 로 올라가 그 파일의 Risk 를 전부 해소한다.
+                unreadable = True
+
+        if unreadable:
+            # 일부라도 못 읽었으면 이 결과는 파일을 설명하지 못한다. PARTIAL 은
+            # 해소 권한을 갖지 않으므로(§7.2) 잘못된 해소가 일어나지 않는다.
+            _log_analysis(
+                artifact,
+                declarations=len(dependencies),
+                candidates=0,
+                coverage=AnalysisCoverage.PARTIAL,
+            )
+            return builder.succeeded(
+                [], coverage=AnalysisCoverage.PARTIAL, **versions
+            )
 
         if not len(dependencies):
             # 파일은 맞지만 선언이 없다. 여기가 조용한 오보가 시작되는 자리다 —
