@@ -135,8 +135,12 @@ requirements.txt                       sample_github/requirements.txt
 GitHub 도 `github_change_fingerprint` 가 `mount_id` 를 포함하므로 같은 구조다.
 Local 도 확인할 것.
 
-판정 정책은 이미 정해져 있다(`docs/RISK_DISPOSITION_POLICY.md` — 되살릴 때
-NEW/UNREVIEWED 로 되돌린다). **계기만** 만들면 된다.
+판정 정책이 정해져 있기는 하다(`docs/RISK_DISPOSITION_POLICY.md` — 되살릴 때
+NEW/UNREVIEWED 로 되돌린다). 다만 `docs/DEVELOPMENT_SPEC.md` §7.1 이 그 규칙을 **개정
+중**이다 — 방아쇠가 수동 해제에서 삭제·폴더 이탈로 넓어지면 흔한 파일 이동이 사용자의
+처분을 지우므로, 판본이 같으면 처분을 복원하도록 바꾼다. 그리고 "계기만 만들면 된다" 도
+정확하지 않다: `should_revive` 는 `_reconcile` 안, 권위 게이트 뒤에서만 불리므로 "분석 없이
+되살리기" 에는 새 경로가 필요하다.
 
 확인 방법은 비용이 없다 — mount 를 일시중지해 Risk 가 EXCLUDED 로 닫히는 것을 보고,
 **파일을 바꾸지 않은 채** 다시 연결한 뒤 Risk 목록을 본다.
@@ -270,6 +274,31 @@ Node 로 동작해 내장 `electron` 모듈이 없고, 앱은 `app` 이 undefine
 **앱의 결함이 아니다** — 이 자리에서 한 번 잘못 짚어 빌드 방식까지 바꿨다가
 되돌렸다. 별도 터미널에서 켜거나 그 변수를 지우고 켠다.
 
+### `GET /desktop/mounts/{id}/status` 는 만들지 않는다 [결정]
+
+Desktop 의 서버 route 는 넷뿐이다 — `POST /desktop/devices/register`,
+`POST /desktop/mounts/register`, `POST /desktop/staging`, `POST /desktop/events`
+(`local/routes.py:96,104,111,118` 의 `create_local_desktop_router`). **별도
+`GET /desktop/mounts/{id}/status` 는 만들지 않는다.** 그 자리를 대신하는 것이 이미
+둘 있고, 둘은 **서로 다른 것을 소유한다.**
+
+| 무엇을 묻는가 | 어디서 읽는가 |
+|---|---|
+| canonical mount 상태 | Control 의 data-access summary — `GET .../data-access-summary`<br>(`api/security/router.py:200`, `security_policy/service.py:225`). workspace 의 mount 를 모아 `ConnectedSourceSummary` 로 낸다 |
+| 그 Desktop 의 enrollment · local registry 상태 | allow-listed `getDesktopConnectionStatus` IPC<br>(`apps/desktop/main/index.ts:148` → `core/local-source-service.ts:129`). `deviceId` 와 `mountCount` 를 내고, main 의 `desktopStatus` 가 credential 유무로 `enrolled` 를 더한다 |
+
+**두 상태의 소유권을 섞는 중복 Source endpoint 는 추가하지 않는다.** canonical mount 는
+Control 것이고 enrollment 와 local registry 는 그 기기 것이다. 하나의 Source endpoint 가
+둘을 함께 답하면 어느 쪽이 진실인지가 endpoint 안에서 정해져 버린다.
+
+**이 결정은 `CODING_AGENT_SPEC_2_SOURCE_DESKTOP.md` §875 를 뒤집는다.** 그 명세의 Local
+route 목록에는 `GET /desktop/mounts/{id}/status` 가 다섯 번째 줄로 들어 있다. 그리고
+이제는 지워진 `INTEGRATION_V2_EXECUTION_PLAN.md`(git 이력에 있다) §19 는 이것을
+**"Desktop mount status endpoint 없음 ·
+P0 UX/ops · UI 연결 전에 구현"** 으로 열어 둔 채 남겼다(P0 는 Gate C 전에 모두 닫는다고
+적혀 있다). **그 P0 를 처분하는 기록은 이것 하나뿐이다** — 없으면 다음 사람이 그 endpoint 를
+만든다.
+
 ---
 
 ## 3-10. Local 실측 결과와 남은 것
@@ -328,6 +357,31 @@ Node 로 동작해 내장 `electron` 모듈이 없고, 앱은 `app` 이 undefine
 었다는 뜻이다. 링크가 살아 있을 때 가드가 막았으니 해시도 남지 않았다.
 
 새어 나간 기록은 workspace 와 함께 지웠다.
+
+### 설계로 보장되지 않고 **환경에 기대는** 확인 두 가지
+
+위 표는 junction 으로 실측한 것이다. 그런데 **symlink 시험 2 건은 이 환경에서 돌지
+않는다.** 권한이 없으면 `t.skip` 으로 넘어가고, 넘어간 것은 통과로 집계된다.
+
+| 시험 | 자리 |
+|---|---|
+| `rejects symlink escaping root (skips gracefully if symlink creation is not permitted)` | `apps/desktop/security/path-guard.test.ts:47` |
+| `rejects events for symlinked paths escaping root (skips gracefully if unsupported)` | `apps/desktop/watcher/watcher.test.ts:129` |
+
+둘 다 `symlinkSync` 가 `EPERM`/`EACCES` 를 내면 건너뛴다. path-guard 쪽 skip 메시지가
+조건을 그대로 적어 둔다 — *"Windows without Developer Mode/admin — run as admin or enable
+Developer Mode to exercise this test."* Agent 2 인계 시점의 Desktop TypeScript 집계가
+**65 tests, 63 passed / 2 Windows symlink skip** 이었던 것이 이 둘이다(총 297 tests,
+295 passed / 2 skipped). **권한이 있는 CI runner 에서 별도로 돌려야 한다.** 4 절의 "시험
+70 건이 통과한다" 를 이 2 건이 통과했다는 뜻으로 읽으면 안 된다 — 이 환경에서 이 둘은
+돌지 않는다.
+
+같은 성격의 구멍이 하나 더 있다 — **Drive file ID 이동 안정성은 설계상 보장이지만 그것을
+확인하는 별도 시험이 없다.** 파일을 옮겨도 ID 가 유지된다는 것에 Drive 추적 스코프가
+기대고 있는데, 보장의 근거는 설계뿐이다.
+
+(같은 목록의 셋째 항목 — **staging TTL 은 문서화만 됐고 실제 bucket lifecycle 은
+Integration 책임**이다. 4 절 끝의 "TTL 이 진짜 안전망" 과 같은 이야기다.)
 
 ---
 

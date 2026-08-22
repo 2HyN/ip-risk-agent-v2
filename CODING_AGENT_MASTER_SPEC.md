@@ -10,6 +10,28 @@
 
 ---
 
+> **후속 명세와의 관계 — `docs/DEVELOPMENT_SPEC.md` (2026-08-23)**
+>
+> `docs/DEVELOPMENT_SPEC.md`(기준 커밋 `e9e3389`)가 **다음 단계 개발의 단일 기준**으로 채택되었다.
+>
+> 이 Master Specification은 그 뒤에도 **도메인 용어, Frozen Contract, enum 의미, Plane 경계**에 대한 시스템 레퍼런스로 남는다. `docs/DEVELOPMENT_SPEC.md` §12.1이 "이 명세는 `shared/contracts/**` 변경을 요구하지 않는다"고 명시하므로 §2·§7~§20의 계약·용어·enum 정의는 그대로 유효하다.
+>
+> 다만 이 문서가 규정한 **동작**을 `docs/DEVELOPMENT_SPEC.md`가 뒤집은 자리에서는 **후자가 우선한다.** 현재 확인된 자리는 다음과 같다.
+>
+> | 이 문서 | 대체하는 곳 (`docs/DEVELOPMENT_SPEC.md`) | 무엇이 바뀌었나 |
+> |---|---|---|
+> | §18 Risk Resolution Rule | §7.2, §8.1 (0-L) | `SUCCEEDED + COMPLETE`만으로는 자동 해소 권한이 서지 않는다. `PARTIAL`은 "해소 권한 없음"으로 좁혀진다 |
+> | §27 App Login / Drive Authorization | 결정 D1, §6.1, §2.1 | `drive.file` + Picker 폐기. 서비스 계정 + 폴더 공유 |
+> | §29 Google Drive Source Model | 결정 D1·D2, §6.1, §6.2 | Picker로 고른 artifact collection → 공유받은 **폴더 단위**, 부모 경로 보존 |
+> | §46 Analysis Reproducibility | 결정 D8, §7.4 | 재현성보다 변화 추적. 지문에 `analysis_input_checksum`이 추가된다 |
+> | §47 Drive OAuth | 결정 D1, §2.1 | 보관할 Drive credential 자체가 없어진다 |
+> | §64 Move / Delete semantics | §7.1, §12.3 | 삭제·폴더 이탈·접근 상실은 Risk를 **닫는다** |
+> | §66 Product Completion Criteria — Source | 결정 D2, §6.1 | `selected file tracking` → 공유 폴더 단위 추적 |
+>
+> 뒤집힌 본문은 **지우지 않는다.** 이전 결정이 무엇이었는지 읽을 수 있어야 하므로, 해당 절에는 어느 절이 대체하는지만 한 줄로 표시한다. **"대체된다"를 "지워도 된다"로 읽으면 안 된다.**
+
+---
+
 # 0. 최상위 목표
 
 이 프로젝트는 **Local Directory / GitHub Repository / Google Drive** 등 서로 다른 실제 협업 Source Workspace를 하나의 **Risk Workspace**에 연결하고, 변경을 지속적으로 감지하여 **Patent / Open-source License 중심의 잠재적 IP Risk**를 근거 기반으로 분석하고, 사용자가 장기적으로 검토·추적·감사할 수 있게 하는 **Secure Human-in-the-Loop AI Risk Management System**이다.
@@ -269,6 +291,42 @@ Integration layer -> all implementations     ALLOWED
 > Intelligence Plane은 Source provider를 모른다.  
 > Control Plane은 provider와 analyzer 내부 구현을 모른다.  
 > Integration Layer만 실제 구현체를 조립한다.
+
+---
+
+### 왜 이 분할인가 — 검토한 대안
+
+위 표의 Plane 경계는 다른 후보를 검토한 뒤 고른 것이다.
+
+**Frontend / Backend / AI 분리 — 채택하지 않음**
+
+단점:
+
+- Drive/GitHub 연결 기능이 UI와 Backend를 계속 넘나듦
+- Local Electron과 Web 경계가 복잡
+- Backend 담당자에게 Auth/VWS/Connector/Risk/Tasks가 집중
+- 병렬 개발 시 기능 하나를 여러 사람이 동시에 수정
+
+**Drive / GitHub / Local 분리 — 채택하지 않음**
+
+단점:
+
+- 각 Source 팀이 Risk/security/analysis flow를 중복 구현하기 쉬움
+- 마지막 통합 비용이 매우 큼
+- "Source가 달라도 Change 이후는 공통"이라는 도메인 구조에 반함
+
+**Plane 분리 — 채택**
+
+장점:
+
+- Source별 외부 API 복잡성은 Source Plane 안에서 완결
+- AI/RAG 복잡성은 Intelligence Plane 안에서 완결
+- Risk truth와 보안 policy는 Control Plane 한 곳에서 유지
+- 통합 접점이 5개 Contract로 제한됨
+- Coding Agent별 directory ownership 충돌 최소화
+- 각 축을 fake contract input으로 독립 테스트 가능
+
+따라서 현재 프로젝트에는 **Platform & Control / Source Integration & Desktop / Risk Intelligence & RAG** 분할이 가장 적합하다고 판단한다.
 
 ---
 
@@ -904,6 +962,8 @@ pipeline 자체는 실행되었으나 입력 또는 근거 부족으로 결론�
 
 # 18. Coverage 의미 — 고정
 
+> **[일부 대체됨]** 아래 `PARTIAL` 의미와 Risk Resolution Rule은 `docs/DEVELOPMENT_SPEC.md` §7.2(`PARTIAL`을 "해소 권한 없음"으로 좁힘)와 §8.1의 0-L 규칙(의존성 아티팩트의 후보 N>0 → 0 전이는 coverage와 무관하게 권위를 갖지 못함)이 대체한다.
+
 ## `COMPLETE`
 
 이 AnalysisResult가 해당 revision에서 analyzer가 평가해야 할 전체 범위를 성공적으로 평가했다.
@@ -1222,6 +1282,8 @@ Provider별 처리:
 
 # 27. App Login / Drive Authorization
 
+> **[대체됨]** 이 절의 Drive authorization 모델(`drive.file` + Picker, App User당 복수 Drive OAuth connection)은 `docs/DEVELOPMENT_SPEC.md` 결정 D1 / §6.1 / §2.1이 대체한다 — **서비스 계정 + 폴더 공유**, `drive.file` 폐기, `drive.readonly` 미채택. Google OIDC App login 부분은 그대로 유효하다.
+
 앱 사용자는 Google OIDC로 로그인한다.
 
 App authentication과 Drive authorization은 별도 credential/context이다.
@@ -1270,6 +1332,8 @@ Application-level path include/exclude tracking scope를 추가로 적용한다.
 ---
 
 # 29. Google Drive Source Model
+
+> **[대체됨]** 이 절의 Drive Source 모델은 `docs/DEVELOPMENT_SPEC.md` 결정 D1·D2 / §6.1 / §6.2가 대체한다 — Picker로 고른 artifact collection이 아니라 **서비스 계정에 공유된 폴더 단위**이고, 부모 경로를 `logical_path_hint`에 실어 `/workspace` 아래 트리로 표시한다.
 
 Google Drive는 filesystem mirror로 취급하지 않는다.
 
@@ -1734,6 +1798,8 @@ MUST NOT store actual source content.
 
 # 46. Analysis Reproducibility
 
+> **[일부 대체됨]** `docs/DEVELOPMENT_SPEC.md` 결정 D8이 우선순위를 뒤집는다 — **재현성보다 변화 추적**이며, 대신 무엇이 왜 달라졌는지는 반드시 남는다. 아래 지문 목록에는 §7.4가 요구하는 `analysis_input_checksum`이 빠져 있다.
+
 AnalysisJob / Result / evidence history에서 다음 정보를 추적 가능하게 한다.
 
 ```text
@@ -1756,6 +1822,8 @@ RAG corpus version
 Control Plane authentication configuration.
 
 ## Drive OAuth
+
+> **[대체됨]** `docs/DEVELOPMENT_SPEC.md` 결정 D1 / §2.1 — 서비스 계정은 Cloud Run에 이미 붙어 있어 키 파일이 필요 없고, 따라서 **보관할 Drive credential이 없다.**
 
 Source Plane connector credential.
 
@@ -2171,6 +2239,8 @@ SourceConnection
 
 # 64. Move / Delete semantics
 
+> **[대체됨]** 아래 DELETE 규칙("Risk 자동 resolve 금지")은 `docs/DEVELOPMENT_SPEC.md` §7.1이 대체한다 — **삭제 · 폴더 이탈 · 접근 상실**이 모두 하나의 경로로 Risk를 닫는다(`decide_exclusion`이 `RESOLVED` + `EXCLUDED`로 둔다). MOVE 규칙의 GitHub identity continuity는 §12.3이 "관찰만 하는 것"으로 유보한다.
+
 ## DELETE
 
 Artifact unavailable/deleted 상태로 기록한다.
@@ -2216,6 +2286,8 @@ Web에서는 local-only 기능을 숨기거나 unavailable 상태로 표시한�
 - Membership 관리
 
 ## Source
+
+> **[일부 대체됨]** 아래 Drive 항목은 `docs/DEVELOPMENT_SPEC.md` 결정 D2 / §6.1이 대체한다 — `selected file tracking`이 아니라 **공유받은 폴더 단위 추적**이다.
 
 - Google Drive SourceConnection + selected file tracking
 - GitHub App + private/selected repo tracking

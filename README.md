@@ -2,12 +2,15 @@
 
 IP Risk Agent는 Google Drive, GitHub, Local Desktop에서 선택한 소스의 변경을 감지하고 특허·라이선스 위험을 분석한 뒤, 사람이 검토하고 승인하는 흐름을 제공하는 IP 리스크 관리 시스템이다.
 
-현재 `integration-v2`는 Phase 9의 repository-side predeployment 준비 단계다. 세 Plane,
-API/Worker durable GCP composition, production Scheduler maintenance, v2 namespace/IAM/build
-계약과 Web/Electron 제품 흐름이 통합되어 있다. Firestore operational store,
-Secret Manager/GCS/Cloud Tasks/OIDC adapter, 네 Scheduler route, 8개 composite index·2개 TTL,
-user-specified Cloud Build identity와 immutable shared image 계약은 repository preflight로
-검증한다. 실제 GCP resource/IAM/credential 생성과 provider live 검증은 외부 작업으로 남는다.
+세 Plane, API/Worker durable GCP composition, production Scheduler maintenance, v2
+namespace/IAM/build 계약과 Web/Electron 제품 흐름이 통합되어 있다. Firestore operational
+store, Secret Manager/GCS/Cloud Tasks/OIDC adapter, 네 Scheduler route, 8개 composite
+index·2개 TTL, user-specified Cloud Build identity와 immutable shared image 계약은
+repository preflight로 검증한다. Phase 9의 GCP 외부 작업은 끝났고 API `00037-6zz` /
+Worker `00037-tq6` (`78a6490`) 리비전이 배포되어 동작 중이다.
+
+다음 단계의 기준은 `docs/DEVELOPMENT_SPEC.md`이며, 그 §11 의 **0 단계 — 오답 제거**
+(항목 0-A~0-L)가 다른 모든 작업의 선행이다.
 
 ## 통합 상태
 
@@ -23,14 +26,18 @@ user-specified Cloud Build identity와 immutable shared image 계약은 reposito
 | GCP 내부 adapter와 배포 입력물 | 완료 |
 | 전체 release regression과 staging runbook | 완료 |
 | 구 Agent 원본 제거와 release candidate 고정 | 완료 |
-| GCP 외부 resource/IAM/live 배포 | Phase 9 착수, 외부 입력 대기 |
+| GCP 외부 resource/IAM/live 배포 | 완료. API `00037-6zz` / Worker `00037-tq6` (`78a6490`) 배포 상태 |
+| 라이선스 오답 제거 (`docs/DEVELOPMENT_SPEC.md` §11 의 0 단계, 0-A~0-L) | 다음 단계 |
 
 Production v2는 기존 v1과 `proj-aj22-211200020328` project를 공유하므로 project 경계가
 아니라 `deploy/v2-resource-contract.yaml`의 v2 namespace로 격리한다. `(default)`
 Firestore, v1 Run/Scheduler/identity/secret/bucket/repository의 재사용이나 IAM 변경은
 금지되며 repository validator와 production startup이 이를 fail-closed한다.
 
-세부 상태와 검증 증거는 `INTEGRATION_V2_PROGRESS_LOG.md`에 기록한다. 이 로그는 통합 작업용 비규범 문서이며, 설계와 의존성 결정은 `INTEGRATION_V2_DEPENDENCY_BASELINE.md`와 `INTEGRATION_V2_EXECUTION_PLAN.md`가 우선한다.
+설계와 구현 기준은 `docs/DEVELOPMENT_SPEC.md`가 우선한다. 알려진 결함과 그것이 닫히는
+자리는 같은 문서 §8에, 추적 기록은 `docs/V3_DEVELOPMENT_WATCH.md`와
+`docs/INTEGRATION_V1_CROSSCHECK.md`에 있다(둘 다 비규범 문서다). dependency 결정 근거는
+아래 "Dependency pin 근거"에 있다.
 
 ## 시스템 구성
 
@@ -51,7 +58,7 @@ rag-corpus/                       reference-only RAG corpus와 provenance
 tests/                            contracts/control/connectors/intelligence/integration/e2e
 scripts/                          contract/deploy 검증과 RAG ingestion dry-run
 deploy/                           Cloud Build/Run/Tasks/Scheduler, Firestore TTL/index, GCS lifecycle
-docs/                             Agent별 통합 참조 문서
+docs/                             개발 명세, 배포 계약/runbook, 설계 노트와 추적 기록
 ```
 
 핵심 Plane의 책임은 다음과 같다.
@@ -127,6 +134,61 @@ pnpm install --frozen-lockfile
 ```
 
 workspace는 `@iprisk/contracts`, `@iprisk/frontend`, `@iprisk/desktop`으로 구성된다. 모든 dependency는 exact version 또는 `workspace:*`로 고정되어 있다. `pnpm-lock.yaml`을 직접 편집하지 않는다.
+
+## Dependency pin 근거
+
+`pyproject.toml`과 `requirements.lock`은 어떤 버전인지만 말하고 왜 그 버전인지는 말하지
+않는다. 아래 네 결정은 manifest만 보면 중복이나 누락으로 오해하기 쉬우므로 근거를 여기에
+남긴다. 이 판단을 뒤집으려면 아래 근거를 먼저 무효화해야 한다.
+
+### `httpx`와 `httpx2`는 중복이 아니다
+
+`httpx==0.28.1`(production)과 `httpx2==2.10.0`(dev)은 **이름이 비슷할 뿐 서로 다른
+package다. 둘 다 남겨야 한다.**
+
+- `httpx==0.28.1`은 application/provider용 async client다. Control의 OIDC, Source의
+  GitHub, Intelligence의 KIPRIS·package metadata·RAG REST가 모두 이것을 공용으로 쓴다.
+- `httpx2==2.10.0`은 Starlette `1.6.0` `TestClient`의 transport다. `starlette/testclient.py`는
+  `import httpx2 as httpx`를 먼저 시도하고, `httpx2`가 없을 때만 `httpx`로 내려가며
+  `StarletteDeprecationWarning`("Using `httpx` with `starlette.testclient` is deprecated;
+  install `httpx2` instead.")을 낸다. 둘 다 없으면 `RuntimeError`로 죽는다.
+- 따라서 `httpx2`를 "중복"으로 보고 지우면 `TestClient`를 쓰는 모든 test —
+  `tests/connectors`의 7개 파일과 `tests/control`의 3개 파일 — 가 upstream이 이미
+  deprecated로 표시한 경로로 내려가고, 그 fallback이 제거되는 순간 전부 실패한다.
+
+`pyproject.toml`도 `requirements.lock`도 이 사실을 설명하지 못한다. lock에는 `httpx==0.28.1`
+(40행)과 `httpx2==2.10.0`(41행)이 나란히 있을 뿐이다.
+
+### `fastapi==0.141.1` — Source의 `0.121.2`가 아니라 Control 검증 버전
+
+Control은 `0.141.1`로 API와 Product backend를 검증했고 Source는 `0.121.2`를 요청했지만
+Source가 쓰는 API는 `APIRouter`, `Request`, `HTTPException`, `TestClient` 중심이다. 두
+버전을 한 Python environment에 동시에 설치할 수 없고 두 Plane의 router가 **하나의 FastAPI
+app에 설치되므로**, 이미 검증된 상위 버전인 Control 기준으로 통일했다. 대신 Source
+connector suite 전체를 `0.141.1`에서 다시 통과시키는 것이 조건이다. `starlette==1.6.0`을
+transitive에 맡기지 않고 direct pin하는 이유는 Control 코드가 Starlette를 직접 import하기
+때문이다.
+
+### `google-auth[requests]`의 `[requests]` extra는 의도된 것이다
+
+`requests`를 별도 direct dependency로 올리지 않는 대신 extra로 transport requirement를
+명시한다. Drive client(`backend/src/ip_risk_agent/connectors/google_drive/client.py:13`),
+RAG engine(`backend/src/ip_risk_agent/intelligence/rag/engine.py:154`), GCP identity
+adapter(`backend/src/ip_risk_agent/gcp/identity.py:9`)가 모두
+`google.auth.transport.requests.Request`를 직접 import한다. base `google-auth`만 선언하면
+`requests` extra가 보장되지 않는다. `requirements.lock`은 extra를 평탄화해
+`google-auth==2.56.3`(21행)과 `requests==2.34.2`(62행)로만 남기므로, lock만 보면 `requests`가
+지워도 되는 transitive처럼 보인다.
+
+### `google-cloud-aiplatform`은 의도적으로 채택하지 않았다
+
+RAG `retrieveContexts`는 SDK가 아니라 `httpx` REST 호출이다
+(`intelligence/rag/engine.py`의 endpoint
+`https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}:retrieveContexts`).
+ADC/token refresh만 `google-auth`에 맡긴다. 코드 주석대로 그 SDK는 100MB를 넘고 이 Plane이
+쓰는 기능은 `retrieveContexts` 하나뿐이라, 대형 SDK를 추가할 구현상 필요가 없다.
+**재평가 조건: RAG REST contract가 바뀌거나 ingestion 구현이 SDK 전용 기능을 요구할 때만
+재평가한다.**
 
 ## 환경 변수
 
@@ -241,27 +303,53 @@ pnpm --filter @iprisk/desktop test
 - Source Plane은 canonical Risk와 VWS state를 직접 변경하지 않는다.
 - Intelligence Plane은 canonical database에 직접 쓰지 않는다.
 - Drive/GitHub/Local adapter는 사용자가 명시적으로 선택한 scope 밖의 원문을 가져오지 않는다.
-- 외부 provider failure, partial 또는 inconclusive 결과를 empty success로 취급하지 않는다.
 - RAG corpus에는 private Source Workspace 원문을 적재하지 않는다.
 - production 설정 누락을 in-memory adapter로 조용히 대체하지 않는다.
+
+**아직 달성되지 않은 목표 — 외부 provider failure, partial 또는 inconclusive 결과를 empty
+success로 취급하지 않는다.** 이것을 이미 성립한 성질로 적으면 안 된다.
+`docs/DEVELOPMENT_SPEC.md` §8.1이 기록하듯 지금 살아 있는 경로가 넷이고, 서로 독립적으로
+같은 결말에 이른다 — 조각화(결함 1) · redaction(14) · 파싱 실패 삼킴(15) · 게이트
+절단(16)이 각각 **의존성 0 건 → `succeeded([])` → coverage `COMPLETE` → 권위 있는 결과 →
+기존 라이선스 Risk 전부 `RESOLVED`, 알림 0 건**으로 끝난다. 네 경로가 전부 `COMPLETE`로
+끝나므로 `PARTIAL`을 손보는 것만으로는 막히지 않는다. 이 목표는 §11의 0 단계 항목
+0-A~0-L이 닫는다(분류 층 0-C·0-D, 처분 층 0-E, 경로와 무관한 방벽 0-L). 그중 0-L의
+1 걸음 — 의존성 아티팩트에서 후보가 N>0에서 0으로 떨어지는 전이는 예외 없이 권위를 갖지
+못한다 — 이 선행이 없고 즉시 듣는다.
 
 ## 문서 기준
 
 설계 및 구현 시 다음 우선순위를 사용한다.
 
-1. `CODING_AGENT_MASTER_SPEC.md`와 세 상세 명세
-2. `IP_RISK_AGENT_MEETING_BLUEPRINT.md`
-3. `INTEGRATION_V2_DEPENDENCY_BASELINE.md`
-4. `INTEGRATION_V2_EXECUTION_PLAN.md`
-5. `docs/AGENT_1_PLATFORM_CONTROL.md`
-6. `docs/AGENT_2_SOURCE_DESKTOP.md`
-7. `docs/AGENT_3_RISK_INTELLIGENCE_RAG.md`
+1. `docs/DEVELOPMENT_SPEC.md` — **다음 단계 개발의 단일 기준.** 제품 방향, 알려진 결함과
+   그것이 닫히는 자리(§8), 구현 순서(§11의 0~4 단계), 하지 않기로 한 것(§12).
+2. `CODING_AGENT_MASTER_SPEC.md` — 도메인 용어, 시스템 경계, 공통 Contract, 보안 invariant,
+   파일 ownership.
+3. Plane별 상세 명세: `CODING_AGENT_SPEC_1_PLATFORM_CONTROL.md`,
+   `CODING_AGENT_SPEC_2_SOURCE_DESKTOP.md`, `CODING_AGENT_SPEC_3_RISK_INTELLIGENCE_RAG.md`.
+4. `README.md` — 설치, 고정 toolchain, 환경 변수 계약, dependency pin 근거, 검증 명령.
+5. `docs/GCP_INTERNAL_DEPLOYMENT.md` — v1을 보호하는 v2 namespace/IAM/build 배포 계약.
+   canonical 값의 source of truth는 `deploy/v2-resource-contract.yaml`이다.
+6. `docs/STAGING_VERIFICATION_RUNBOOK.md` — 외부 배포 순서와 증거 형식.
+7. `docs/RISK_DISPOSITION_POLICY.md` — `ReviewDisposition`의 뜻(2026-08-22 결정).
+8. 설계 노트와 계획: `docs/PATENT_PRIORITY_DESIGN_NOTE.md`(특허 우선도 임계값 검토),
+   `docs/GITHUB_LOCAL_DESKTOP_PLAN.md`(GitHub·Local·Desktop 마무리 계획).
+9. 비규범 추적 기록: `docs/V3_DEVELOPMENT_WATCH.md`(개발 추적),
+   `docs/INTEGRATION_V1_CROSSCHECK.md`(integration v1 대조).
 
-`INTEGRATION_V2_PROGRESS_LOG.md`는 진행 추적용 부가 기록이다. 기존 Agent delivery/dependency 원본 8개는 Phase 7 전체 검증 뒤 제거했으며, provenance는 세 통합 문서의 표와 Git history에 남는다. 외부 배포 순서와 증거 형식은 `docs/STAGING_VERIFICATION_RUNBOOK.md`를 따른다.
+`docs/DEVELOPMENT_SPEC.md`가 다음 단계의 기준이지만 저장소의 모든 문서를 대체하지는
+않는다. 도메인 용어, frozen Contract와 보안 invariant는 여전히
+`CODING_AGENT_MASTER_SPEC.md`와 `shared/contracts/**`가 소유한다. "대체된다"를 "지워도
+된다"로 읽지 않는다.
+
+기존 Agent delivery/dependency 원본 8개는 Phase 7 전체 검증 뒤 제거했고, Agent별 통합 참조
+문서와 integration-v2 작업 문서(dependency baseline, execution plan, progress log)도
+`docs/DEVELOPMENT_SPEC.md`로 수렴한 뒤 제거했다. 옮기지 않은 provenance는 Git history에만
+남는다. 외부 배포 순서와 증거 형식은 `docs/STAGING_VERIFICATION_RUNBOOK.md`를 따른다.
 
 ## 통합 작업 규칙
 
-- 모든 통합 변경은 `integration-v2`에서만 수행한다.
+- 모든 통합 변경은 `integration-v3`에서만 수행한다. `integration-v2`는 그 백업이며 v3 와 같은 커밋을 가리킨다.
 - 가능하면 하나의 Phase를 하나의 commit으로 유지한다.
 - phase gate가 통과하기 전에 다음 phase의 기능 변경을 섞지 않는다.
 - manifest를 변경하면 lock, install, 전체 영향 Plane test 결과를 함께 갱신한다.

@@ -5,6 +5,35 @@
 source of truth는 `deploy/v2-resource-contract.yaml`이며 validator가 모든 deploy 입력과
 `Settings.validate()`의 동일 계약을 회귀 검증한다.
 
+## 0. project 전제와 API 활성화
+
+resource를 하나라도 만들기 전에 Console project selector를 shared project
+`proj-aj22-211200020328`에 고정하고 **Billing** 연결 상태와 budget alert를 확인한다.
+이어서 **APIs & Services → Library**에서 다음 API를 모두 Enabled로 만든다. 이 목록은
+repository의 어떤 `deploy/` 파일에도 없으므로, 두 번째 환경을 세울 때 여기서부터
+시작한다.
+
+- Artifact Registry API: `artifactregistry.googleapis.com`
+- Cloud Build API: `cloudbuild.googleapis.com`
+- Cloud Run Admin API: `run.googleapis.com`
+- Firestore API: `firestore.googleapis.com`
+- Secret Manager API: `secretmanager.googleapis.com`
+- Cloud Tasks API: `cloudtasks.googleapis.com`
+- Cloud Scheduler API: `cloudscheduler.googleapis.com`
+- IAM 및 IAM Service Account Credentials API
+- Vertex AI API: `aiplatform.googleapis.com`
+- Google Drive API와 Google Picker API
+- Cloud Logging API와 Cloud Monitoring API
+
+API 활성화를 수행하는 작업자에게는 `roles/serviceusage.serviceUsageAdmin` 또는 동등한
+`serviceusage.services.enable` 권한이 필요하다. 활성화는 project-level 변경이므로 활성
+project ID를 다시 확인한 뒤 수행한다. Google Picker API는 §8의 D1 결정으로 폐기 대상이니
+새 환경에서는 Drive OAuth/Picker 관련 활성화를 §8에서 먼저 확인한다.
+
+Vertex RAG 지원 region, billing account 연결, OAuth test user, GitHub test
+organization/repository, KIPRIS staging key, 공개 HTTPS domain(또는 우선 사용할 Cloud Run
+`run.app` URL) 정책이 확정되지 않았다면 resource를 만들지 않는다.
+
 ## 1. shared project와 v2 namespace
 
 | 종류 | v2 canonical 값 |
@@ -119,16 +148,76 @@ source fetch 중 access와 refresh 시 add를 사용한다. 현재 runtime 경�
 ## 6. durable resource와 RAG
 
 - canonical/operational collection 모두 v2 named database에만 둔다.
-- Local staging은 v2 bucket의 `staging/` prefix와 하루 lifecycle만 사용한다.
+- Local staging은 v2 bucket의 `staging/` prefix와 하루 lifecycle만 사용한다. bucket 자체는
+  public access prevention을 **Enforced**, uniform bucket-level access를 **Enabled**로 두고
+  object versioning은 필요가 없으므로 켜지 않는다. 이 세 가지는 절차가 아니라 결정이며
+  `deploy/storage-lifecycle.json`에는 담기지 않는다 — 그 파일이 가진 것은 `staging/` prefix
+  object의 age 1일 Delete와 incomplete multipart upload의 age 1일 Abort 두 lifecycle rule
+  뿐이다. `allUsers`/`allAuthenticatedUsers` binding은 두지 않고 API/Worker에는 이 bucket
+  범위의 object 권한만 부여한다. 기존 bucket에는 lifecycle도 IAM도 추가하지 않는다.
 - analysis task는 v2 queue에서 v2 Tasks caller OIDC로 v2 Worker에 전달한다.
 - RAG는 별도 `ip-risk-agent-v2-legal-reference` corpus를 사용하고 기존 corpus를 재사용하지
   않는다. 승인 manifest와 corpus version 계약은 유지한다.
+
+배포된 corpus identity는 repository에 없고 Worker 환경에만 있다.
+
+```text
+RAG_CORPUS_ID=6917529027641081856
+RAG_REGION=asia-northeast3
+RAG_CORPUS_VERSION=2026-08-21.1
+```
+
+`.env.example`은 60~62행에 `RAG_REGION=`, `RAG_CORPUS_ID=`, `RAG_CORPUS_VERSION=`를 빈
+값으로만 두므로 위 세 값은 이 문서가 유일한 기록이다. 여기에 **미결 하나**가 붙어 있다 —
+`rag-corpus/manifest.yaml`의 `corpus_version`은 `2026-08-14.1`인데 배포 환경변수는
+`2026-08-21.1`이다. 그리고 `scripts/validate_gcp_deployment.py:289`가 manifest 쪽 값
+`2026-08-14.1`을 하드코딩해 강제하므로, repository gate가 통과시키는 버전과 Worker에
+주입된 버전이 서로 다르다. 어느 쪽이 실제로 올라간 corpus인지 확인하기 전에는 주기적
+갱신을 시작하지 않는다. 확인한 뒤에는 manifest, validator 상수, 배포 환경변수를 함께
+움직인다.
 
 Scheduler의 Drive watch renewal/reconciliation, expired state cleanup, source health refresh는
 durable operational store와 기존 adapter/Control facade를 재사용하는 production 구현으로 API
 composition에 mount된다. Scheduler OIDC audience는 API base URL이며 허용 caller는
 `iprisk-v2-scheduler@...` 하나다. Drive/GitHub/Local health는 canonical source 상태로
 수렴하고 cleanup은 OAuth/device challenge와 만료된 `PENDING` connection만 제거한다.
+
+operational collection은 canonical aggregate를 대체하지 않는다. 모든 document ID는 raw
+state, token, credential, device credential, provider lookup key가 아니라 그 값의
+SHA-256이며 document에는 `schema_version: 1`을 둔다. 열두 collection의 목적과 TTL은 다음과
+같고, 이름은 `backend/src/ip_risk_agent/gcp/operational_firestore.py`의 상수(34~49행,
+runtime 다섯 개는 `RUNTIME_COLLECTIONS`)와 일치한다. 같은 파일 50~56행의
+`MAINTENANCE_COLLECTIONS`는 OAuth state, pending connection, device challenge와 runtime
+다섯 개를 정리 대상으로 묶는다.
+
+| collection | 목적 | TTL |
+|---|---|---|
+| `source_operational_oauth_states` | one-time OAuth/App state와 safe callback context | `expires_at` |
+| `source_operational_pending_connections` | canonical mount 생성 전 pending connection | `expires_at`* |
+| `source_operational_mount_bindings` | deterministic registration key↔mount binding | 없음 |
+| `source_operational_device_challenges` | one-time desktop enrollment challenge hash | `expires_at` |
+| `source_operational_devices` | owner/session/status와 credential hash | 없음 |
+| `source_operational_device_credentials` | credential hash→device ID lookup | 없음 |
+| `source_operational_device_mounts` | device↔workspace↔mount binding | 없음 |
+| `source_operational_drive_runtime` | Drive cursor/watch runtime | 없음 |
+| `source_operational_drive_tracking` | Drive selected file scope | 없음 |
+| `source_operational_github_runtime` | GitHub delivery/runtime state | 없음 |
+| `source_operational_github_tracking` | repository/branch/path scope | 없음 |
+| `source_operational_local_runtime` | Local staging runtime reference | 없음 |
+
+*pending connection의 `expires_at`은 만료 판정 field이지 선언된 Firestore TTL policy가
+아니다. `deploy/firestore.indexes.json`의 `fieldOverrides`는 `source_operational_oauth_states`와
+`source_operational_device_challenges` 둘만 `ttl: true`로 두며, 만료된 `PENDING` connection은
+아래 index/TTL 문단대로 scheduler가 status-aware하게 정리한다.
+
+schema 변경 규칙은 하나다. collection을 **제자리에서 추정하지 않는다** — `schema_version`
+decoder를 먼저 추가하고 별도 migration dry-run을 통과시킨 뒤에 바꾼다. emulator 검증은
+`FIRESTORE_EMULATOR_HOST`를 명시한 경우에만 실행하며 production에는 이 환경변수를 절대
+설정하지 않는다.
+
+OAuth state consume은 Firestore transaction으로 `consumed_at`을 원자적으로 기록한다. TTL
+삭제는 즉시성을 보장하는 authorization mechanism이 아니므로, one-time credential을
+consume할 때는 `expires_at`과 `consumed_at`을 **둘 다** 검사한다.
 
 Firestore composite index는 `deploy/firestore.indexes.json`의 정확히 8개다. 기존 canonical
 7개에 `source_operational_github_tracking(record.owner, record.repo)`가 포함된다. TTL은 OAuth
@@ -155,13 +244,46 @@ identity에 대한 Token Creator만 둔다. build log는 `CLOUD_LOGGING_ONLY`이
 `cloud-run-source-deploy` repository에 의존하지 않는다. build는 commit SHA tag 하나를
 push하고, API/Worker manifest는 같은 `application@${IMAGE_DIGEST}`를 요구한다.
 
-## 8. Google Auth Platform shared configuration
+## 8. provider console 등록과 shared configuration
 
 OAuth Login/Drive client는 각각 `ip-risk-agent-v2-login`, `ip-risk-agent-v2-drive`로 새로
 만든다. 다만 Branding, Audience, Data Access, authorized domain은 project-level이라 v1과
 완전히 분리되지 않는다. 기존 v1 OAuth client와 consent configuration을 자동 수정·삭제하지
 않으며 project-level 변경은 반드시 “v1에도 영향을 줄 수 있는 shared configuration”으로
 검토·승인한다.
+
+provider console에 등록하는 endpoint는 최종 API HTTPS origin이 확정된 뒤 한 번에 맞춘다.
+scheme, host, port, 대소문자, path와 trailing slash까지 runtime environment 값과 exact
+match여야 하며, 임시 `run.app` callback/origin을 console에 남기지 않는다.
+
+Google 쪽 등록은 `docs/DEVELOPMENT_SPEC.md` §2 결정 D1(Drive는 **서비스 계정 + 폴더 공유**,
+`drive.file` 폐기·`drive.readonly` 미채택)으로 절반이 정리된다. 보관할 Drive 사용자 토큰이
+없어지므로 Drive OAuth client와 browser Picker에 딸린 등록도 함께 사라진다(§2.1).
+
+| 등록 항목 | 값 | D1 이후 |
+|---|---|---|
+| Google login redirect | `https://<API_HOST>/api/v1/auth/google/callback` | **유지.** `ip-risk-agent-v2-login` client의 server-side redirect flow이며 `composition/container.py`의 `_oidc()`가 `APP_PUBLIC_BASE_URL` + 이 path를 기본 redirect로 만든다 |
+| Drive webhook endpoint | `https://<API_HOST>/webhooks/google-drive` | **유지.** push channel 수신 endpoint이지 OAuth redirect가 아니므로 서비스 계정이 만든 watch에도 그대로 필요하다. `X-Goog-*` header와 channel token 검증, 만료 전 renewal을 확인한다 |
+| Drive OAuth redirect | `https://<API_HOST>/api/v1/source-connections/google-drive/callback` | **폐기.** `ip-risk-agent-v2-drive` client 자체가 D1으로 없어진다 |
+| Authorized JS origin | `https://<API_HOST>` | **폐기.** browser Picker를 위한 등록이었다. login은 server-side flow라 JS origin이 필요 없다. Picker API key의 HTTPS origin·API·application restriction도 같이 폐기된다 |
+
+폐기 두 항목의 코드 경로는 아직 남아 있다(`connectors/google_drive/oauth_routes.py:75`의
+Drive callback, `connectors/google_drive/mounts_routes.py`의 picker-session). D1 구현 전에
+이미 배포된 등록은 그대로 두되, 새 환경에서는 만들지 않고 D1 이후 재등록하지 않는다.
+
+GitHub App은 organization 또는 test owner의 **Settings → Developer settings → GitHub Apps
+→ New GitHub App**에서 만들고 다음 두 URL을 등록한다.
+
+```text
+Callback URL: https://<API_HOST>/api/v1/source-connections/github/install/callback
+Webhook URL:  https://<API_HOST>/webhooks/github
+```
+
+권한 범위 결정은 **Contents는 Read-only, event는 Push만**이다. Metadata 외 불필요한
+permission/event는 추가하지 않는다. webhook secret을 설정하고 private key는 Secret
+Manager(`iprisk-v2-github-private-key`, `iprisk-v2-github-webhook-secret`)에만 둔다. test
+organization에서는 선택한 repository에만 설치하며, App ID/slug와 callback URL은 runtime
+값과 일치해야 한다.
 
 ## 9. repository gate
 

@@ -104,4 +104,4 @@ Risk 가 활성으로 남는다. 이 순서라면 반대로 감시가 남아 다
   `exclude_mount_risks` 를 workspace 범위로 부르면 된다
 * **GitHub·Local 의 파일 단위 추적 해제** — canonical 쪽은 이미 source 종류와
   무관하므로 connector 라우터만 붙이면 된다
-* 기본 Risk 목록에서 `EXCLUDED` 를 접어두는 처리 — 현재는 필터로만 가른다
+

@@ -140,6 +140,13 @@ class GoogleOperationalFirestoreBackend:
         async def consume(transaction):
             snapshot = await reference.get(transaction=transaction)
             data = _document(snapshot)
+            # 만료와 소진을 둘 다 본다. TTL 삭제는 background best-effort
+            # mechanism 이라 즉시 삭제를 보장하지 않는다. 그래서 expires_at 이
+            # 지난 document 도 collection 에 그대로 남아 읽힌다. 만료를 즉시로
+            # 만드는 것은 expires_at 검사이고, one-time credential 을 한 번만
+            # 쓰이게 만드는 것은 consumed_at 검사다. 어느 쪽도 다른 쪽을
+            # 대신하지 못하므로, 중복으로 보인다고 하나를 지우면 실제
+            # authorization control 이 사라진다.
             if (
                 data is None
                 or data.get("consumed_at") is not None

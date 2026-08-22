@@ -5,6 +5,24 @@
 > Master Spec이 상위 규약이며, 충돌 시 Master Spec을 우선한다.  
 > Agent 3의 입력은 승인된 `AnalysisArtifact`, 출력은 `AnalysisResult`뿐이다.
 
+> **[2026-08-23] 이 문서는 Intelligence Plane 의 설계 참조로 계속 유효하다.**
+> 다만 `docs/DEVELOPMENT_SPEC.md` 가 다음 단계 개발의 단일 기준으로 채택되었고, 아래 절이
+> 규정한 동작 일부를 **뒤집는다.** 충돌하는 자리에서는 `docs/DEVELOPMENT_SPEC.md` 가
+> 우선한다. 뒤집힌 텍스트는 지우지 않는다 — 그때 무엇을 왜 정했는지의 기록이다.
+>
+> | 이 문서 | 무엇이 뒤집혔나 | 우선하는 곳 |
+> |---|---|---|
+> | §23 "MVP는 versioned global deterministic license policy" · "VWS별 custom policy는 구현하지 않는다" | 정책은 **workspace 별**이다. Control 의 메서드를 composition 에서 넘겨 계약 변경 없이 다리를 놓는다 | `DEVELOPMENT_SPEC.md` §2 **D7** · §5.10 (항목 2-E) |
+> | §24 Dependency File Support (권장 목록) | 인식 표는 `core/artifacts/dependency_files.py` **한 곳**에 있고, `requirements.lock`·`constraints.txt`·`requirements/*.txt` 를 **더한다** | §5.8 · §6.8 · 결함 17 (항목 0-J) |
+> | §29 "RAG explanation 실패 시 `SUCCEEDED + PARTIAL`" | `PARTIAL` 은 **"해소 권한 없음"** 으로만 좁아진다. 결정론적 판정을 함께 버리지 않는다 | §7.2 · §8 결함 **5** (항목 0-E) |
+> | §29 "RAG는 deterministic policy를 override하지 않는다" | RAG 가 판정에 관여해도 된다. 단 **§4 의 층 규칙** — T3 은 **올릴 수만 있고 내리지 못한다** | §2 **D9** · §4 |
+> | §8 Coverage Rule 말미 | Control 이 `SUCCEEDED+COMPLETE` 에서만 해소한다는 전제가 바뀐다 | §7.2 · §8.1 |
+> | §26 "Registry fallback을 구현 가능" | 요청한 버전이 레지스트리에 없으면 **모른다.** 문서 전체(=최신 버전)로 폴백하지 않는다 | §5.9 · 결함 19 (항목 0-K) |
+> | §27 SPDX Normalization | 원문자열을 **저장 경계 너머까지 보존**하고, `WITH` 예외를 평가에 반영하며 **예외 식별자를 SPDX 예외 목록으로 검증**한다. `OR` 선택은 어느 쪽을 택했는지 기록한다 | §5.2 · §5.3 · 결함 3·4·20 (0-F · 2-A · 2-B) |
+> | §28 "정책 테이블은 코드/버전 파일로 명시" | `POLICY_VERSION` 이 모듈 상수가 아니라 `{workspace}:{정책표 판본}:{배포형태축 해시}` 가 된다. 커버리지 표는 코드에서 **데이터로** 옮긴다 | §5.10 · §5.5 (2-D · 2-E) |
+> | §35 Corpus Versioning | 배포 검증기가 `corpus_version` 과 소스 3 건을 **하드코딩**해 확대를 막는다. corpus 를 늘리는 작업은 검증기 수정을 포함한다 | §5.4 (2-C · 2-D) |
+> | §40 License "RAG 사용 시 `rag_corpus_version`" | retriever 가 **존재하면 부착 여부와 무관하게** 기록한다 | §5.6 · 결함 11 (항목 0-H) |
+
 ---
 
 # 0. Agent 3 임무
@@ -221,6 +239,13 @@ requested_analyzers includes target
 유효 분석 범위 없음.
 
 Agent 3는 resolution을 결정하지 않지만 Control이 `SUCCEEDED+COMPLETE`에서만 resolution 가능하다는 점을 고려해 coverage를 보수적으로 정확히 설정한다.
+
+> **[전제 변경 — `docs/DEVELOPMENT_SPEC.md` §7.2 · §8.1]** Control 쪽 규칙이 바뀐다.
+> `PARTIAL` 은 **후보 부재로 인한 `RESOLVED` 만** 막고 Risk 생성 · 근거 저장 · 이력 기록은
+> 허용한다 (0-E). 그리고 `COMPLETE` 로 들어온 후보 0 건이라도 의존성 아티팩트에서
+> **N>0 → 0 전이는 단독으로 권위를 갖지 못한다** (0-L). "보수적으로 PARTIAL 을 준다" 가
+> 더 이상 전면 정지를 뜻하지 않으므로, coverage 는 **읽기의 온전함**을 그대로 반영한다 —
+> 파싱 실패 · 절단 · 미인식은 `COMPLETE` 가 아니다 (§6.6 · §6.7).
 
 ---
 
@@ -546,6 +571,30 @@ Dependency facts + SPDX normalization + deterministic policy
 
 # 23. MVP License Policy Scope — 중요 결정
 
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` D7 · §5.10, 항목 2-E]** 정책은 **workspace 별**이고
+> 워크스페이스는 서로 완전히 독립이다. 아래의 "Contract v2 가 필요하다" 는 전제가 틀렸다 —
+> **계약을 고치지 않고 다리를 놓는 선례가 이미 있다.** 특허 쪽이 Control 의 메서드를
+> composition 에서 Intelligence 로 넘긴다:
+>
+> ```
+> public_facade/service.py:298    async def previously_matched_patents(...)
+> composition/production.py:422   previously_matched_patents=context.control_facade.previously_matched_patents
+> intelligence/public.py:107,125  받아서 분석기에 전달
+> ```
+>
+> 같은 모양으로 `workspace_license_policy(risk_workspace_id)` 를 넘긴다. `LicenseAnalyzer.
+> __init__` 이 지금 `retriever` 를 받는 자리(`analyzer.py:66-73`)와 같은 키워드로 받는다.
+> **Agent 3 가 Control DB 를 직접 조회하지 않는다는 금지는 그대로다** — 넘어가는 것은
+> 함수 하나이고 Intelligence 는 그것이 어디서 오는지 모른다 (§3 의 경계).
+>
+> `POLICY_VERSION` 도 모듈 상수(`policy.py:24` = `global-license-policy-2026-08-14.1`)에서
+> **`{risk_workspace_id}:{정책표 판본}:{배포형태축 해시}`** 로 바뀐다.
+> `AnalysisVersions.policy_version` 이 자유 문자열이라 계약 변경이 없다 (§12.1).
+>
+> **설정 전에는 등급을 매기지 않는다 [결정]** — 파이프라인 1~3 단계(파싱 · 식별 · 전문
+> 조회)는 그대로 돌고 **4~5 단계(조항 검색 · 의무 판정)를 하지 않는다.** 가장 무거운 쪽으로
+> 가정하면 첫 화면이 전부 빨강이 되고, 그러면 사용자는 진짜 HIGH 도 함께 무시한다.
+
 Frozen `AnalysisArtifact`에는 VWS-specific license policy payload가 없다.
 
 따라서 **MVP는 versioned global deterministic license policy**를 사용한다.
@@ -559,6 +608,22 @@ Agent 3가 임의로 Control DB를 조회해 VWS policy를 가져오면 안 된�
 ---
 
 # 24. Dependency File Support
+
+> **[대체됨 — `docs/DEVELOPMENT_SPEC.md` §5.8 · §6.8, 결함 17, 항목 0-J]** 인식 목록은 더
+> 이상 이 문서의 권장이 아니라 **`core/artifacts/dependency_files.py` 한 곳의 표**이고
+> 커넥터와 분석기가 함께 본다 (`78a6490` 에서 통일). 현재 7 형식 —
+> `requirements*.txt/.in`, `pyproject.toml`, `setup.cfg`, `package.json`,
+> `package-lock.json`, `uv.lock`, `poetry.lock`. **읽을 수 있는 이름만 인정한다** —
+> 파서 없는 이름을 의존성으로 분류하면 어느 분석기도 맡지 못해 분석이 계약 위반으로
+> 실패한다 (`setup.py` 가 그래서 빠져 있다).
+>
+> 여기에 **`requirements.lock`, `constraints.txt`, 하위 경로의 `requirements/*.txt` 를
+> 더한다.** 이 저장소 자신의 `requirements.lock` 이 지금 `dependency_format()` 에 없어
+> **기존 `requirements` 파서로 그대로 읽으면 68 건이 나오는데 한 건도 안 보인다.**
+> 함께 볼 것 — `requirements` 계열 파서는 `EXACT_PIN` 을 내는데 잠금 파일은 `LOCKFILE`
+> 이어야 한다. 지금 두 값이 동률이라 먼저 온 쪽이 이긴다.
+>
+> glob 지정과 모르는 파일의 형식 판별·추출은 [유예] 다 (§12.2, D5).
 
 MVP 우선:
 
@@ -611,11 +676,41 @@ class PackageMetadataProvider(Protocol):
 
 Registry fallback을 구현 가능.
 
+> **[제한 — `docs/DEVELOPMENT_SPEC.md` §5.9, 결함 19, 항목 0-K]** 폴백이 **없는 버전을
+> 최신 버전으로 대체하면 안 된다.** 지금 npm 폴백이 `info["versions"].get(version, info)`
+> 라(`package_metadata.py:142`) 요청한 버전이 없으면 **문서 전체로 폴백**해 최신 버전의
+> 라이선스를 그 버전의 라이선스로 기록하고, `inferred_from_free_text` 같은 표시도 붙지
+> 않는다. 요청한 버전이 없으면 **모른다** — `UNKNOWN` + 불확실 표시로 남긴다. 라이선스를
+> 바꾼 패키지가 바로 이 제품이 잡으려는 대상이다.
+
 Provider 결과는 법적 authoritative conclusion이 아니라 evidence fact.
 
 ---
 
 # 27. SPDX Normalization
+
+> **[강화 — `docs/DEVELOPMENT_SPEC.md` §5.2 · §5.3, 결함 3·4·20, 항목 0-F · 2-A · 2-B]**
+> 아래 MUST 는 방향이 옳지만 실제 코드가 그 반대다. 셋을 더한다.
+>
+> * **원문자열을 저장 경계 너머까지 보존한다** (0-F). 지금은 미상 식별자가 저장 경계
+>   이전에 문자열 `UNKNOWN` 으로 치환된다 — 소거하는 곳은 `spdx.normalize` 가 아니라
+>   그 아래의 `spdx.canonicalize` 이고, **운영에서 실제로 도는 레지스트리 폴백 경로는
+>   `normalize` 를 부르지 않는다.** 고칠 곳은 `package_metadata.py` 의 120-126 ·
+>   152-166 · 228-234 세 군데다. `'MIT AND BUSL-1.1'` 이 `'MIT AND UNKNOWN'` 으로
+>   **부분 소거**되므로 정책 표에 행을 추가해도 소급 구제가 되지 않는다. 계약은 열지
+>   않는다 — `Evidence.metadata_safe` 의 `PACKAGE_METADATA` 근거에 실어 넘긴다 (§12.1).
+> * **`WITH` 예외를 평가에 반영한다.** 파서는 `WITH` 를 제대로 읽어 `exception` 에 담는데
+>   (`spdx.py:227`) 정책이 그 필드를 **한 번도 보지 않는다** (`policy.py:90-92`). 그래서
+>   `GPL-2.0-only WITH Classpath-exception-2.0` 이 맨 GPL 과 같은 `POLICY_CONFLICT` 가
+>   되어 **오탐이 자바 생태계 전반에 걸린다.**
+> * **예외 식별자를 SPDX 예외 목록으로 검증한다.** 지금은 `MIT WITH totally-made-up` 이
+>   조용히 통과해 `NOTICE_REQUIRED` 가 된다 — 날조된 예외가 완화를 얻는다. 목록에 없으면
+>   완화하지 않고 `UNKNOWN` 으로 다룬다.
+>
+> `OR` 선택은 결과에 **어느 쪽을 택했는지 기록한다.** 지금은 조용히 최소 심각도를 고르고
+> (`AGPL-3.0-only OR MIT` → `NOTICE_REQUIRED`) 그 선택이 원장에 남지 않는다.
+> 어휘는 SPDX 전체로 넓힌다 — 표 밖 식별자는 `UNKNOWN` 이되 **원문자열이 남으므로**
+> 나중에 표가 넓어지면 재평가로 구제된다 (2-A).
 
 `spdx.py`에서 deterministic.
 
@@ -651,9 +746,42 @@ Policy v1은 SPDX family/known obligations에 따른 보수적 분류.
 
 정책 테이블은 코드/버전 파일로 명시하고 test한다.
 
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` §5.10 · §5.5, 항목 2-D · 2-E]** 두 표가 코드를
+> 떠난다. **정책 판본**은 모듈 상수(`policy.py:24`)가 아니라
+> `{risk_workspace_id}:{정책표 판본}:{배포형태축 해시}` 로 workspace 마다 달라지고(D7),
+> **커버리지 표**는 manifest 에서 생성한 색인을 package-data 로 실어 문서를 늘릴 때 `.py`
+> 를 고치지 않게 한다 — 프롬프트 `.md` 가 `pyproject.toml:46` 에서 이미 그렇게 실린다.
+> `UNKNOWN`/non-standard 를 자동 허용하지 않는다는 규칙은 그대로다.
+
 ---
 
 # 29. License RAG 설명
+
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` D9 · §4 · §7.2, 결함 5, 항목 0-E]** 이 절이 두
+> 군데에서 뒤집힌다.
+>
+> * **RAG 는 판정에 관여해도 된다** (D9). 다만 전부 여는 것이 아니라 층을 나눈다 (§4) —
+>   T1 결정론(파서 · SPDX 표현식 · 정책 함수)과 T2 검증된 대조는 판정을 **만들고**,
+>   **T3(RAG · 모델)은 등급을 올릴 수만 있고 내리지 못한다.** 근거가 있다 — 특허 쪽에서
+>   모델 자기신고로 강등했더니 **HIGH 자격 13 건이 13 건 모두 강등되어 HIGH 가 한 번도
+>   안 나왔다** (`intelligence/patent/grounding.py:120-137`). T3 이 올릴 때는
+>   **corpus chunk id + 실재가 확인된 인용**이 반드시 있어야 하고, 인용이 없으면 모델
+>   출력을 전혀 쓰지 않는다. 상향 발화율은 계측하고 상한을 둔다 (§10).
+> * **아래 "MVP 권장" 의 `SUCCEEDED + PARTIAL` 이 결함 5 다.** `_attach_reference_evidence`
+>   가 RAG 예외에서 coverage 를 PARTIAL 로 낮추고, Control 이
+>   `analysis_is_authoritative(SUCCEEDED, COMPLETE)` 안에서만 reconcile 하므로
+>   (`risk_reconcile/service.py:196`) **RAG 가 죽으면 표가 낸 판정까지 함께 버려진다.**
+>   `explanation.py` 머리말의 "두 기능이 모두 실패해도 정책 결과는 그대로 남는다" 는
+>   canonical 계층에서 사실이 아니다. 새 기준은 `PARTIAL` 을 **"해소 권한 없음"** 으로만
+>   좁힌다 — Risk 생성 · 근거 저장 · 이력 기록은 허용하고 후보 부재로 인한 `RESOLVED` 만
+>   막으며, 부분성은 근거 행 자체에 표시한다.
+>
+> **retrieval 자체도 바뀐다** (§5.5, 결함 2, 항목 0-G). `reference_gate.is_relevant` 가
+> 판정을 이끈 leaf 가 아니라 **표현식의 모든 leaf** 를 봐서
+> `'Apache-2.0 AND GPL-3.0-only'`(`POLICY_CONFLICT`)에 "소스코드 공개 의무는 없다" 는
+> `permissive-notice` 가 붙는다 — **판정과 정반대의 근거다.** 게이트가 보는 집합을
+> **판정을 이끈 leaf**(AND 는 최대 심각도, OR 은 선택된 leaf)로 좁히고, 검색은 **거르고
+> 나서 찾는다**: SPDX 식별자로 정확 조회 → 그 안에서만 임베딩으로 구절 선택.
 
 RAG는 deterministic policy를 override하지 않는다.
 
@@ -809,6 +937,20 @@ AnalysisResult에 기록.
 
 Corpus 변경 시 version bump.
 
+> **[제약 — `docs/DEVELOPMENT_SPEC.md` §5.4, 항목 2-C · 2-D]** **배포 검증기가 corpus
+> 확대를 막는다.** `scripts/validate_gcp_deployment.py:286-294` 가 `corpus_version` 을
+> 문자열 `"2026-08-14.1"` 로, 소스를 **정확히 3 건**으로, source_id 집합을
+> `RAG_SOURCE_IDS` 로 하드코딩해 검사한다 — **문서를 하나만 더해도 배포가 막힌다.** 같은
+> 파일 `:640-666` 은 `CORPUS_SUBJECT_COVERAGE` 를 manifest 와 교차검증한다. **2-C 와 2-D 는
+> 배포 검증기 수정을 포함한다.**
+>
+> 지금 corpus 는 손으로 쓴 문서 3 개, 총 **2,120 바이트**(789 + 734 + 597)이고 RAG 를
+> 부르는 대상 22 개 중 **4 개**만 덮는다. 내용은 SPDX license-list-data 의 **전문**(CC0)
+> + 배포 형태별 의무 해설로 간다 (D4). 임의의 웹 문서를 긁지 않으며 manifest 의
+> `approved_for_rag` 가 그 관문이다. `manifest.yaml` 의 `corpus_version`(`2026-08-14.1`)
+> 과 배포 환경변수(`2026-08-21.1`)가 서로 다른 것은 [미결] 이다 (§13-5) — 강제하는 쪽은
+> manifest 값이다.
+
 ---
 
 # 36. RAG Ingestion
@@ -901,6 +1043,13 @@ rag_corpus_version
 - policy_version required
 - RAG 사용 시 rag_corpus_version
 - Gemini explanation 시 model/prompt version
+
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` §5.6, 결함 11, 항목 0-H]** "RAG 사용 시" 가
+> 아니라 **retriever 가 존재하면 부착 여부와 무관하게 기록한다.** 지금은 조각이 실제로
+> 붙었을 때만 기록되어 주제 불일치로 전부 버린 경우와 조회 실패가 `None` 이고, 실측에서
+> 저장된 LICENSE 결과 **15 건이 전부 `None` 인데 `LICENSE_REFERENCE` 근거는 8 건 존재**
+> 했다. corpus 갱신이 판정을 바꾸는 구조에서 이 필드가 **감사의 전부**가 된다.
+> 아울러 `policy_version` 은 §5.10 에 따라 workspace 마다 다른 값이 된다.
 
 ---
 

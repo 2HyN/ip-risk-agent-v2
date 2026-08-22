@@ -5,6 +5,22 @@
 > Master Spec이 상위 규약이며, 충돌 시 Master Spec을 우선한다.  
 > Agent 1은 이 문서에서 지정한 파일만 소유하며 `shared/contracts/**`, Integration-only 영역, Agent 2/3 소유 영역을 수정하지 않는다.
 
+> **[2026-08-23] 이 문서는 Platform & Control Plane 의 설계 참조로 계속 유효하다.**
+> 다만 `docs/DEVELOPMENT_SPEC.md` 가 다음 단계 개발의 단일 기준으로 채택되었고, 아래 절이
+> 규정한 동작 일부를 **뒤집는다.** 충돌하는 자리에서는 `docs/DEVELOPMENT_SPEC.md` 가
+> 우선한다. 뒤집힌 텍스트는 지우지 않는다 — 그때 무엇을 왜 정했는지의 기록이다.
+>
+> | 이 문서 | 무엇이 뒤집혔나 | 우선하는 곳 |
+> |---|---|---|
+> | §22 "DELETE event도 자동 resolve하지 않는다" | 삭제 · 폴더 이탈 · 접근 상실이 **Risk 를 닫는 한 경로로 모인다.** 같은 판본으로 되돌아오면 분석 없이 되살리고 이전 처분까지 복원한다 | `DEVELOPMENT_SPEC.md` §7.1 · §8 결함 7·8·21 (항목 1-D) |
+> | §22 "`SUCCEEDED + COMPLETE`에 대해서만 실행" / §19 5~6 | `PARTIAL` 의 뜻을 **"해소 권한 없음"** 으로만 좁힌다. Risk 생성 · 근거 저장 · 이력 기록은 허용하고 후보 부재로 인한 `RESOLVED` 만 막는다 | §7.2 · §8 결함 5 (0-E) |
+> | §22 "old-only -> RESOLVED" | 의존성 아티팩트에서 후보가 **N>0 → 0 으로 떨어지는 전이는 단독으로 권위를 갖지 못한다.** coverage 가 `COMPLETE` 여도 그렇다 | §8.1 (0-L) |
+> | §23 Human Review | `docs/RISK_DISPOSITION_POLICY.md` 가 `ReviewDisposition` 의 뜻을 고정해 대체한다. 그 정책 문서 자체도 **1-D 가 개정한다** | `docs/RISK_DISPOSITION_POLICY.md` · `DEVELOPMENT_SPEC.md` §7.1 |
+> | §16 Secret/Credential Filter | 의존성 아티팩트의 마스킹은 **파싱 안전한 형태**여야 한다 | §6.5 · §8 결함 14 (0-B) |
+> | §17 Data Minimization | 의존성 파일은 **통짜로** 넘기고, 게이트가 자른 입력으로는 판정하지 않는다 | §6.4 · §6.7 · 결함 1·16 (0-A·0-D) |
+> | §28 Notifications | **하향(해소 · 등급 강등) 알림 종류를 더한다** | §7.3 · §12.1 |
+> | §25 hash chain 권장 | 권장에 그쳤고 **끝내 구현하지 않았다.** 관찰 항목으로 남는다 | §12.3 |
+
 ---
 
 # 0. Agent 1 임무
@@ -615,6 +631,12 @@ MVP 기능:
 
 # 16. Secret/Credential Filter
 
+> **[조건 추가 — `docs/DEVELOPMENT_SPEC.md` §6.5, 결함 14, 항목 0-B]** 이 결정론적 마스킹이
+> **패키지 이름에 걸린다.** `secret|token|credential|password|api[_-]?key` 어휘가 실제
+> 패키지 이름과 겹쳐 `tokenizers==0.15.0` 이 `('tokenizers', None)` 이 되고,
+> TOML·JSON 처럼 구조가 있는 형식은 따옴표가 먹혀 **파일 전체가 0 건**이 된다. 의존성
+> 아티팩트에서는 파싱 안전한 형태로 마스킹하거나 선언 구역을 대상에서 뺀다.
+
 MVP는 deterministic pattern 기반으로 구현한다.
 
 최소 탐지/제거 후보:
@@ -641,6 +663,13 @@ Redaction 방식은:
 ---
 
 # 17. Data Minimization
+
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` §6.4 · §6.7, 결함 1·16, 항목 0-A·0-D]** 의존성
+> 파일에는 "최소 segment" 를 적용하지 않는다. **통짜로** 분석기에 넘긴다 — 조각 경유로
+> `pyproject.toml` 이 20 건에서 3 건, `package.json` 이 1 건에서 0 건이 됐다. 아울러
+> 게이트가 바이트 상한으로 자른 사실을 분석기가 알아야 하고(`content_scope` 는 지금
+> `intelligence/` 전체에서 참조가 0 건이다), 락파일은 크므로 의존성 종류에 한해 바이트
+> 상한 특례가 필요하다.
 
 가능하면 `CHANGESET_WITH_CONTEXT`를 유지한다.
 
@@ -680,6 +709,10 @@ Agent 3가 최종적으로 unsupported 판단하여 SKIPPED를 반환할 수 있
 ---
 
 # 19. AnalysisResult Intake
+
+> **[좁아짐 — `docs/DEVELOPMENT_SPEC.md` §7.2 · §8.1]** 아래 5~6 번은 `PARTIAL` 에서
+> Risk 생성까지 함께 막는다. 새 기준은 **해소만** 막는다 (0-E). 그리고 `COMPLETE` 로
+> 들어온 후보 0 건도 의존성 아티팩트라면 단독으로 권위를 갖지 못한다 (0-L).
 
 핵심 use-case:
 
@@ -762,6 +795,10 @@ Mount alias는 key에 포함하지 않는다.
 
 # 22. Risk Reconcile Algorithm
 
+> **[뒤집힘]** 이 절의 세 규정이 `docs/DEVELOPMENT_SPEC.md` 로 대체됐다 — 실행 조건은
+> §7.2 (`PARTIAL` 은 해소만 막고 판정은 살린다), old-only 해소는 §8.1 (의존성 아티팩트의
+> N>0 → 0 전이는 단독으로 권위가 없다), DELETE 는 §7.1 (닫는다).
+
 `SUCCEEDED + COMPLETE`에 대해서만 실행.
 
 Pseudo flow:
@@ -786,11 +823,31 @@ Transaction 안에서:
 
 FAILED/INCONCLUSIVE/PARTIAL/NONE이면 old-only resolution logic을 호출하지 않는다.
 
+> **[좁아짐 — `docs/DEVELOPMENT_SPEC.md` §7.2, 결함 5, 항목 0-E]** `PARTIAL` 에서 막는
+> 것은 **후보 부재로 인한 `RESOLVED` 뿐**이고, Risk 생성 · 근거 저장 · 이력 기록은
+> 허용한다. 지금은 `analysis_is_authoritative(SUCCEEDED, COMPLETE)`
+> (`core/risk/transitions.py:50`) 안에서만 `_reconcile` 이 불려
+> (`risk_reconcile/service.py:196`) **RAG 가 죽으면 표가 낸 판정까지 함께 버려진다.**
+
 DELETE event도 자동 resolve하지 않는다.
+
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` §7.1, 결함 7, 항목 1-D]** 삭제 · 폴더 이탈 ·
+> 접근 상실은 모두 Risk 를 닫는 한 경로로 들어간다. 지금 코드는 이 절대로 동작한다 —
+> `exclude_artifact_risks` 를 부르는 곳은 수동 "추적 해제" 하나뿐이고
+> (`public_facade/service.py:356`), DELETE 변경은 이벤트를 곧바로 `DONE` 으로 둔다
+> (`process_change/service.py:163`). 재진입 되살리기는 `_reconcile` 안의
+> `should_revive` (`risk_reconcile/service.py:304`) 밖에 **새 경로**로 만든다.
 
 ---
 
 # 23. Human Review
+
+> **[대체됨 — `docs/RISK_DISPOSITION_POLICY.md`]** 네 disposition 값의 뜻과 누가 붙일 수
+> 있는지는 그 문서가 고정한다 — `EXCLUDED` 는 **시스템만** 붙이고, 사람은 `EXCLUDED` 로도
+> `EXCLUDED` 에서도 나갈 수 없다 (`decide_user_review` 가 양방향을 막는다).
+> 그리고 **그 정책 문서 자체를 `docs/DEVELOPMENT_SPEC.md` §7.1 의 항목 1-D 가 개정한다** —
+> 지금은 되살릴 때 처분이 `NEW`/`UNREVIEWED` 로 초기화되지만(결함 21), 1-D 이후에는
+> **판본이 같으면 이전 처분을 복원하고 다르면 지금처럼 다시 시작한다.**
 
 Disposition:
 
@@ -861,6 +918,11 @@ RiskEvent
 
 MVP에서 hash chain을 구현할 수 있으면 권장하나, 핵심은 append-only다.
 
+> **[관찰 — `docs/DEVELOPMENT_SPEC.md` §12.3]** 이 권장은 **끝내 구현되지 않았다.**
+> `RiskEvent` 는 append-only 이지만 암호학적 사슬이 아니다. 우리 저장소를 신뢰하는
+> 사람에게는 온전한 이력이지만, 변조를 증명해야 하는 자리에서는 사슬이 없다는 사실이
+> 먼저 나온다. 대외 주장에 쓰기 전에 알고 있어야 한다.
+
 금지:
 
 - 과거 event update
@@ -915,6 +977,12 @@ SourceAccessEvent
 ---
 
 # 28. Notifications
+
+> **[확장 — `docs/DEVELOPMENT_SPEC.md` §7.3, 항목 3-A]** 이 목록에 **하향(해소 · 등급
+> 강등) 알림**을 더한다. 틀린 하향은 알림 0 건에 `RESOLVED` 이력이 `evidence_refs=()` 로
+> 남아 소리 없이 사라진다. §12.1 이 확인했듯 `NotificationType` 은
+> `shared/contracts/**` 가 아니라 `core/notifications/models.py:19-25` 에 있어 **계약
+> 변경이 아니다.**
 
 MVP는 Firestore/in-app notification만 필수.
 

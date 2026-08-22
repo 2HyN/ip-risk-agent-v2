@@ -5,6 +5,24 @@
 > Master Spec이 상위 규약이며, 충돌 시 Master Spec을 우선한다.  
 > Agent 2는 Google Drive / GitHub / Local Source를 연결·감시·조회하는 Plane만 소유한다.
 
+> **[2026-08-23] 이 문서는 Source Plane 의 설계 참조로 계속 유효하다.**
+> 다만 `docs/DEVELOPMENT_SPEC.md` 가 다음 단계 개발의 단일 기준으로 채택되었고, 아래 절이
+> 규정한 동작 일부를 **뒤집는다.** 특히 **Drive 인증 방식 전체**가 바뀐다. 충돌하는
+> 자리에서는 `docs/DEVELOPMENT_SPEC.md` 가 우선한다. 뒤집힌 텍스트는 지우지 않는다 —
+> 그때 무엇을 왜 정했는지의 기록이다.
+>
+> | 이 문서 | 무엇이 뒤집혔나 | 우선하는 곳 |
+> |---|---|---|
+> | §7 · §8 · §9 (Drive OAuth `drive.file` + refresh token + Picker) | Drive 는 **서비스 계정 + 폴더 공유**로 간다. `drive.file` 폐기, `drive.readonly` 미채택, **보관할 자격증명이 없다** | `DEVELOPMENT_SPEC.md` §2 D1 · §2.1 · §6.1 (항목 1-F) |
+> | §10 `DriveTrackingScope.selected_file_ids[]` | 스코프는 **공유받은 폴더**다. 폴더 안은 소유자를 구별하지 않고 전부 검사하고, 확장에 상한(항목 300 · 깊이 10)을 둔다 | §6.1 · §2 D2 |
+> | §10 "`path_hint`는 optional display hint" | **필수다.** `logical_path_hint` 에 부모 경로를 넣는다 | §6.1 (항목 **1-E**) |
+> | §11 6 "selected file IDs와 intersect" | 폴더 스코프와 교차한다. 서비스 계정의 `changes` 피드가 이탈·재진입을 주는지는 **1-A 실측이 정한다** | §6.1 · §13-1 |
+> | §13 Drive 지원 형식 | 허용 목록을 넓힌다 — mime 이 텍스트이거나 **확장자가 텍스트 계열**이면 읽는다. 어댑터와 게이트 **두 곳**을 함께 고친다 | §6.2 · 결함 9 (항목 1-C) |
+> | §20 GitHub artifact 이름 | `display_name` 규칙을 마운트와 push 에서 하나로 모은다 | §6.3 · 결함 10 (항목 1-G) |
+> | §21 "`CHANGESET_WITH_CONTEXT`를 우선" | 의존성 파일은 **통짜(FULL_TEXT)** 가 필수다. 잘린 입력으로는 판정하지 않는다 | §6.4 · §6.7 (항목 0-A·0-D) |
+> | §39 Drive UI (파일 선택 · 선택 개수) | 폴더 단위 마운트 UI. `/workspace` 아래 트리 | §2 D2 · §6.1 |
+> | 875 행 `GET /desktop/mounts/{id}/status` | **만들지 않는다** [결정] | `docs/GITHUB_LOCAL_DESKTOP_PLAN.md` §3-9 |
+
 ---
 
 # 0. Agent 2 임무
@@ -189,6 +207,16 @@ Google refresh token, GitHub App private key/webhook secret 등은 logs/contract
 
 # 7. Google Drive — Identity & Authorization Flow
 
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` D1 · §2.1 · §6.1]** Drive 는 사용자 OAuth 를 쓰지
+> 않는다. **서비스 계정 + 폴더 공유**로 간다 — `drive.file` 은 폐기하고 `drive.readonly` 는
+> 채택하지 않는다. 서비스 계정은 Cloud Run 에 이미 붙어 있어 키 파일이 없고 그래서
+> **보관할 자격증명이 없다.** workspace 를 전부 지운 뒤에도 Drive refresh token 19 개가
+> 남아 있던 사고(`1849f37` 로 고침)가 **구조적으로 재발하지 않고**, 봉쇄가 우리 신뢰 경계
+> **밖**(Google)에 남는다. 변경 피드도 함께 좁아진다 — 서비스 계정의 `changes` 는 공유받은
+> 범위이므로 범위 밖 파일의 이름과 변경 사실이 우리 시스템을 지나가지 않는다.
+> 아래 flow 에서 `drive.file scope authorization` · `refresh token secured` ·
+> `Picker session` 세 단계가 사라진다.
+
 App login과 Drive authorization은 별개다.
 
 한 App User가 여러 Google Drive 계정을 연결할 수 있어야 한다.
@@ -227,6 +255,10 @@ CSRF/state validation 필수.
 
 # 8. Drive OAuth Credential Model
 
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` D1 · §2.1]** Drive 에는 저장할 credential 이 없다.
+> `refresh_token_secret_ref` 도 `granted_scopes` 도 남지 않는다. §6 의 credential vault 는
+> GitHub App private key · webhook secret 에는 그대로 필요하다.
+
 Provider-private metadata:
 
 ```text
@@ -253,6 +285,10 @@ status
 
 # 9. Google Picker
 
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` D1 · §6.1]** Picker 를 쓰지 않는다. 사용자가
+> 폴더를 서비스 계정에 공유하고 우리는 **공유받은 폴더만** 읽는다. 범위 계산에 버그가
+> 있어도 공유되지 않은 것을 요청하면 Google 이 거절한다.
+
 Picker는 해당 Drive SourceConnection의 access token을 사용한다.
 
 App login account의 token을 사용하지 않는다.
@@ -271,6 +307,21 @@ Picker에서 파일 선택이 바뀌면 Source Manager 본인 Mount + provider a
 ---
 
 # 10. Drive SourceWorkspace Model
+
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` D1/D2 · §6.1, 항목 1-E · 1-F]** 두 가지가 바뀐다.
+>
+> * `selected_file_ids[]` 대신 **공유받은 폴더**가 스코프다. 폴더 안은 소유자를 구별하지
+>   않고 전부 검사한다. 폴더 확장에 **상한**을 둔다 — v1 이 쓴 **항목 300 개 / 깊이 10** 을
+>   새로 정할 이유가 없으면 그대로 쓰고, **잘라낸 사실을 로그로 남긴다**(조용히 자르면
+>   "전부 검사했다" 로 읽힌다). 바로가기(`application/vnd.google-apps.shortcut`)는 따라가지
+>   않으며, 지금은 목록에 없어서 막히는 것이므로 **규칙으로 막는다.**
+> * **`path_hint` 는 optional display hint 가 아니라 필수다** (항목 1-E). 지금
+>   `google_drive/adapter.py:211,299` 가 `logical_path_hint=None` 이라 Drive artifact 의
+>   `logical_path` 가 `alias/파일이름` 으로 평평하다. 여기에 **부모 경로**를 넣는다. UI
+>   트리의 전제이고 스코프 결정과 독립이다.
+>
+> `source_artifact_id = Drive file ID` 와 "parent hierarchy 를 identity 에 쓰지 않는다" 는
+> 그대로다 — 부모 경로는 표시·경로용이다.
 
 Drive SourceWorkspace는 directory mirror가 아니다.
 
@@ -317,6 +368,11 @@ push wake-up + changes cursor + reconcile
 9. watch expiry 전 scheduler renewal hook 제공.
 10. periodic reconcile safety net.
 
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` §6.1]** 교차 대상이 **공유받은 폴더 스코프**다.
+> 이탈·재진입이 `changes` 피드에 잡히는지는 **1-A 실측**이 정하고 (§13-1 미결), 잡히면
+> 이미 있는 DELETE / UPDATE 경로로 들어와 폴더 대조 작업이 필요 없다. **v1 의 동작을 근거로
+> 읽으면 안 된다** — v1 의 폴더 펼침은 연결 시점의 스냅샷이었다 (`ea70787`).
+
 Webhook endpoint는 빠르게 ACK한다.
 
 ---
@@ -338,6 +394,15 @@ Drive stable file ID가 유지되면 MOVE에도 동일 artifact identity.
 ---
 
 # 13. Drive fetch_snapshot()
+
+> **[넓어짐 — `docs/DEVELOPMENT_SPEC.md` §6.2, 결함 9, 항목 1-C]** 지금 Drive 는
+> `SELECTABLE_MIME_TYPES` 네 개(Google Doc / `text/plain` / `text/markdown` /
+> `application/json`)만 통과시키고, 게이트도 mime 만 보고 확장자는 보지 않아
+> `application/octet-stream` 으로 온 `.md` 가 거부된다. 새 기준은 **mime 이 텍스트이거나
+> 확장자가 텍스트 계열이면 읽고**, 내용이 실제 바이너리면 UTF-8 디코드 실패를 정직한
+> "미지원" 으로 처리한다. 허용 목록이 **어댑터와 게이트 두 곳에 나뉘어 있으므로 함께**
+> 고친다. 폴더 마운트를 열기 전에 들어가야 한다 — 폴더 안의 `.py`·`.csv`·`.yaml` 이 조용히
+> 빠지면 §6.1 의 "폴더 안은 전부 검사한다" 와 동작이 어긋난다.
 
 Input:
 
@@ -492,6 +557,12 @@ Webhook failure를 성공으로 숨기지 않는다.
 
 # 20. GitHub SourceChange Identity
 
+> **[추가 — `docs/DEVELOPMENT_SPEC.md` §6.3, 결함 10, 항목 1-G]** `display_name` 규칙이
+> 두 곳에서 다르다 — 마운트는 경로의 **마지막 조각**(`github/adapter.py:225`), push 는
+> `file.filename` 즉 **전체 경로**(`github/webhook_processor.py:158`). 실패하지는 않지만
+> 하위 폴더 파일의 이름이 첫 push 이후 바뀐다. 한 규칙으로 모은다. `logical_path` 가 이미
+> 폴더를 들고 있으므로 `display_name` 에 폴더가 없어도 트리는 나온다.
+
 권장 fingerprint:
 
 ```text
@@ -527,6 +598,13 @@ MOVE/rename이 감지되면 `previous_artifact` 제공.
 10. SourceSnapshot.
 
 `CHANGESET_WITH_CONTEXT`를 우선.
+
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` §6.4 · §6.7, 결함 1·16, 항목 0-A·0-D]** 의존성
+> 파일에서는 "가능하면 FULL_TEXT" 가 아니라 **통짜가 필수**다. 조각 경유로
+> `pyproject.toml` 이 20 건에서 3 건, `package.json` 이 1 건에서 0 건이 됐고, 0 건은
+> `succeeded([])` → coverage `COMPLETE` 를 지나 **기존 라이선스 Risk 를 전부 `RESOLVED`
+> 로 오보한다.** 아울러 게이트가 바이트 상한으로 자른 사실을 분석기가 알아야 하며
+> (`content_scope`), 락파일은 크므로 의존성 종류에 한해 바이트 상한 특례가 필요하다.
 
 manifest/lockfile 등 작은 파일은 FULL_TEXT 가능.
 
@@ -875,6 +953,25 @@ POST /desktop/staging
 GET  /desktop/mounts/{id}/status
 ```
 
+> **[뒤집힘 — `docs/GITHUB_LOCAL_DESKTOP_PLAN.md` §3-9 `GET /desktop/mounts/{id}/status`
+> 는 만들지 않는다 [결정]]** 위 다섯째 줄은 **의도적으로 만들지 않았다.** Desktop 의 서버
+> route 는 넷뿐이다 — `POST /desktop/devices/register`, `POST /desktop/mounts/register`,
+> `POST /desktop/staging`, `POST /desktop/events`
+> (`local/routes.py:96,104,111,118` 의 `create_local_desktop_router`).
+>
+> 그 자리를 대신하는 것이 이미 둘 있고 **서로 다른 것을 소유한다** — canonical mount 상태는
+> Control 의 `GET .../data-access-summary` (`api/security/router.py:200`,
+> `security_policy/service.py:225`) 가, 그 Desktop 의 enrollment · local registry 상태는
+> allow-listed `getDesktopConnectionStatus` IPC (`apps/desktop/main/index.ts:148` →
+> `apps/desktop/core/local-source-service.ts:129`) 가 답한다. **두 상태의 소유권을 섞는 중복 Source
+> endpoint 는 추가하지 않는다** — 하나의 endpoint 가 둘을 함께 답하면 어느 쪽이 진실인지가
+> endpoint 안에서 정해져 버린다.
+>
+> 이제는 지워진 `INTEGRATION_V2_EXECUTION_PLAN.md`(git 이력에 있다) §19 가 이것을
+> "Desktop mount status endpoint 없음 ·
+> P0 UX/ops · UI 연결 전에 구현" 으로 열어 둔 채 남겼으므로, **그 P0 를 처분하는 기록은
+> 위 문서 하나뿐이다.**
+
 정확한 canonical Mount creation은 Control callback과 Integration에서 묶는다.
 
 ---
@@ -897,6 +994,12 @@ Agent 2는 `frontend/src/sources/**`만 소유한다.
 - select/manage files
 - selected file count/list summary
 - reconnect/disconnect
+
+> **[뒤집힘 — `docs/DEVELOPMENT_SPEC.md` D1/D2 · §6.1]** 파일 선택 UI 가 아니라 **폴더
+> 공유 안내 + 폴더 단위 마운트**다. 세 소스를 폴더 단위로 통합하고 UI 는 `/workspace`
+> 아래 트리로 낸다 (D2). 조직 정책으로 공유가 막히는 경우의 안내 문구는 [유예] 다
+> (§12.2) — 원칙은 정해져 있다: **조직이 막은 것을 서비스가 넘어서면 그것은 서비스가
+> 아니라 백도어다.**
 
 ### GitHub
 

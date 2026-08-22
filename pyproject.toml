@@ -16,7 +16,7 @@ dependencies = [
   "httpx==0.28.1",
   "itsdangerous==2.2.0",
   "google-api-python-client==2.198.0",
-  "google-auth[requests]==2.56.3",
+  "google-auth[requests]==2.56.3",  # [requests] extra 는 의도적이다. Drive client(connectors/google_drive/client.py)와 RAG client(intelligence/rag/engine.py)가 google.auth.transport.requests.Request 를 직접 import 한다.
   "PyJWT[crypto]==2.10.1",
   "defusedxml==0.7.1",
   "PyYAML==6.0.3",
@@ -31,7 +31,7 @@ dependencies = [
 dev = [
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
-  "httpx2==2.10.0",
+  "httpx2==2.10.0",  # Starlette 1.6.0 TestClient 의 transport. 위 dependencies 의 httpx==0.28.1(애플리케이션/provider async client)과는 서로 다른 package 이므로 둘 다 유지한다. 이걸 빼면 TestClient test 가 전부 깨진다.
 ]
 
 [tool.setuptools.packages.find]

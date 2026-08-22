@@ -130,6 +130,53 @@ queue는 purge하지 않고 새 enqueue만 멈춘다. Firestore canonical Risk�
 대량 resolve하지 않는다. Secret은 이전 version을 rollback window 동안 보존하고,
 schema는 backward-compatible reader를 먼저 유지한다.
 
+### 422 `Method Not Allowed` 관측 시 진단 절차
+
+`422` status와 `{"detail":"Method Not Allowed"}` body의 조합은 이 저장소의 코드가 한
+응답으로 만들어낼 수 없다. FastAPI/Starlette의 method mismatch는 정확히
+`405 {"detail":"Method Not Allowed"}`이고, 이는 route regression test로 고정돼 있다 —
+`tests/connectors/test_drive_mounts.py:290`의
+`test_mount_route_method_mismatch_is_405_not_422`가 GET
+`/api/v1/source-mounts/{mount_id}/drive/mounts`에 대해 `405`와 그 body를 함께 단언한다
+(`:296-297`). request validation 422와 domain 422는 서로 다른 safe error envelope을 쓴다.
+
+staging live에서 이 조합이 두 번 보고됐고, 두 조사 모두 저장소 안에서 원인을 찾지
+못한 채 끝났다.
+
+- **1차 (Drive mount callback POST).** mount callback은 Google Drive를 전혀 호출하지
+  않았으므로 외부 Drive의 405를 이 코드가 옮긴 것이 아니었다. POST route coverage는
+  유지하고 wrong-method regression을 405로 고정했다. 이후 mount 완료에서 새로 생긴
+  provider 호출은 Picker scope로 한정된 초기 metadata fetch 하나뿐이며, 그 실패는
+  contradictory 422가 아니라 safe envelope으로 반환된다.
+- **2차 (두 번째 서로 다른 Drive 선택).** 저장소가 실제로 재현한 제품 오류는
+  모든 Drive mount alias가 `Google Drive`로 같아 생긴 workspace alias unique
+  collision이었고, 설치된 error handler 계약상 409 conflict 경로였다. 즉 관측된 422와는
+  다른 status다. 이 alias collision과 추가 파일 선택 시의 OAuth 재시작 우회는 이후
+  변경으로 제거됐다.
+
+따라서 새 revision에서 같은 조합이 다시 관측되면 **같은 Network request 한 건의
+status, response body, response headers를 한 번에 다시 수집한다.** 저장소가 그 쌍을
+낼 수 없다는 사실이 위 test로 고정돼 있으므로, 서로 다른 request나 서로 다른 화면에서
+status와 body를 따로 모은 관측(split-source observation)이 그 조합을 만들어냈다고 본다.
+세 값이 같은 request에서 함께 나오기 전에는 이 조합을 위의 중단 기준으로 취급하지 않는다.
+
+관련 계약 확인점.
+
+- 초기 metadata fetch의 provider HTTP 실패는 source connector error boundary로 매핑돼
+  `DRIVE_INITIAL_SYNC_FAILED` safe envelope으로 반환된다.
+  `tests/connectors/test_drive_mounts.py:241`은 `502`와
+  `{"code": "DRIVE_INITIAL_SYNC_FAILED", "operation": "drive_file_metadata",
+  "provider_error": "TEMPORARY_UNAVAILABLE", "retryable": false}`를 고정하고, 선택된
+  file ID가 response body에 없음을 함께 확인한다. provider URL, file ID, response body,
+  credential은 제외된다.
+- 현재 alias는 선택 집합이 아니라 **연결된 Drive 계정**에서 파생한다
+  (`backend/src/ip_risk_agent/composition/source_registration.py:461` `_drive_mount_alias`:
+  계정 라벨이 있으면 `Google Drive {label}`, 없으면 `Google Drive {subject digest 8자}`).
+  파일을 더 추가해도 alias가 바뀌지 않는다. 선택한 파일이 이미 전부 추적 중이면
+  오류가 아니라 기존 binding을 돌려주는 **멱등 200**이고
+  (`source_registration.py:282`), `409 selected files are already tracked`는 추적 중인데
+  binding이 없는 불가능 상태의 guard로만 남아 있다(`:280`).
+
 ## 8. 승인 기록
 
 | 항목 | 기록값 |
