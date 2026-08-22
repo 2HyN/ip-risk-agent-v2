@@ -603,3 +603,84 @@ def test_an_auth_failure_is_not_retried():
         await client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_the_priority_diagnostic_separates_the_three_paths_to_medium(caplog):
+    """MEDIUM 은 세 갈래로 만들어진다. 결과만 보면 가릴 수 없다.
+
+    실측에서 특허 Risk 33 건이 전부 MEDIUM 이었는데, 겹치는 구성이 하나뿐인지
+    청구항 근거가 없는지 HIGH 에서 강등된 것인지 알 길이 없었다. 이 진단이 그것을
+    가른다.
+    """
+    import json
+    import logging
+
+    analyzer = make_analyzer([extraction(), comparison(PATENT_A), comparison(PATENT_B)])
+    with caplog.at_level(logging.INFO, logger="ip_risk_agent.intelligence.patent.analyzer"):
+        run(analyzer.analyze(patent_artifact()))
+
+    records = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{")
+    ]
+    priority = [r for r in records if r.get("event") == "patent_priority_diagnostic"]
+    assert priority, "후보마다 등급 진단이 나와야 한다"
+    for record in priority:
+        assert set(record) == {
+            "schema_version",
+            "event",
+            "match_count",
+            "has_claim_evidence",
+            "uncertainty_flag_count",
+            "segment_count",
+            "distinct_segments",
+            "priority",
+        }
+        # 판정을 되짚을 수 있어야 한다.
+        assert isinstance(record["match_count"], int)
+        assert isinstance(record["has_claim_evidence"], bool)
+        assert record["priority"] in {"LOW", "MEDIUM", "HIGH"}
+    # 본문이나 표시 문구는 남기지 않는다.
+    dumped = json.dumps(priority, ensure_ascii=True)
+    assert "겹치는" not in dumped
+    assert DOC[:12] not in dumped
+
+
+def test_a_document_is_split_into_reviewable_segments():
+    """원문은 저장하지 않으므로 검토 화면이 보여줄 문맥은 조각 그 자체다.
+
+    통짜 하나였을 때는 대조가 (문서 전체 × 청구항) 쌍만 만들 수 있었고, Risk 에
+    남는 원문 근거는 매칭된 부분이 아니라 파일 앞부분이었다.
+    """
+    from ip_risk_agent.connectors.common.segmentation import (
+        MAX_SEGMENT_CHARS,
+        split_document,
+    )
+
+    body = "\n\n".join(
+        [
+            "# 제목",
+            "첫 문단이다. " * 20,
+            "```\n코드 한 줄\n또 한 줄\n```",
+            "마지막 문단이다. " * 20,
+        ]
+    )
+    segments = split_document(body)
+    assert len(segments) > 1, "통짜 하나로 두면 가리킬 곳이 없다"
+    assert all(len(s.text) <= MAX_SEGMENT_CHARS for s in segments)
+    assert all(s.line_start is not None and s.line_end is not None for s in segments)
+    assert all(s.segment_id == f"L{s.line_start}-{s.line_end}" for s in segments)
+    # 줄 범위가 겹치지 않고 앞으로만 간다.
+    starts = [s.line_start for s in segments]
+    assert starts == sorted(starts)
+    # 코드 울타리는 안에서 잘리지 않는다.
+    fenced = [s for s in segments if "코드 한 줄" in s.text]
+    assert fenced and "또 한 줄" in fenced[0].text
+
+
+def test_an_empty_document_yields_no_segments():
+    from ip_risk_agent.connectors.common.segmentation import split_document
+
+    assert split_document("") == []
+    assert split_document("\n\n   \n") == []

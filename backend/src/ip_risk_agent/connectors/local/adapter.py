@@ -26,6 +26,7 @@ from iprisk_contracts.source_change import SourceChange
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
+from ..common.segmentation import split_document
 from ..common.errors import NotFoundError, SourceConnectorError, UnsupportedContentError
 from ..common.runtime_store import LocalConnectionStatus, LocalRuntime
 from .device_lookup import LocalDeviceLookup
@@ -83,7 +84,7 @@ class LocalAdapter:
         ref = StagingRef(object_name=staging_object_name)
         text = await self._staging_store.get(ref)
 
-        segment = TextSegment(segment_id="full", text=text, segment_kind=SegmentKind.FULL)
+        segments = split_document(text)
         checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
         receipt = build_access_receipt(
             SourceAccessType.FULL_CONTENT, content_bytes=bytes_of_text(text)
@@ -103,7 +104,7 @@ class LocalAdapter:
             mime_type=None,
             artifact_kind=self._infer_artifact_kind(change.artifact.display_name),
             content_scope=ContentScope.FULL_TEXT,
-            text_segments=[segment],
+            text_segments=segments,
             checksum=checksum,
             byte_size=bytes_of_text(text),
             source_access_receipt=receipt,

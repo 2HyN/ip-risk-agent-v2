@@ -59,6 +59,44 @@ def _diagnostic(**counts: int) -> None:
     )
 
 
+def _priority_diagnostic(
+    *,
+    match_count: int,
+    has_claim_evidence: bool,
+    uncertainty_flag_count: int,
+    segment_count: int,
+    distinct_segments: int,
+    priority: str,
+) -> None:
+    """후보 하나의 등급이 **왜** 그 값이 되었는지 남긴다.
+
+    실측에서 특허 Risk 33 건이 모두 MEDIUM 이었다. 등급이 한 값으로 뭉치면 검토
+    순서에 아무 정보를 주지 못하는데, 원인이 셋이라 결과만 보고는 가릴 수 없다 —
+    겹치는 구성이 하나뿐인지, 청구항 근거가 없는지, HIGH 였다가 불확실 표시로
+    내려온 것인지.
+
+    ``suggested_priority`` 의 입력을 그대로 남기면 그 셋이 갈린다. 개수와 불리언만
+    남기고 표시의 문구나 본문은 남기지 않는다.
+    """
+    logger.info(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "event": "patent_priority_diagnostic",
+                "match_count": match_count,
+                "has_claim_evidence": has_claim_evidence,
+                "uncertainty_flag_count": uncertainty_flag_count,
+                "segment_count": segment_count,
+                "distinct_segments": distinct_segments,
+                "priority": priority,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
+
 ANALYZER_VERSION = "patent-analyzer-1.0.0"
 COMPARE_PROMPT = "patent_compare_v1"
 
@@ -143,7 +181,19 @@ class PatentAnalyzer:
                 EvidenceType.SOURCE_EXCERPT,
                 segment.text,
                 source_reference(artifact.logical_path),
-                {"segment_kind": segment.segment_kind.value},
+                # 줄 범위를 근거에 실어 둔다. 검토 화면이 "문서의 어느 줄" 을 짚고,
+                # 나중에 문장 단위 하이라이트가 이 범위 안에서 다시 좁힌다.
+                {
+                    "segment_kind": segment.segment_kind.value,
+                    **(
+                        {}
+                        if segment.line_start is None
+                        else {
+                            "line_start": segment.line_start,
+                            "line_end": segment.line_end or segment.line_start,
+                        }
+                    ),
+                },
             )
 
         # ── 4. 후보별 대조
@@ -227,12 +277,23 @@ class PatentAnalyzer:
             builder.record_failure(failure)
             return None
 
+        priority = grounding.suggested_priority(grounded)
+        _priority_diagnostic(
+            match_count=grounded.match_count,
+            has_claim_evidence=grounded.has_claim_evidence,
+            uncertainty_flag_count=len(grounded.uncertainty_flags),
+            segment_count=len(artifact.text_segments),
+            distinct_segments=sum(
+                1 for value in grounded.evidence_ids if value.startswith("src:")
+            ),
+            priority=priority.value,
+        )
         return _Evaluated(
             matched_elements=grounded.matched_elements,
             candidate=PatentCandidate(
                 normalized_application_number=candidate.application_number,
                 title=document.title or candidate.title,
-                suggested_review_priority=grounding.suggested_priority(grounded),
+                suggested_review_priority=priority,
                 matched_elements=grounded.matched_elements,
                 evidence_ids=grounded.evidence_ids,
                 provider_metadata_safe={

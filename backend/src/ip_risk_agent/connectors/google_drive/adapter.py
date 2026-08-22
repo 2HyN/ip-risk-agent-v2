@@ -34,6 +34,7 @@ from iprisk_contracts.source_change import SourceChange
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
+from ..common.segmentation import split_document
 from ..common.credential_vault import SourceCredentialVault
 from ..common.errors import (
     AuthRequiredError,
@@ -190,7 +191,7 @@ class GoogleDriveAdapter:
         text = provider.read_text(file_id, drive_file.mime_type)
         await self._persist_refreshed_token(connection, provider)
 
-        segment = TextSegment(segment_id="full", text=text, segment_kind=SegmentKind.FULL)
+        segments = split_document(text)
         checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
         receipt = build_access_receipt(
             SourceAccessType.FULL_CONTENT, content_bytes=bytes_of_text(text)
@@ -210,7 +211,7 @@ class GoogleDriveAdapter:
             mime_type=drive_file.mime_type,
             artifact_kind=self._infer_artifact_kind(drive_file.name),
             content_scope=ContentScope.FULL_TEXT,
-            text_segments=[segment],
+            text_segments=segments,
             checksum=checksum,
             byte_size=bytes_of_text(text),
             source_access_receipt=receipt,
