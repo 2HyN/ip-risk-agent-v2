@@ -61,16 +61,43 @@ workspace 쪽은 적어도 거부로 실패가 보인다.
 
 검증한 두 목록(같은 집합을 거른다, 20,764 → 439)은 `SOURCE_MEASUREMENT.md` §1.5 에 있다.
 
-## 1-A — 막혔다. 사람의 동작 둘이 필요하다
+## 1-A — 아직 막혔다. `TRACKING.md` 의 "막는 것: 없음" 과 어긋난다
 
-**(가) Drive 폴더를 서비스 계정에 뷰어로 공유해야 한다.**
+`TRACKING.md` 가 Fork C 의 막는 것을 "없음" 으로 적었으나 **아직 못 돈다.** README 의
+규칙대로 어긋난 것을 여기 적는다. 다만 막는 지점이 **바뀌었다.**
+
+**(가) `gcloud` 재인증은 풀렸다.** 더 이상 reauth 오류가 아니다.
+
+**(나) 새로 드러난 것 — 가장(impersonation) 권한이 없다.**
 
 ```
-iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+PERMISSION_DENIED: Failed to impersonate
+  iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+permission: iam.serviceAccounts.getAccessToken   (authenticated as aj22@iceu.kr)
 ```
 
-**(나) `gcloud auth login`.** 지금 세션이 만료돼 서비스 계정 가장이 안 된다
-(`Reauthentication failed. cannot prompt during non-interactive execution`).
+`roles/iam.serviceAccountTokenCreator` 가 그 서비스 계정에 대해 사람 계정에 붙어 있지
+않다. `deploy/iam-policy-contract.yaml` 이 그 역할을 주는 곳은 Cloud Build 서비스 에이전트
+→ `iprisk-v2-deploy` 하나뿐이라, 계약대로다.
+
+**(다) 폴더 공유 여부는 아직 확인 못 했다** — (나)를 넘어야 볼 수 있다.
+
+### 푸는 방법 둘 — **(2)를 권한다**
+
+**(1) 사람 계정에 `iprisk-v2-worker` 가장 권한을 준다.** 빠르지만 **운영 신원을 사람이
+가장할 수 있게 된다.** 그 SA 는 Firestore·Secret·Drive 에 닿는다. 실측 하나를 위해 열기엔
+넓다.
+
+**(2) 버리는 시험용 서비스 계정을 따로 만든다.** 예: `iprisk-v2-drivetest@…`. 권한을
+아무것도 주지 않고, 사람 계정에 **그 계정에 대해서만** `serviceAccountTokenCreator` 를
+붙이고, 시험 폴더를 그 주소로 공유한다.
+
+**(2)가 맞는 이유** — D1 의 핵심이 "Drive 접근은 IAM 역할이 아니라 **폴더 공유**에서
+온다" 는 것이다. 그러므로 권한 0 인 SA 로도 1-A 의 세 물음은 **똑같이** 답이 나온다.
+운영 신원을 건드리지 않고, 끝나면 지우면 된다. 오히려 D1 이 실제로 그렇게 동작하는지를
+함께 확인하는 셈이다.
+
+**이건 GCP 자원 생성이라 Fork D 몫이다.** 나는 만들지 않았다.
 
 탐침은 만들어 두었다 — `check` / `start` / `poll` 세 명령이고, 각 변경에 `removed` ·
 `trashed` · `parents` 를 함께 찍어 **폴더 밖으로 나간 것이 `removed` 로 오는지 아니면
