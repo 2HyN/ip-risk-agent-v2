@@ -20,11 +20,41 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from .kipris import PatentDocument, PatentSearchHit, PatentSearchProvider
+
+logger = logging.getLogger(__name__)
+
+
+def _record_call(operation: str, *, cached: bool) -> None:
+    """KIPRIS 를 실제로 불렀는지 남긴다.
+
+    무료 등급은 월 1,000 회인데 **포털에 사용량 조회 API 가 없다.** 마이페이지에
+    로그인해야만 볼 수 있고, 그마저 지금 얼마나 남았는지 미리 알 수 없다.
+
+    그래서 우리가 센다. ``cached=false`` 인 것만 세면 실제 소비량이고,
+    ``cached=true`` 와 함께 보면 캐시가 얼마나 받아 주는지도 보인다.
+
+    검색어와 출원번호는 남기지 않는다 — 검색어는 문서에서 파생된 값이다.
+    """
+    logger.info(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "event": "kipris_call",
+                "operation": operation,
+                "cached": cached,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
 
 #: 등록된 특허의 서지는 바뀌지 않는다. 길게 잡되 영원히 두지는 않는다 —
 #: 정정공고나 우리 파서 변경이 반영될 길은 남겨 둔다.
@@ -147,7 +177,9 @@ class CachingPatentSearchProvider:
         cached = await self._safe(self._cache.get_search(key))
         now = self._clock()
         if cached is not None and now - cached.stored_at < self._search_ttl:
+            _record_call("search", cached=True)
             return list(cached.hits)
+        _record_call("search", cached=False)
         hits = await self._inner.search(query, rows=rows)
         await self._safe(self._cache.put_search(key, CachedSearch(list(hits), now)))
         return hits
@@ -156,7 +188,9 @@ class CachingPatentSearchProvider:
         cached = await self._safe(self._cache.get_document(application_number))
         now = self._clock()
         if cached is not None and now - cached.stored_at < self._document_ttl:
+            _record_call("detail", cached=True)
             return cached.document
+        _record_call("detail", cached=False)
         document = await self._inner.fetch_detail(application_number)
         await self._safe(
             self._cache.put_document(

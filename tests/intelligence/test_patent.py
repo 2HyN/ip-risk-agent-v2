@@ -1214,3 +1214,49 @@ def test_a_broken_carry_forward_lookup_does_not_stop_the_analysis():
     )
     result = run(analyzer.analyze(patent_artifact()))
     assert result.candidates
+
+
+def test_actual_kipris_calls_are_counted_separately_from_cache_hits(caplog):
+    """무료 등급은 월 1,000 회인데 포털에 사용량 조회 API 가 없다.
+
+    그래서 우리가 센다. cached=false 만 세면 실제 소비량이고, cached=true 와 함께
+    보면 캐시가 얼마나 받아 주는지도 보인다.
+    """
+    import json
+    import logging
+
+    from ip_risk_agent.intelligence.patent.cache import (
+        CachingPatentSearchProvider,
+        InMemoryPatentResponseCache,
+    )
+
+    provider = CachingPatentSearchProvider(
+        StaticPatentSearchProvider(HITS, DOCUMENTS), InMemoryPatentResponseCache()
+    )
+
+    query = "voice phishing detection"
+
+    async def scenario():
+        await provider.search(query)
+        await provider.search(query)
+        await provider.fetch_detail(PATENT_A)
+        await provider.fetch_detail(PATENT_A)
+
+    with caplog.at_level(logging.INFO, logger="ip_risk_agent.intelligence.patent.cache"):
+        asyncio.run(scenario())
+
+    calls = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{")
+    ]
+    calls = [c for c in calls if c.get("event") == "kipris_call"]
+    spent = [c for c in calls if not c["cached"]]
+    saved = [c for c in calls if c["cached"]]
+    assert len(spent) == 2, "실제 호출은 검색 1 + 상세 1"
+    assert len(saved) == 2, "나머지는 캐시가 받았다"
+    assert {c["operation"] for c in spent} == {"search", "detail"}
+    # 검색어와 출원번호는 남기지 않는다.
+    dumped = json.dumps(calls)
+    assert query not in dumped
+    assert PATENT_A not in dumped
