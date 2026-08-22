@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import unicodedata
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
@@ -108,6 +108,9 @@ class _CandidateProjection:
     priority: ReviewPriority
     summary: str
     evidence_ids: tuple[str, ...]
+    #: 근거 ID -> 그 근거 본문 안에서 강조할 구간. 후보마다 다르다 — 같은 청구항을
+    #: 두 후보가 다른 문장으로 인용할 수 있어 근거 원장에 하나만 둘 수 없다.
+    quote_spans: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
 
 
 class AnalysisResultIntakeService:
@@ -337,7 +340,12 @@ class AnalysisResultIntakeService:
                     reference=sanitize_reference(source.reference, self._retention),
                     source_revision=result.revision,
                     created_at=risk_time,
-                    metadata_safe=sanitize_metadata(source.metadata_safe, self._retention),
+                    metadata_safe=sanitize_metadata(
+                        _with_quote_span(
+                            source.metadata_safe, projection.quote_spans.get(evidence_id)
+                        ),
+                        self._retention,
+                    ),
                 )
                 await uow.risks.add_evidence(evidence)
                 evidence_refs.append(evidence.id)
@@ -597,6 +605,48 @@ def _aggregate_job(
     )
 
 
+def _quote_spans(candidate) -> dict[str, dict[str, int]]:
+    """후보 metadata 에 실린 인용 구간을 꺼낸다.
+
+    분석기가 인용의 실재를 확인한 것만 담겨 있다. 여기서는 모양만 검사한다 —
+    canonical 은 provider metadata 를 믿지 않는다.
+    """
+    raw = getattr(candidate, "provider_metadata_safe", None) or {}
+    spans = raw.get("quote_spans")
+    if not isinstance(spans, Mapping):
+        return {}
+    checked: dict[str, dict[str, int]] = {}
+    for evidence_id, span in spans.items():
+        if not isinstance(span, Mapping):
+            continue
+        start, end = span.get("start"), span.get("end")
+        if isinstance(start, bool) or isinstance(end, bool):
+            continue
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        if start < 0 or end <= start:
+            continue
+        checked[str(evidence_id)] = {"start": start, "end": end}
+    return checked
+
+
+def _with_quote_span(
+    metadata: Mapping[str, object], span: Mapping[str, int] | None
+) -> Mapping[str, object]:
+    """근거 metadata 에 강조 구간을 얹는다.
+
+    화면은 저장된 excerpt 를 보여 주고 그 안의 이 구간만 강조한다. 그래서 구간은
+    excerpt 기준이어야 하는데, excerpt 는 보존 정책이 잘라낼 수 있다. 잘린 뒤로
+    넘어가는 구간은 가리킬 곳이 없으므로 붙이지 않는다.
+    """
+    if span is None:
+        return metadata
+    merged = dict(metadata)
+    merged["quote_start"] = span["start"]
+    merged["quote_end"] = span["end"]
+    return merged
+
+
 def _is_risk_worthy(priority: ReviewPriority) -> bool:
     """이 후보를 Risk 로 다룰지. 상·중만 Risk 다.
 
@@ -678,6 +728,7 @@ def _candidate_projections(
             priority=priority,
             summary=summary,
             evidence_ids=tuple(dict.fromkeys(candidate.evidence_ids)),
+            quote_spans=_quote_spans(candidate),
         )
     return projections
 

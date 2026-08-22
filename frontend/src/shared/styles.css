@@ -365,6 +365,13 @@ textarea:focus-visible {
 }
 /* 분석 실패 안내. 한도 소진처럼 사용자가 고칠 수 없는 것은 경고 톤으로 둔다 —
    위험을 알리는 것이 아니라 기다리면 된다는 뜻이기 때문이다. */
+.evidence-quote {
+  /* 겹친다고 판정된 구간. 발췌 전체가 아니라 이 부분이 근거다. */
+  background: #fff3bf;
+  color: inherit;
+  padding: 1px 2px;
+  border-radius: 3px;
+}
 .analysis-notice {
   display: block;
   padding: 10px 12px;

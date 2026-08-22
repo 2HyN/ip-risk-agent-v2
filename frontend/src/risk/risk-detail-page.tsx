@@ -17,6 +17,7 @@ import {
   toneFor,
 } from "../shared/ui";
 import type { Risk } from "../shared/api/types";
+import { EvidenceExcerpt } from "./evidence-highlight.js";
 import { useWorkspace } from "../workspace/workspace-context";
 import { useIntegration } from "../app/integration-context";
 
@@ -161,7 +162,10 @@ export function RiskDetailPage() {
                       <Badge tone="info">{evidence.evidence_type}</Badge>
                       <small>Revision {evidence.source_revision}</small>
                     </div>
-                    <blockquote>{evidence.excerpt}</blockquote>
+                    <EvidenceExcerpt
+                      excerpt={evidence.excerpt}
+                      metadata={evidence.metadata_safe}
+                    />
                     <p>
                       <strong>Reference:</strong> {evidence.reference}
                     </p>

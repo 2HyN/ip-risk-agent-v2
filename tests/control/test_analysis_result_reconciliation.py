@@ -181,6 +181,7 @@ def patent_result(
     coverage: AnalysisCoverage = AnalysisCoverage.COMPLETE,
     include_candidate: bool = True,
     provider_failures: list[ProviderFailure] | None = None,
+    quote_spans: dict | None = None,
 ) -> AnalysisResult:
     evidence = Evidence(
         evidence_id="evidence-1",
@@ -197,7 +198,10 @@ def patent_result(
                 suggested_review_priority=priority,
                 matched_elements=["candidate ranking"],
                 evidence_ids=[evidence.evidence_id],
-                provider_metadata_safe={"jurisdiction": "KR"},
+                provider_metadata_safe={
+                    "jurisdiction": "KR",
+                    **({} if quote_spans is None else {"quote_spans": quote_spans}),
+                },
             )
         ]
         if include_candidate
@@ -960,5 +964,71 @@ def test_a_non_authoritative_low_result_does_not_close_a_risk() -> None:
                 await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
             )[0]
             assert risk.lifecycle_state is RiskLifecycleState.NEW
+
+    run(scenario())
+
+
+def test_a_verified_quote_span_reaches_the_stored_evidence() -> None:
+    """근거는 문단까지 좁혀져 있고, 그 안의 어느 문장인지는 구간이 짚는다.
+
+    화면은 저장된 발췌를 보여 주고 그 구간만 강조한다. 구간이 canonical 까지
+    오지 않으면 하이라이트가 가리킬 것이 없다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+        job, started = await add_running_job(store, suffix="span-1", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(
+                job,
+                "revision-1",
+                started,
+                quote_spans={"evidence-1": {"start": 3, "end": 11}},
+            )
+        )
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            evidence = await uow.risks.list_evidence(risk.id)
+        stored = {item.evidence_id_from_result: item for item in evidence}
+        assert stored["evidence-1"].metadata_safe["quote_start"] == 3
+        assert stored["evidence-1"].metadata_safe["quote_end"] == 11
+
+    run(scenario())
+
+
+def test_a_malformed_quote_span_is_dropped_instead_of_stored() -> None:
+    """canonical 은 provider metadata 를 믿지 않는다.
+
+    잘못된 구간으로 엉뚱한 곳을 강조하면 사람이 그것을 근거로 읽는다. 강조가 없는
+    것보다 나쁘다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+        job, started = await add_running_job(store, suffix="span-2", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(
+                job,
+                "revision-1",
+                started,
+                quote_spans={
+                    "evidence-1": {"start": 9, "end": 4},  # 끝이 시작보다 앞
+                    "evidence-2": {"start": -1, "end": 5},  # 음수
+                    "evidence-3": "구간이 아니다",
+                },
+            )
+        )
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            evidence = await uow.risks.list_evidence(risk.id)
+        for item in evidence:
+            assert "quote_start" not in item.metadata_safe
+            assert "quote_end" not in item.metadata_safe
 
     run(scenario())
