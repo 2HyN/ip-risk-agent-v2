@@ -1,8 +1,0 @@
-# pip 매니페스트. License 분석기가 requirements 형식으로 읽는다.
-#
-# 파일마다 패키지를 다르게 둔 이유 — Risk 는 (artifact, 생태계, 패키지) 로
-# 구분되므로, 어느 파일이 어느 Risk 를 만들었는지 이름만 보고 알 수 있다.
-
-# POLICY_CONFLICT — 결합 저작물의 소스 공개를 요구한다 (AGPL-3.0-only).
-# deps.dev 가 non-standard 로 답하고 PyPI 원문에서 복원되는 폴백 경로도 함께 탄다.
-pymupdf==1.24.0
