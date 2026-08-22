@@ -197,8 +197,16 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
         await refresh();
       } catch (cause) {
         console.error(cause);
+        // OWNER 안내는 권한 거부(403)일 때만 맞는 말이다. 다른 실패에 그
+        // 문구를 붙이면 사용자가 엉뚱한 원인을 의심하게 된다.
+        const status =
+          typeof cause === "object" && cause !== null && "status" in cause
+            ? (cause as { status: number }).status
+            : null;
         setRemoveError(
-          "감시를 중단하지 못했습니다. 이 워크스페이스의 OWNER 인지 확인해 주세요.",
+          status === 403
+            ? "감시를 중단할 권한이 없습니다. 이 워크스페이스의 OWNER 인지 확인해 주세요."
+            : "감시를 중단하지 못했습니다. 잠시 후 다시 시도해 주세요.",
         );
       }
     },

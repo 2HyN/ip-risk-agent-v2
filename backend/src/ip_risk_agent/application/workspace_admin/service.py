@@ -444,7 +444,10 @@ class WorkspaceAdministrationService:
                     RiskEvent(
                         id=risk_event_id_for(
                             risk.id,
-                            f"mount-removed:{mount_id}",
+                            # 같은 mount 를 제거→재연결→재제거할 수 있다. 시각을
+                            # 넣지 않으면 두 번째 제거가 어제의 이벤트 id 와
+                            # 충돌해 409 로 죽는다 — 실제로 그렇게 막혔다.
+                            f"mount-removed:{mount_id}:{risk_time.isoformat()}",
                             RiskEventType.RESOLVED.value,
                         ),
                         risk_id=risk.id,

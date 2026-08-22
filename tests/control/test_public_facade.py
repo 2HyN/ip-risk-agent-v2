@@ -520,7 +520,11 @@ def test_removing_and_reconnecting_a_mount_round_trips_its_risks() -> None:
             unit_of_work_factory=store,
             clock=clock,
             # facade 의 id 공급기와 겹치지 않게 접두사를 달리한다.
-            id_factory=lambda kind: f"admin-{kind}-1",
+            id_factory=(
+                lambda counter=iter(range(1, 100)): (
+                    lambda kind: f"admin-{kind}-{next(counter)}"
+                )
+            )(),
         )
         await admin.remove_mount(
             risk_workspace_id="vws-1", actor_user_id="owner-1", mount_id=mount_id
@@ -548,5 +552,15 @@ def test_removing_and_reconnecting_a_mount_round_trips_its_risks() -> None:
             and event.reason_safe == "source mount restored"
             for event in events
         )
+
+        # 같은 mount 를 다시 제거할 수 있어야 한다. 해소 이벤트 id 가
+        # 첫 제거와 충돌하면 두 번째 제거가 409 로 죽는다 — 실제로 막혔다.
+        clock.current = clock.current + timedelta(minutes=5)
+        await admin.remove_mount(
+            risk_workspace_id="vws-1", actor_user_id="owner-1", mount_id=mount_id
+        )
+        async with store() as uow:
+            re_resolved = await uow.risks.get("risk-1")
+        assert re_resolved.lifecycle_state is RiskLifecycleState.RESOLVED
 
     run(scenario())
