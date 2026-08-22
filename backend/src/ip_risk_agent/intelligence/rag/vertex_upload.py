@@ -37,7 +37,7 @@ import json
 import httpx
 
 from ..common.errors import FailureCategory, ProviderFailureError
-from .ingestion import PreparedDocument
+from .ingestion import PreparedDocument, checksum
 
 PROVIDER = "RAG_ENGINE"
 SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -146,10 +146,14 @@ class VertexRagCorpusUploader:
         metadata = {
             "rag_file": {
                 "display_name": document.source_id,
+                # 여기 적은 것이 **나중에 확인할 수 있는 전부**다. 목록 API 는 본문을
+                # 돌려주지 않으므로, 지문을 함께 남기지 않으면 "올라간 것이 올리려던
+                # 것과 같은가" 를 물을 방법이 없다.
                 "description": json.dumps(
                     {
                         "corpus_version": corpus_version,
                         "document_version": document.version,
+                        "checksum": checksum(document.text),
                         "canonical_reference": document.canonical_reference,
                         **document.metadata,
                     },
@@ -204,6 +208,91 @@ class VertexRagCorpusUploader:
 
             await asyncio.gather(*(send(document) for document in documents))
         return len(documents)
+
+    # ------------------------------------------------------------------ 확인
+
+    async def audit(
+        self, documents: list[PreparedDocument], corpus_version: str
+    ) -> dict[str, object]:
+        """corpus 에 올라간 것이 올리려던 것과 같은가.
+
+        올리기는 성공했는데 **틀린 것이 올라가 있는** 경우가 조용하다. 그래서 올린 뒤에
+        다시 물어본다. 목록 API 는 본문을 돌려주지 않으므로 업로드할 때 ``description``
+        에 남긴 지문과 판본을 대조한다.
+
+        보는 것은 넷이다.
+
+        * **빠진 것** — 매니페스트에 있는데 corpus 에 없다. 업로드가 실패했거나
+          이름이 어긋났다.
+        * **중복** — 같은 이름이 둘 이상이다. 지우고 올리는 단계가 걸러야 했던 것이고,
+          남으면 검색이 두 판본을 섞는다.
+        * **어긋난 지문·판본** — 이름은 맞는데 내용이 다르다.
+        * **매니페스트 밖** — corpus 에 있는데 승인 목록에 없다. `approved_for_rag` 가
+          관문이라고 해 놓고 관문을 지나지 않은 것이 남아 있는 상태다.
+
+        고치지 않는다. 무엇이 어긋났는지만 돌려준다 — 지우는 것은 사람이 정한다.
+        """
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            existing = await self.list_files(client)
+
+        by_name: dict[str, list[dict]] = {}
+        for item in existing:
+            by_name.setdefault(item.get("displayName", ""), []).append(item)
+
+        expected = {document.source_id: document for document in documents}
+        missing: list[str] = []
+        duplicated: list[str] = []
+        mismatched: list[dict[str, str]] = []
+
+        for source_id, document in expected.items():
+            found = by_name.get(source_id, [])
+            if not found:
+                missing.append(source_id)
+                continue
+            if len(found) > 1:
+                duplicated.append(source_id)
+            want = checksum(document.text)
+            for item in found:
+                try:
+                    stamped = json.loads(item.get("description") or "{}")
+                except json.JSONDecodeError:
+                    stamped = {}
+                if stamped.get("checksum") != want:
+                    mismatched.append({"source_id": source_id, "reason": "checksum"})
+                elif stamped.get("corpus_version") != corpus_version:
+                    mismatched.append(
+                        {
+                            "source_id": source_id,
+                            "reason": "corpus_version",
+                            "found": str(stamped.get("corpus_version")),
+                        }
+                    )
+
+        unexpected = sorted(name for name in by_name if name not in expected)
+        return {
+            "corpus_resource": self.corpus_resource,
+            "corpus_version": corpus_version,
+            "expected": len(expected),
+            "found": len(existing),
+            "missing": sorted(missing),
+            "duplicated": sorted(duplicated),
+            "mismatched": mismatched,
+            "unexpected": unexpected,
+            "clean": not (missing or duplicated or mismatched or unexpected),
+        }
+
+    async def prune(self, names: list[str]) -> int:
+        """매니페스트 밖 문서를 지운다. 사람이 목록을 보고 부른다."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            existing = await self.list_files(client)
+            targets = [
+                item["name"]
+                for item in existing
+                if item.get("displayName") in set(names) and item.get("name")
+            ]
+            for name in targets:
+                await self._delete(client, name)
+        return len(targets)
 
     # ------------------------------------------------------------------ 오류
 

@@ -34,7 +34,10 @@ sys.path.insert(0, str(ROOT / "backend" / "src"))
 sys.path.insert(0, str(ROOT / "shared" / "contracts" / "python"))
 
 from ip_risk_agent.intelligence.rag.corpus_manifest import load_manifest  # noqa: E402
-from ip_risk_agent.intelligence.rag.ingestion import ingest  # noqa: E402
+from ip_risk_agent.intelligence.rag.ingestion import (  # noqa: E402
+    InMemoryCorpusUploader,
+    ingest,
+)
 from ip_risk_agent.intelligence.rag.vertex_upload import (  # noqa: E402
     VertexRagCorpusUploader,
 )
@@ -52,9 +55,9 @@ async def run(args: argparse.Namespace) -> int:
     print(f"승인된 문서  {len(approved)} 편")
     print(f"대상 corpus  {args.corpus_id}  ({args.region})")
 
-    if not args.confirm:
+    if not (args.confirm or args.verify):
         print()
-        print("--confirm 이 없어 아무것도 올리지 않았다.")
+        print("--confirm 도 --verify 도 없어 아무것도 하지 않았다.")
         print("올리기 전에 확인할 것:")
         print("  * 관련성 게이트(0-G)가 **배포된 리비전**에 들어 있는가")
         print("  * 이 corpus 가 운영이 쓰는 것인가, 새로 만든 것인가")
@@ -75,29 +78,39 @@ async def run(args: argparse.Namespace) -> int:
         corpus_id=args.corpus_id,
         credentials=credentials,
     )
-    report = await ingest(manifest_path, uploader, strict=True)
+
+    if args.confirm:
+        report = await ingest(manifest_path, uploader, strict=True)
+        prepared = report.prepared
+        print()
+        print(f"올렸다 — {report.uploaded} 편")
+    else:
+        # 올리지 않고 확인만 한다. 준비 단계는 그대로 거쳐야 지문을 계산한다.
+        report = await ingest(manifest_path, InMemoryCorpusUploader(), strict=True)
+        prepared = report.prepared
+
+    audit = await uploader.audit(prepared, report.corpus_version)
+    print()
+    print(json.dumps(audit, ensure_ascii=False, indent=2))
+
+    if audit["clean"]:
+        print()
+        print("corpus 가 매니페스트와 정확히 같다.")
+        if args.confirm:
+            print(
+                "다음 — 배포에서 RAG_CORPUS_ID 와 RAG_CORPUS_VERSION 을 "
+                f"'{args.corpus_id}' / '{report.corpus_version}' 으로 함께 맞춘다."
+            )
+        return 0
 
     print()
-    print(
-        json.dumps(
-            {
-                "corpus_version": report.corpus_version,
-                "document_count": len(report.prepared),
-                "uploaded": report.uploaded,
-                "skipped": report.skipped,
-                "corpus_resource": uploader.corpus_resource,
-                "external_write_performed": True,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
-    print()
-    print(
-        "다음 — 배포에서 RAG_CORPUS_ID 와 RAG_CORPUS_VERSION 을 "
-        f"'{args.corpus_id}' / '{report.corpus_version}' 으로 함께 맞춘다."
-    )
-    return 0
+    print("**corpus 가 매니페스트와 다르다.** 위 목록을 보고 처리한다.", file=sys.stderr)
+    if audit["unexpected"] and args.prune:
+        removed = await uploader.prune(list(audit["unexpected"]))
+        print(f"매니페스트 밖 문서 {removed} 편을 지웠다. 다시 --verify 하라.")
+    elif audit["unexpected"]:
+        print("매니페스트 밖 문서는 --prune 으로 지운다.", file=sys.stderr)
+    return 1
 
 
 def main() -> int:
@@ -115,7 +128,17 @@ def main() -> int:
     parser.add_argument(
         "--confirm",
         action="store_true",
-        help="실제로 올린다. 없으면 무엇을 할지 보여 주기만 한다",
+        help="실제로 올린다. 올린 뒤 곧바로 확인까지 한다",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="올리지 않고, 이미 올라간 것이 매니페스트와 같은지만 확인한다",
+    )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="매니페스트 밖 문서를 지운다. --verify 나 --confirm 과 함께 쓴다",
     )
     return asyncio.run(run(parser.parse_args()))
 
