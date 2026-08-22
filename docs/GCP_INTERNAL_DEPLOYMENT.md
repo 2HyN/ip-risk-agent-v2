@@ -159,6 +159,42 @@ source fetch 중 access와 refresh 시 add를 사용한다. 현재 runtime 경�
 > ② 없으면 조건부 binding 을 실제로 부여,
 > ③ **자격증명이 붙은 workspace 를 실제로 지워** `DELETING` 에서 벗어나는지 확인.
 
+## RAG corpus 판본은 배포 직전에 손으로 맞춘다
+
+**저장소가 이것을 잡아 주지 못한다.** `RAG_CORPUS_VERSION` 은
+`deploy/cloud-run-services.yaml` 의 `optionalEnvironment.worker` 에 **이름만** 있고 값은
+라이브 Cloud Run service 에만 산다. 그래서 `scripts/validate_gcp_deployment.py` 는 이 변수가
+선언돼 있는지만 보고 값은 보지 못한다.
+
+두 가지가 겹쳐 조용해진다 — **worker 전용**이라 API 를 봐서는 알 수 없고,
+**`optional`** 이라 값이 없거나 낡아도 배포가 실패하지 않는다.
+
+어긋나면 원장이 거짓말을 한다. 판정에 실리는 `rag_corpus_version` 이 실제로 검색된 corpus
+와 다른 판본을 가리키고, 그러면 `DEVELOPMENT_SPEC.md` §7.4 의 원인 귀속이 "판단 기준이
+좋아졌다" 를 엉뚱한 시점에 적는다. §5.6 이 이 필드를 "감사의 전부" 라고 부른 이유가 그것이다.
+
+**순서를 지킨다. 값만 맞추면 라벨만 바뀌고 실제 corpus 는 그대로다.**
+
+1. 적재 — 전문을 Vertex RAG 에 올린다 (Fork A 소유, `0-G` 뒤에만)
+2. 매니페스트 첫 줄의 `corpus_version` 을 읽는다
+3. 그 값으로 **worker** 의 `RAG_CORPUS_VERSION` 을 갱신한다
+4. 배포
+
+**배포 직전 확인 명령**
+
+```
+grep '^corpus_version:' rag-corpus/manifest.yaml
+gcloud run services describe ip-risk-agent-v2-worker --region=asia-northeast3   --format='value(spec.template.spec.containers[0].env)' | tr ',' '
+' | grep RAG_CORPUS_VERSION
+```
+
+두 값이 같아야 배포한다. 다르면 **적재를 먼저 했는지부터** 확인한다.
+
+**나중에 코드로 막을 수 있다.** 값을 `optionalEnvironment` 에서 `canonicalEnvironment.worker`
+로 옮기면 저장소가 값을 갖게 되고, 검증기가 매니페스트의 `corpus_version` 과 같은지 검사할
+수 있다. 지금 하지 않는 이유는 corpus 가 아직 움직이고 있어서다 — 매니페스트가 오를 때마다
+이 파일이 깨져 다른 세션의 시험까지 멈춘다. **적재가 끝나 판본이 멎으면 그때 옮긴다.**
+
 중요한 IAM 한계가 있다. `secretmanager.secrets.create`는 새 secret이 아니라 project parent에
 대해 평가되므로 IAM resource-name condition으로 미래의 `iprisk-v2-cred-*` ID만 생성하도록
 제한할 수 없다. 유지할 최소 custom role은 API에 project scope의
