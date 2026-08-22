@@ -12,6 +12,7 @@ from iprisk_contracts import SourceSnapshot
 
 from ip_risk_agent.application.public_facade import SourceAccessReceiptContext
 from ip_risk_agent.application.repositories import RecordNotFoundError
+from ip_risk_agent.application.risk_reconcile import SupersededRevisionError
 from ip_risk_agent.connectors.common.errors import SourceConnectorError
 from ip_risk_agent.intelligence.common.errors import IntelligenceError
 from ip_risk_agent.core.common import DomainInvariantError
@@ -217,6 +218,20 @@ class AnalysisPipeline:
                 claim.attempt,
                 safe_code=f"INTELLIGENCE:{category_value}",
                 retryable=retryable,
+            )
+            if snapshot_fetched:
+                await _cleanup(adapter, claim.source_change)
+            return result
+        except SupersededRevisionError:
+            # 분석하는 사이에 소스가 앞서 나갔다. 결함이 아니라 이 실행이 늦은
+            # 것이므로, 시작에서 걸렸을 때와 같은 코드로 끝낸다. 새 판본을 맡은
+            # 실행이 이미 있다.
+            result = await self._fail(
+                change_event_id,
+                claim.analysis_job_id,
+                claim.attempt,
+                safe_code="SOURCE:REVISION_SUPERSEDED",
+                retryable=False,
             )
             if snapshot_fetched:
                 await _cleanup(adapter, claim.source_change)

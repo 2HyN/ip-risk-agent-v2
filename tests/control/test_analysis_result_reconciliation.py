@@ -32,6 +32,7 @@ from ip_risk_agent.application.risk_reconcile import (
     AnalysisResultIntakeError,
     AnalysisResultIntakeService,
     EvidenceRetentionPolicy,
+    SupersededRevisionError,
 )
 from ip_risk_agent.application.risk_exclusion import exclude_artifact_risks
 from ip_risk_agent.application.security_gate import REDACTION_PLACEHOLDER
@@ -630,7 +631,9 @@ def test_unrequested_or_stale_result_rolls_back_without_outcome_or_risk() -> Non
                 replace(state, latest_revision="revision-2", updated_at=NOW + timedelta(minutes=1))
             )
             await uow.commit()
-        with pytest.raises(AnalysisResultIntakeError, match="no longer canonical"):
+        # 결함이 아니라 소스가 앞서 나간 것이다. 파이프라인이 그 둘을 구분해
+        # 사용자에게 다른 안내를 낼 수 있도록 종류를 나눠 둔다.
+        with pytest.raises(SupersededRevisionError, match="no longer canonical"):
             await make_service(store).accept_analysis_result(
                 patent_result(job_id, "revision-1", started_at)
             )

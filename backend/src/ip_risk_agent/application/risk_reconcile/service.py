@@ -91,6 +91,20 @@ class AnalysisResultIntakeError(DomainInvariantError):
     """
 
 
+class SupersededRevisionError(AnalysisResultIntakeError):
+    """이 실행이 맡은 판본보다 새 판본이 소스에 있다.
+
+    결함이 아니다. 소스가 앞서 나갔으니 이 결과를 받아들이면 옛 판본의 내용으로
+    현재 상태를 덮게 된다. 새 판본을 맡은 실행이 이미 있으므로 이쪽은 버리는 것이
+    맞다.
+
+    파이프라인 시작에서 걸리면 :data:`SOURCE:REVISION_SUPERSEDED` 로 끝나는데,
+    분석하는 사이에 판본이 바뀌면 여기까지 와서야 걸린다. 사용자에게는 같은
+    일이므로 같은 코드로 끝나야 한다 — 예전에는 이쪽만
+    ``CONTRACT:CANONICAL_INTAKE_REJECTED`` 라는 결함 코드로 보였다.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class AnalysisResultAcceptance:
     disposition: AnalysisResultDisposition
@@ -496,7 +510,7 @@ def _validate_result(
     if job.started_at is None or result.started_at < job.started_at:
         raise AnalysisResultIntakeError("result predates the current job attempt")
     if existing is None and artifact_state.latest_revision != result.revision:
-        raise AnalysisResultIntakeError("result revision is no longer canonical latest")
+        raise SupersededRevisionError("result revision is no longer canonical latest")
     if result.status is AnalysisStatus.SUCCEEDED and result.coverage is AnalysisCoverage.COMPLETE:
         if result.provider_failures:
             raise AnalysisResultIntakeError(

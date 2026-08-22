@@ -6,6 +6,7 @@ from .service import (
     AnalysisResultDisposition,
     AnalysisResultIntakeError,
     AnalysisResultIntakeService,
+    SupersededRevisionError,
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "AnalysisResultIntakeService",
     "EvidenceRetentionError",
     "EvidenceRetentionPolicy",
+    "SupersededRevisionError",
 ]
 
