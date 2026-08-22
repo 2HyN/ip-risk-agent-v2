@@ -636,8 +636,12 @@ class FirestoreAnalysisJobRepository(_Repository):
             raise UniqueConstraintViolation(
                 "analysis job requested types may only be narrowed"
             )
+        # 재검사는 끝난 판정을 다시 돌리는 것이 요점이므로, 이전 상태가 성공이어도
+        # 새 attempt 를 열 수 있어야 한다. 예전에는 FAILED/RUNNING 만 허용해서
+        # 성공한 분석에 "다시 검사" 를 누르면 여기서 막혔다. 이 불변조건이 막으려는
+        # 것은 **한 attempt 안에서** 판정이 조용히 바뀌는 것이지, 새 attempt 가 아니다.
         is_attempt_reset = (
-            previous.status in {AnalysisJobStatus.FAILED, AnalysisJobStatus.RUNNING}
+            previous.status is not AnalysisJobStatus.QUEUED
             and job.status in {AnalysisJobStatus.QUEUED, AnalysisJobStatus.RUNNING}
             and not job.analysis_outcomes
             and (

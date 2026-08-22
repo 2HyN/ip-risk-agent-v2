@@ -883,3 +883,76 @@ def test_security_service_reanalysis_rejects_another_workspace() -> None:
             )
 
     run(scenario())
+
+
+def test_reanalysis_reruns_an_analysis_that_already_succeeded() -> None:
+    """재검사의 본래 대상은 **성공한** 분석이다.
+
+    저장소 불변조건이 이전 상태를 FAILED/RUNNING 으로만 허용해서, 성공한 분석에
+    "다시 검사" 를 누르면 "analysis job outcomes are append-only within an attempt"
+    로 막혔다. 기존 시험이 전부 실패한 분석만 다시 돌려서 드러나지 않았다.
+
+    이 불변조건이 막으려는 것은 한 attempt 안에서 판정이 조용히 바뀌는 것이지,
+    새 attempt 를 여는 것이 아니다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        receipt = await facade.register_source_change(make_change(source))
+        claim = await facade.claim_analysis(receipt.change_event_id)
+        assert claim is not None
+
+        evidence = Evidence(
+            evidence_id="evidence-1",
+            evidence_type=EvidenceType.PATENT_CLAIM,
+            excerpt="A minimal matching claim excerpt.",
+            reference="https://example.invalid/patents/1#claim-1",
+            metadata_safe={"claim": 1},
+        )
+        result = AnalysisResult(
+            contract_version="1",
+            analysis_job_id=claim.analysis_job_id,
+            artifact_id=receipt.artifact_id,
+            revision="revision-failure",
+            analysis_type=AnalysisType.PATENT,
+            status=AnalysisStatus.SUCCEEDED,
+            coverage=AnalysisCoverage.COMPLETE,
+            candidates=[
+                PatentCandidate(
+                    normalized_application_number="KR-10-2026-000001",
+                    title="Candidate ranking method",
+                    suggested_review_priority=ReviewPriority.HIGH,
+                    matched_elements=["candidate ranking"],
+                    evidence_ids=["evidence-1"],
+                    provider_metadata_safe={"jurisdiction": "KR"},
+                )
+            ],
+            evidence=[evidence],
+            provider_failures=[],
+            versions=AnalysisVersions(analyzer_version="patent-v1"),
+            started_at=NOW + timedelta(seconds=2),
+            completed_at=NOW + timedelta(seconds=4),
+        )
+        clock.current = NOW + timedelta(seconds=5)
+        accepted = await facade.accept_analysis_result(result)
+        assert accepted.job_status == "SUCCEEDED"
+
+        before = len(queue.attempts)
+        clock.current = NOW + timedelta(seconds=6)
+        await facade.request_reanalysis(receipt.change_event_id)
+        assert len(queue.attempts) == before + 1
+
+        again = await facade.claim_analysis(receipt.change_event_id)
+        assert again is not None
+        assert again.attempt > claim.attempt
+        # 이전 판정은 지워져야 한다. 남으면 새 결과가 "이미 있는 결과" 로 취급된다.
+        async with store() as uow:
+            job = await uow.analysis_jobs.get(claim.analysis_job_id)
+        assert job.analysis_outcomes == {}
+
+    run(scenario())
