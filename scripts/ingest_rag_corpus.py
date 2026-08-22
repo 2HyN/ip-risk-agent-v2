@@ -45,6 +45,82 @@ from ip_risk_agent.intelligence.rag.vertex_upload import (  # noqa: E402
 SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 
+async def _probe(
+    *,
+    project_id: str,
+    region: str,
+    corpus_id: str,
+    corpus_version: str,
+    documents: list,
+    count: int,
+) -> dict[str, object]:
+    """실제로 검색해 본다.
+
+    목록 대조는 **우리가 찍은 도장**을 다시 읽는 것이라, 올린 뒤 Vertex 가 그 문서를
+    색인했는지 · 조각으로 나눴는지 · 어떤 이름으로 돌려주는지를 말해 주지 않는다. 그
+    셋 중 하나만 어긋나도 목록은 멀쩡한데 근거가 하나도 안 붙는다.
+
+    특히 ``sourceDisplayName`` 이 그렇다. 관련성 게이트가 그 값으로 커버리지를 맞추므로
+    (``license/reference_gate.py``), Vertex 가 파일명을 다르게 돌려주면 **모든 참조가
+    조용히 떨어져 나간다.** 목록 API 로는 절대 안 보이는 고장이다.
+
+    그래서 문서 몇 편을 골라 그 문서가 덮는 라이선스로 질의하고, 되돌아온 것이 그 문서인지
+    본다.
+    """
+    from ip_risk_agent.intelligence.license import reference_gate
+    from ip_risk_agent.intelligence.rag.engine import (
+        RagEngineConfig,
+        RagEngineRetriever,
+    )
+
+    coverage = reference_gate.CORPUS_SUBJECT_COVERAGE
+    targets = [
+        document
+        for document in documents
+        if coverage.get(document.source_id)
+    ][:count]
+
+    retriever = RagEngineRetriever(
+        RagEngineConfig(
+            project_id=project_id,
+            region=region,
+            corpus_id=corpus_id,
+            corpus_version=corpus_version,
+        )
+    )
+    results: list[dict[str, object]] = []
+    try:
+        for document in targets:
+            identifier = sorted(coverage[document.source_id])[0]
+            chunks = await retriever.retrieve(
+                f"{identifier} 배포 시 의무사항", top_k=3
+            )
+            names = [chunk.source_id for chunk in chunks]
+            accepted = [
+                chunk.source_id
+                for chunk in chunks
+                if reference_gate.is_relevant(chunk.source_id, identifier)
+            ]
+            results.append(
+                {
+                    "queried": identifier,
+                    "expected_document": document.source_id,
+                    "returned": names,
+                    "returned_expected": document.source_id in names,
+                    "passed_gate": accepted,
+                }
+            )
+    finally:
+        await retriever.aclose()
+
+    return {
+        "probed": len(results),
+        "results": results,
+        # 하나라도 게이트를 통과해 되돌아와야 이 corpus 가 쓰인다고 말할 수 있다.
+        "passed": bool(results) and all(item["passed_gate"] for item in results),
+    }
+
+
 async def run(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     manifest = load_manifest(manifest_path)
@@ -93,6 +169,25 @@ async def run(args: argparse.Namespace) -> int:
     print()
     print(json.dumps(audit, ensure_ascii=False, indent=2))
 
+    if args.probe:
+        print()
+        probe = await _probe(
+            project_id=project_id,
+            region=args.region,
+            corpus_id=args.corpus_id,
+            corpus_version=report.corpus_version,
+            documents=prepared,
+            count=args.probe_count,
+        )
+        print(json.dumps(probe, ensure_ascii=False, indent=2))
+        if not probe["passed"]:
+            print()
+            print(
+                "**검색이 문서를 되찾지 못한다.** 목록에 있어도 쓰이지 않는 상태다.",
+                file=sys.stderr,
+            )
+            return 1
+
     if audit["clean"]:
         print()
         print("corpus 가 매니페스트와 정확히 같다.")
@@ -139,6 +234,14 @@ def main() -> int:
         "--prune",
         action="store_true",
         help="매니페스트 밖 문서를 지운다. --verify 나 --confirm 과 함께 쓴다",
+    )
+    parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="실제로 검색해 문서가 되돌아오고 게이트를 통과하는지 본다",
+    )
+    parser.add_argument(
+        "--probe-count", type=int, default=5, help="검색해 볼 문서 수 (기본 5)"
     )
     return asyncio.run(run(parser.parse_args()))
 
