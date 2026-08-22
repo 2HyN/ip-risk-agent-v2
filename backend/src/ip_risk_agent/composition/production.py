@@ -55,7 +55,6 @@ from ip_risk_agent.gcp.operational_firestore import (
 )
 from ip_risk_agent.intelligence.gemini.client import GoogleGenAIClient
 from ip_risk_agent.intelligence.explain import GeminiRiskExplainer
-from ip_risk_agent.intelligence.license.gemini_explainer import GeminiLicenseExplainer
 from ip_risk_agent.intelligence.license.package_metadata import HttpPackageMetadataProvider
 from ip_risk_agent.intelligence.patent.cache import CachingPatentSearchProvider
 from ip_risk_agent.intelligence.patent.kipris import KiprisClient
@@ -414,9 +413,6 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             patent_response_cache=patent_cache,
             previously_matched_patents=context.control_facade.previously_matched_patents,
             retriever=retriever,
-            # 설명이 없으면 라이선스 판정이 정책 고정 문구로만 읽힌다. 판정 자체는
-            # 규칙 엔진이 하고, 이 구현은 참조 자료에 근거해 이유만 붙인다.
-            explainer=GeminiLicenseExplainer(model),
         ),
         # 이미 판정이 끝난 Risk 에 설명과 권고를 붙인다. 저장된 근거만 보므로
         # provider 는 이것 하나뿐이고, 기존 Risk 백필에도 같은 코드가 쓰인다.

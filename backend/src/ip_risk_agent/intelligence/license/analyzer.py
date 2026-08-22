@@ -25,7 +25,7 @@ from ..common.validation import validate_artifact
 from . import lockfiles, manifests, policy, spdx
 from .dependency_models import DependencyDeclaration, DependencySet, Ecosystem
 from . import reference_gate
-from .explanation import LicenseExplainer, ReferenceRetriever, reference_query
+from .explanation import ReferenceRetriever, reference_query
 from .package_metadata import PackageMetadataProvider
 
 ANALYZER_VERSION = "license-analyzer-1.0.0"
@@ -64,11 +64,9 @@ class LicenseAnalyzer:
         metadata_provider: PackageMetadataProvider,
         *,
         retriever: ReferenceRetriever | None = None,
-        explainer: LicenseExplainer | None = None,
     ) -> None:
         self._metadata = metadata_provider
         self._retriever = retriever
-        self._explainer = explainer
 
     def supports(self, artifact: AnalysisArtifact) -> bool:
         """의존성 파일만 본다. 소스 코드에는 의존성 선언이 없다."""
@@ -162,7 +160,7 @@ class LicenseAnalyzer:
             )
         )
 
-        degraded = await self._attach_explanation(
+        degraded = await self._attach_reference_evidence(
             declaration, fact.license_expression, outcome, evidence_ids, builder, versions
         )
 
@@ -179,7 +177,7 @@ class LicenseAnalyzer:
             degraded,
         )
 
-    async def _attach_explanation(
+    async def _attach_reference_evidence(
         self,
         declaration: DependencyDeclaration,
         expression: str,
@@ -188,7 +186,11 @@ class LicenseAnalyzer:
         builder: ResultBuilder,
         versions: dict[str, str | None],
     ) -> bool:
-        """근거 조항과 설명을 붙인다. 실패하면 True 를 돌려 coverage 를 낮춘다."""
+        """정책 판정의 근거가 될 라이선스 조항을 붙인다.
+
+        실패하면 True 를 돌려 coverage 를 낮춘다 — 근거를 못 붙였다는 것은
+        "모른다" 이고, 그것을 COMPLETE 로 두면 없는 권위를 주장하게 된다.
+        """
         if self._retriever is None or not policy.needs_review(outcome):
             return False
 
@@ -227,36 +229,14 @@ class LicenseAnalyzer:
                 )
             )
 
-        if self._explainer is None:
-            return False
-
-        try:
-            explanation = await self._explainer.explain(
-                package=declaration.name,
-                license_expression=expression,
-                outcome=outcome,
-                references=relevant,
-            )
-        except ProviderFailureError as failure:
-            builder.record_failure(failure)
-            return True
-
-        # 모델이 실제로 없는 참조를 들었다면 설명 전체를 믿지 않는다.
-        unknown = [
-            cid
-            for cid in explanation.reference_chunk_ids
-            if not builder.ledger.has(cid)
-        ]
-        if unknown:
-            builder.record_failure(
-                ProviderFailureError(
-                    "GEMINI",
-                    FailureCategory.MALFORMED_OUTPUT,
-                    "explanation referenced unknown evidence",
-                )
-            )
-            return True
-
-        versions["model_id"] = self._explainer.model_id
-        versions["prompt_version"] = self._explainer.prompt_version
+        # 설명은 여기서 만들지 않는다.
+        #
+        # 예전에는 이 자리에서 Gemini 를 부르고 결과를 **버렸다.** 계약의
+        # ``LicenseCandidate`` 에는 설명을 실을 필드가 없고 계약은 동결이라 담을 곳이
+        # 없었기 때문이다. 후보마다 한 번씩 호출하고 아무 데도 쓰지 않은 셈이다.
+        #
+        # 지금은 ``RiskExplanationService`` 가 **저장된 근거**에서 설명을 만든다.
+        # 위에서 등록한 RAG 참조 조각도 후보 근거에 들어가므로 같은 자료를 본다.
+        # 그래서 여기서 부를 이유가 없다.
+        return False
         return False

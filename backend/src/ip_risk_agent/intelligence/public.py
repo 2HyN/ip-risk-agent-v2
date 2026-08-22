@@ -23,7 +23,7 @@ from .common.errors import (
 from .common.registry import AnalyzerRegistry
 from .gemini.client import GoogleGenAIClient, PromptLibrary, StructuredModelClient
 from .license.analyzer import LicenseAnalyzer
-from .license.explanation import LicenseExplainer, ReferenceRetriever
+from .license.explanation import ReferenceRetriever
 from .license.package_metadata import (
     HttpPackageMetadataProvider,
     PackageMetadataProvider,
@@ -101,7 +101,6 @@ def create_analyzer_registry(
     model_client: StructuredModelClient,
     search_provider: PatentSearchProvider | None = None,
     retriever: ReferenceRetriever | None = None,
-    explainer: LicenseExplainer | None = None,
     prompts: PromptLibrary | None = None,
     patent_candidate_cap: int = 6,
     patent_response_cache=None,
@@ -113,7 +112,7 @@ def create_analyzer_registry(
     특허 검색기를 넣지 않으면 라이선스만 등록된다.
     """
     analyzers: list[Analyzer] = [
-        LicenseAnalyzer(metadata_provider, retriever=retriever, explainer=explainer)
+        LicenseAnalyzer(metadata_provider, retriever=retriever)
     ]
     if search_provider is not None:
         analyzers.append(
@@ -133,7 +132,6 @@ def create_facade_from_env(
     env: dict[str, str],
     *,
     retriever: ReferenceRetriever | None = None,
-    explainer: LicenseExplainer | None = None,
 ) -> IntelligenceFacade:
     """배포용 조립.
 
@@ -155,7 +153,6 @@ def create_facade_from_env(
             model_client=client,
             search_provider=search_provider,
             retriever=retriever,
-            explainer=explainer,
             patent_candidate_cap=config.patent_candidate_cap,
         )
     )

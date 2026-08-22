@@ -85,9 +85,3 @@ class RiskExplanationOutput(_Output):
     )
 
 
-class LicenseExplanationOutput(_Output):
-    """정책 결과에 붙일 설명. 판정을 바꾸지 못한다."""
-
-    summary: str
-    obligations: list[str] = Field(default_factory=list)
-    reference_chunk_ids: list[str] = Field(default_factory=list)

@@ -31,7 +31,6 @@ from ip_risk_agent.intelligence.license.dependency_models import (
     ResolutionKind,
 )
 from ip_risk_agent.intelligence.license.explanation import (
-    LicenseExplanation,
     ReferenceChunk,
 )
 from ip_risk_agent.intelligence.license.package_metadata import (
@@ -100,29 +99,6 @@ class FakeRetriever:
         if self._fail:
             raise RuntimeError("rag engine unavailable")
         return self._chunks[:top_k]
-
-
-class FakeExplainer:
-    def __init__(self, reference_ids: list[str] | None = None):
-        self._reference_ids = reference_ids
-
-    @property
-    def model_id(self) -> str:
-        return "fake-model"
-
-    @property
-    def prompt_version(self) -> str:
-        return "license_explain_v1"
-
-    async def explain(self, *, package, license_expression, outcome, references):
-        ids = (
-            self._reference_ids
-            if self._reference_ids is not None
-            else [f"rag:{c.source_id}:{c.chunk_id}" for c in references]
-        )
-        return LicenseExplanation(
-            summary=policy.describe(outcome), obligations=[], reference_chunk_ids=ids
-        )
 
 
 PROVIDER = StaticPackageMetadataProvider(
@@ -301,35 +277,29 @@ def test_rag_failure_downgrades_coverage_but_keeps_policy_result():
 
 
 def test_rag_reference_is_attached_as_evidence():
-    analyzer = LicenseAnalyzer(
-        PROVIDER, retriever=FakeRetriever(), explainer=FakeExplainer()
-    )
+    """라이선스 분석은 근거만 붙이고 설명은 만들지 않는다.
+
+    설명은 `RiskExplanationService` 가 **저장된 근거**에서 만든다. 분석기 안에서
+    만들면 담을 곳이 없어 버려진다 — 실제로 그랬고, 후보마다 Gemini 를 부르고
+    결과를 쓰지 않았다.
+    """
+    analyzer = LicenseAnalyzer(PROVIDER, retriever=FakeRetriever())
     result = run(analyzer.analyze(make_artifact("PyMuPDF==1.24.0")))
     assert result.coverage is AnalysisCoverage.COMPLETE
     assert result.versions.rag_corpus_version == "2026-08-14.1"
-    assert result.versions.model_id == "fake-model"
-    assert any(e.evidence_id.startswith("rag:") for e in result.evidence)
-
-
-def test_hallucinated_reference_invalidates_the_explanation():
-    analyzer = LicenseAnalyzer(
-        PROVIDER,
-        retriever=FakeRetriever(),
-        explainer=FakeExplainer(reference_ids=["rag:made-up:chunk-9"]),
-    )
-    result = run(analyzer.analyze(make_artifact("PyMuPDF==1.24.0")))
-    assert result.coverage is AnalysisCoverage.PARTIAL
-    assert result.provider_failures[0].category == "MALFORMED_OUTPUT"
-    # 설명을 믿지 않으므로 모델 버전도 기록하지 않는다.
+    # 라이선스 경로는 모델을 부르지 않는다. 부르지 않았으니 버전도 없다.
     assert result.versions.model_id is None
+    assert any(e.evidence_id.startswith("rag:") for e in result.evidence)
+    # 그 근거가 후보에 달려 있어야 설명기가 나중에 그것을 보고 쓴다.
+    assert any(eid.startswith("rag:") for eid in result.candidates[0].evidence_ids)
 
 
 def test_deterministic_policy_is_not_overridden_by_the_model():
     strict = run(LicenseAnalyzer(PROVIDER).analyze(make_artifact("PyMuPDF==1.24.0")))
     explained = run(
-        LicenseAnalyzer(
-            PROVIDER, retriever=FakeRetriever(), explainer=FakeExplainer()
-        ).analyze(make_artifact("PyMuPDF==1.24.0"))
+        LicenseAnalyzer(PROVIDER, retriever=FakeRetriever()).analyze(
+            make_artifact("PyMuPDF==1.24.0")
+        )
     )
     assert (
         strict.candidates[0].policy_outcome is explained.candidates[0].policy_outcome

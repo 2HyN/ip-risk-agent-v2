@@ -39,37 +39,6 @@ class ReferenceRetriever(Protocol):
         ...
 
 
-@dataclass(frozen=True)
-class LicenseExplanation:
-    """모델이 만든 설명. 어떤 참조에 기반했는지 함께 남긴다."""
-
-    summary: str
-    obligations: list[str]
-    reference_chunk_ids: list[str]
-
-
-class LicenseExplainer(Protocol):
-    """정책 결과와 참조를 받아 사람이 읽을 설명을 만든다."""
-
-    @property
-    def model_id(self) -> str:
-        ...
-
-    @property
-    def prompt_version(self) -> str:
-        ...
-
-    async def explain(
-        self,
-        *,
-        package: str,
-        license_expression: str,
-        outcome: LicensePolicyOutcome,
-        references: list[ReferenceChunk],
-    ) -> LicenseExplanation:
-        ...
-
-
 def reference_query(license_expression: str, outcome: LicensePolicyOutcome) -> str:
     """검색 질의. 표현식과 분류를 함께 넣어 관련 조항만 좁힌다."""
     return f"{license_expression} 배포 시 의무사항 {outcome.value}"
