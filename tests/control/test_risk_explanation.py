@@ -182,3 +182,25 @@ def test_without_an_explainer_nothing_happens() -> None:
         assert outcome.skipped == ("risk-1",)
 
     run(scenario())
+
+
+def test_a_google_doc_is_not_denied_for_its_source_format() -> None:
+    """어댑터가 text/plain 으로 export 해서 넘기는데 mime 은 원본 그대로다.
+
+    받아 주지 않으면 이미 텍스트로 읽어 온 문서를 FILE_TYPE_DENIED 로 막는다.
+    운영에서 실제로 Google 문서 하나가 그렇게 막혔다.
+    """
+    from iprisk_contracts.common import ArtifactKind
+
+    from ip_risk_agent.application.security_gate.policy import SecurityGatePolicy
+    from ip_risk_agent.application.security_gate.service import _mime_is_denied
+
+    policy = SecurityGatePolicy(policy_version="gate-1")
+    assert not _mime_is_denied(
+        "application/vnd.google-apps.document", ArtifactKind.DOCUMENT_TEXT, policy
+    )
+    # 다루지 못하는 형식은 계속 막는다. export 하는 것은 Docs 뿐이다.
+    assert _mime_is_denied(
+        "application/vnd.google-apps.spreadsheet", ArtifactKind.DOCUMENT_TEXT, policy
+    )
+    assert _mime_is_denied("image/png", ArtifactKind.DOCUMENT_TEXT, policy)

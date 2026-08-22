@@ -383,9 +383,10 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
     )
     # KIPRIS 무료 등급은 월 1,000 회다. 같은 특허를 재분석마다 다시 받으면 재검증
     # 자체가 불가능해지므로 프로세스 밖에 캐시를 둔다.
+    patent_cache = FirestorePatentResponseCache(foundation.clients.firestore)
     kipris = CachingPatentSearchProvider(
         KiprisClient(_secret(foundation, settings.kipris_api_key_secret_id)),
-        FirestorePatentResponseCache(foundation.clients.firestore),
+        patent_cache,
     )
     retriever = None
     close_callbacks = [metadata.aclose, kipris.aclose]
@@ -407,6 +408,11 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             metadata_provider=metadata,
             model_client=model,
             search_provider=kipris,
+            # 같은 문서면 검색어를 재사용하고, 이미 매칭된 특허는
+            # 검색과 무관하게 다시 대조한다. 재검사에서 Risk 가
+            # 조용히 해소되는 것을 막는다.
+            patent_response_cache=patent_cache,
+            previously_matched_patents=context.control_facade.previously_matched_patents,
             retriever=retriever,
             # 설명이 없으면 라이선스 판정이 정책 고정 문구로만 읽힌다. 판정 자체는
             # 규칙 엔진이 하고, 이 구현은 참조 자료에 근거해 이유만 붙인다.

@@ -1116,3 +1116,101 @@ def test_the_synthetic_corpus_refuses_casual_use(monkeypatch):
         load_corpus(CORPUS_PATH, acknowledge_synthetic=True)
     with pytest.raises(SyntheticCorpusRefused):
         offline_kipris_client({}, acknowledge_synthetic=True)
+
+
+def test_the_same_document_reuses_its_search_queries():
+    """문서가 그대로면 검색어도 그대로여야 한다.
+
+    추출은 모델이 하므로 실행마다 검색어가 달라진다. 그러면 후보가 달라져
+    **바뀐 것이 없는데 Risk 가 새로 생기고 이전 것이 해소된다.** 운영에서 실제로
+    같은 문서를 재검사했더니 특허 2 건이 새로 잡히고 2 건이 RESOLVED 가 됐다.
+    """
+    from ip_risk_agent.intelligence.patent.cache import InMemoryPatentResponseCache
+
+    cache = InMemoryPatentResponseCache()
+    artifact = patent_artifact()
+
+    first = make_analyzer([extraction(), comparison(PATENT_A), comparison(PATENT_B)])
+    first._cache = cache
+    run(first.analyze(artifact))
+
+    # 두 번째 실행에는 **추출 응답을 넣지 않는다.** 캐시가 먹으면 모델을 부르지
+    # 않으므로 대조 응답만 있으면 된다. 캐시가 안 먹으면 대조 응답을 추출로 읽어
+    # 결과가 비어 버리므로, 이 시험은 재사용 여부를 그대로 드러낸다.
+    second = make_analyzer([comparison(PATENT_A), comparison(PATENT_B)])
+    second._cache = cache
+    result = run(second.analyze(artifact))
+    assert {c.normalized_application_number for c in result.candidates} == {
+        PATENT_A,
+        PATENT_B,
+    }
+
+
+def test_a_previously_matched_patent_is_compared_again_even_if_search_misses_it():
+    """검색이 데려오지 않아도 이미 매칭된 특허는 다시 대조한다.
+
+    그러지 않으면 canonical 이 "판정해 보니 더 이상 위험이 아니다" 로 읽어 Risk 를
+    RESOLVED 로 닫는데, 실제로는 이번에 보지도 않은 것이다.
+    """
+
+    async def known(_artifact_id):
+        return (PATENT_B,)
+
+    # 검색은 PATENT_A 만 데려온다.
+    provider = StaticPatentSearchProvider(
+        {"voice phishing detection": [PatentSearchHit(PATENT_A, "보이스피싱 검출", "voice phishing detection")]},
+        DOCUMENTS,
+    )
+    analyzer = PatentAnalyzer(
+        provider,
+        ScriptedModelClient([extraction(), comparison(PATENT_A), comparison(PATENT_B)]),
+        candidate_cap=6,
+        previously_matched=known,
+    )
+    result = run(analyzer.analyze(patent_artifact()))
+    found = {c.normalized_application_number for c in result.candidates}
+    assert PATENT_A in found
+    assert PATENT_B in found, "검색이 놓쳐도 이전 매칭은 다시 대조해야 한다"
+
+
+def test_a_carried_patent_that_no_longer_matches_is_a_real_resolution():
+    """이월해서 대조했는데 겹치지 않으면 그때는 진짜 해소다."""
+    from ip_risk_agent.intelligence.gemini.schemas import PatentComparison
+
+    async def known(_artifact_id):
+        return (PATENT_B,)
+
+    provider = StaticPatentSearchProvider(
+        {"voice phishing detection": [PatentSearchHit(PATENT_A, "보이스피싱 검출", "voice phishing detection")]},
+        DOCUMENTS,
+    )
+    analyzer = PatentAnalyzer(
+        provider,
+        ScriptedModelClient(
+            [
+                extraction(),
+                comparison(PATENT_A),
+                # 이월된 후보는 겹치는 구성이 없다.
+                PatentComparison(application_number=PATENT_B, matched_elements=[]),
+            ]
+        ),
+        candidate_cap=6,
+        previously_matched=known,
+    )
+    result = run(analyzer.analyze(patent_artifact()))
+    found = {c.normalized_application_number for c in result.candidates}
+    assert found == {PATENT_A}, "겹치지 않으면 후보에 남지 않는다"
+
+
+def test_a_broken_carry_forward_lookup_does_not_stop_the_analysis():
+    async def broken(_artifact_id):
+        raise RuntimeError("canonical is unreachable")
+
+    analyzer = PatentAnalyzer(
+        StaticPatentSearchProvider(HITS, DOCUMENTS),
+        ScriptedModelClient([extraction(), comparison(PATENT_A), comparison(PATENT_B)]),
+        candidate_cap=6,
+        previously_matched=broken,
+    )
+    result = run(analyzer.analyze(patent_artifact()))
+    assert result.candidates

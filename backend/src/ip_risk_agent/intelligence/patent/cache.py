@@ -33,10 +33,28 @@ DOCUMENT_TTL = timedelta(days=90)
 #: 검색은 새 공보가 나오면 달라진다. 검토 도구의 주기로는 일주일이면 충분하다.
 SEARCH_TTL = timedelta(days=7)
 
+#: 문서가 그대로면 검색어도 그대로여야 한다.
+#:
+#: 추출은 모델이 하므로 같은 문서라도 실행마다 검색어가 달라진다. 그러면 후보가
+#: 달라지고, **바뀐 것이 없는데 Risk 가 새로 생기고 이전 것이 해소된다.** 운영에서
+#: 실제로 그랬다 — 같은 문서를 재검사했더니 특허 2 건이 새로 잡히고 2 건이
+#: RESOLVED 가 됐다.
+#:
+#: 그래서 문서 내용(analysis_input_checksum)이 같으면 검색어를 재사용한다.
+#: 내용이 바뀌면 체크섬이 바뀌므로 자연히 다시 뽑는다 — 그때는 검색어가 달라지는
+#: 것이 옳다.
+EXTRACTION_TTL = timedelta(days=30)
+
 
 @dataclass(frozen=True, slots=True)
 class CachedSearch:
     hits: list[PatentSearchHit]
+    stored_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class CachedExtraction:
+    payload: dict
     stored_at: datetime
 
 
@@ -55,6 +73,8 @@ class PatentResponseCache(Protocol):
     async def put_document(
         self, application_number: str, value: CachedDocument
     ) -> None: ...
+    async def get_extraction(self, key: str) -> CachedExtraction | None: ...
+    async def put_extraction(self, key: str, value: CachedExtraction) -> None: ...
 
 
 class InMemoryPatentResponseCache:
@@ -63,6 +83,7 @@ class InMemoryPatentResponseCache:
     def __init__(self) -> None:
         self._searches: dict[str, CachedSearch] = {}
         self._documents: dict[str, CachedDocument] = {}
+        self._extractions: dict[str, CachedExtraction] = {}
 
     async def get_search(self, key: str) -> CachedSearch | None:
         return self._searches.get(key)
@@ -77,6 +98,20 @@ class InMemoryPatentResponseCache:
         self, application_number: str, value: CachedDocument
     ) -> None:
         self._documents[application_number] = value
+
+    async def get_extraction(self, key: str) -> CachedExtraction | None:
+        return self._extractions.get(key)
+
+    async def put_extraction(self, key: str, value: CachedExtraction) -> None:
+        self._extractions[key] = value
+
+
+def extraction_cache_key(analysis_input_checksum: str, prompt_version: str) -> str:
+    """문서 내용과 프롬프트가 함께 검색어를 정한다. 둘 다 키에 넣는다.
+
+    프롬프트를 고치면 검색어가 달라지는 것이 옳으므로 캐시가 자연히 무효화된다.
+    """
+    return f"{prompt_version}:{analysis_input_checksum}"
 
 
 def search_cache_key(query: str, rows: int) -> str:
@@ -147,7 +182,10 @@ class CachingPatentSearchProvider:
 
 __all__ = [
     "CachedDocument",
+    "CachedExtraction",
     "CachedSearch",
+    "EXTRACTION_TTL",
+    "extraction_cache_key",
     "CachingPatentSearchProvider",
     "DOCUMENT_TTL",
     "InMemoryPatentResponseCache",

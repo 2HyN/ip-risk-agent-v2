@@ -14,6 +14,7 @@ import json
 import logging
 
 import asyncio
+from datetime import datetime, timezone
 
 from iprisk_contracts import AnalysisArtifact
 from iprisk_contracts.common import (
@@ -29,10 +30,11 @@ from ..common.errors import MalformedProviderOutputError, ProviderFailureError
 from ..common.evidence import source_reference, source_segment_id
 from ..common.validation import validate_artifact
 from ..gemini.client import PromptLibrary, StructuredModelClient
-from ..gemini.schemas import PatentComparison
+from ..gemini.schemas import PatentComparison, TechnicalExtraction
 from . import evidence_builder, grounding
 from .candidate_rank import DEFAULT_CANDIDATE_CAP, RankedCandidate, rank_candidates
 from .extraction import TechnicalExtractor, render_segments
+from .cache import CachedExtraction, EXTRACTION_TTL, extraction_cache_key
 from .kipris import PatentDocument, PatentSearchProvider
 from .score import evidence_strength
 from .query_builder import run_searches
@@ -102,6 +104,18 @@ def _priority_diagnostic(
     )
 
 
+#: 이월된 후보는 검색 순위가 없다. 정렬에서 뒤로 보낸다.
+_CARRIED_POSITION = 10_000
+
+
+async def _safe_cache(awaitable):
+    """캐시 오류는 삼킨다. 캐시는 정확성의 일부가 아니다."""
+    try:
+        return await awaitable
+    except Exception:  # noqa: BLE001
+        return None
+
+
 ANALYZER_VERSION = "patent-analyzer-1.0.0"
 COMPARE_PROMPT = "patent_compare_v2"
 
@@ -123,12 +137,18 @@ class PatentAnalyzer:
         *,
         prompts: PromptLibrary | None = None,
         candidate_cap: int = DEFAULT_CANDIDATE_CAP,
+        response_cache=None,
+        previously_matched=None,
     ) -> None:
         self._search = search_provider
         self._client = model_client
         self._prompts = prompts or PromptLibrary()
         self._extractor = TechnicalExtractor(model_client, self._prompts)
         self._cap = candidate_cap
+        # 같은 문서면 같은 검색어를 쓴다. 없으면 매번 다시 뽑는다.
+        self._cache = response_cache
+        # 이 artifact 에서 이미 매칭된 출원번호. 검색과 무관하게 다시 대조한다.
+        self._previously_matched = previously_matched
 
     def supports(self, artifact: AnalysisArtifact) -> bool:
         return artifact.artifact_kind in _DOCUMENT_KINDS
@@ -149,7 +169,7 @@ class PatentAnalyzer:
 
         # ── 1. 기술 요소 추출
         try:
-            extraction = await self._extractor.extract(artifact)
+            extraction = await self._extract(artifact)
         except ProviderFailureError as failure:
             builder.record_failure(failure)
             return builder.failed(**versions)
@@ -171,6 +191,14 @@ class PatentAnalyzer:
             return builder.failed(**versions)
 
         candidates = rank_candidates(outcome.hits_by_query, cap=self._cap)
+        # 검색이 데려오지 않았어도, 이 문서에서 이미 매칭된 특허는 다시 대조한다.
+        #
+        # 그러지 않으면 검색어가 조금만 달라져도 이전 후보가 결과에서 빠지고,
+        # canonical 은 그것을 "판정해 보니 더 이상 위험이 아니다" 로 읽어 Risk 를
+        # RESOLVED 로 닫는다. 실제로는 **이번에 보지도 않은 것**이다. 운영에서
+        # 같은 문서를 재검사했더니 특허 2 건이 그렇게 조용히 해소됐다.
+        carried = await self._carried_forward(artifact, candidates)
+        candidates = [*candidates, *carried]
         _diagnostic(
             query_count=len(extraction.search_queries),
             queries_answered=len(outcome.hits_by_query),
@@ -244,6 +272,58 @@ class PatentAnalyzer:
         )
 
     # ------------------------------------------------------------ 내부
+
+    async def _extract(self, artifact: AnalysisArtifact):
+        """검색어를 뽑는다. 문서 내용이 같으면 지난번 것을 그대로 쓴다.
+
+        추출은 모델이 하므로 같은 문서라도 실행마다 검색어가 달라진다. 그러면
+        후보가 달라져 **바뀐 것이 없는데 Risk 가 새로 생긴다.**
+        """
+        checksum = artifact.security_context.analysis_input_checksum
+        key = None
+        if self._cache is not None and checksum:
+            key = extraction_cache_key(checksum, self._extractor.prompt_version)
+            cached = await _safe_cache(self._cache.get_extraction(key))
+            now = datetime.now(timezone.utc)
+            if cached is not None and now - cached.stored_at < EXTRACTION_TTL:
+                return TechnicalExtraction.model_validate(cached.payload)
+
+        extraction = await self._extractor.extract(artifact)
+        if key is not None:
+            await _safe_cache(
+                self._cache.put_extraction(
+                    key,
+                    CachedExtraction(
+                        payload=extraction.model_dump(mode="json"),
+                        stored_at=datetime.now(timezone.utc),
+                    ),
+                )
+            )
+        return extraction
+
+    async def _carried_forward(
+        self, artifact: AnalysisArtifact, candidates: list[RankedCandidate]
+    ) -> list[RankedCandidate]:
+        if self._previously_matched is None:
+            return []
+        try:
+            known = await self._previously_matched(artifact.artifact_id)
+        except Exception:  # noqa: BLE001 - 이월을 못 해도 분석은 진행한다
+            return []
+        seen = {candidate.application_number for candidate in candidates}
+        return [
+            RankedCandidate(
+                application_number=number,
+                title="",
+                # 검색이 데려온 것이 아니므로 적중 질의가 없다. 점수의
+                # query_reach 가 0 이 되는 것은 사실 그대로다.
+                matched_queries=[],
+                best_position=_CARRIED_POSITION,
+                metadata={"carried_forward": "true"},
+            )
+            for number in known
+            if number and number not in seen
+        ]
 
     async def _fetch_documents(
         self, candidates: list[RankedCandidate], builder: ResultBuilder

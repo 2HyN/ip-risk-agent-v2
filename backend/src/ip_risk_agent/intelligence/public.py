@@ -104,6 +104,8 @@ def create_analyzer_registry(
     explainer: LicenseExplainer | None = None,
     prompts: PromptLibrary | None = None,
     patent_candidate_cap: int = 6,
+    patent_response_cache=None,
+    previously_matched_patents=None,
 ) -> AnalyzerRegistry:
     """Analyzer 를 조립한다.
 
@@ -120,6 +122,8 @@ def create_analyzer_registry(
                 model_client,
                 prompts=prompts,
                 candidate_cap=patent_candidate_cap,
+                response_cache=patent_response_cache,
+                previously_matched=previously_matched_patents,
             )
         )
     return AnalyzerRegistry(analyzers)

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 from iprisk_contracts import (
     AnalysisResult,
+    AnalysisType,
     MountRef,
     SourceArtifactRef,
     SourceChange,
@@ -272,6 +273,33 @@ class ControlPlaneFacade:
             "analysis_reanalysis_requested",
             correlation=CorrelationIds(event_id=change_event_id),
         )
+
+    async def previously_matched_patents(
+        self, artifact_id: str, *, limit: int = 20
+    ) -> tuple[str, ...]:
+        """이 artifact 에서 이미 매칭된 특허 출원번호.
+
+        분석기가 검색 결과와 무관하게 이것들을 다시 대조한다. 그러지 않으면
+        검색어가 조금만 달라져도 이전 후보가 결과에서 빠지고, 그것을 "판정해 보니
+        더 이상 위험이 아니다" 로 읽어 Risk 가 조용히 RESOLVED 가 된다.
+
+        해소된 Risk 도 포함한다. 다시 겹치면 REOPENED 로 살아나야 한다.
+
+        risk_key 는 해시라 출원번호를 되돌릴 수 없다. 근거 ID
+        (``patent:{출원번호}:claim:N``) 에서 읽는다.
+        """
+        numbers: list[str] = []
+        async with self._unit_of_work_factory() as uow:
+            risks = await uow.risks.list_for_artifact(artifact_id, AnalysisType.PATENT)
+            for risk in risks:
+                for evidence in await uow.risks.list_evidence(risk.id):
+                    parts = evidence.evidence_id_from_result.split(":")
+                    if len(parts) >= 2 and parts[0] == "patent" and parts[1]:
+                        if parts[1] not in numbers:
+                            numbers.append(parts[1])
+                if len(numbers) >= limit:
+                    break
+        return tuple(numbers[:limit])
 
     async def untrack_artifact(
         self,

@@ -539,6 +539,14 @@ def _mime_is_denied(
         "application/pdf",
         "application/rtf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        # Google Docs 는 어댑터가 text/plain 으로 export 해서 넘긴다. 그런데
+        # snapshot 의 mime 은 원본 형식 그대로라, 여기서 받아 주지 않으면 이미
+        # 텍스트로 읽어 온 문서를 FILE_TYPE_DENIED 로 막는다. 운영에서 실제로
+        # Google 문서 하나가 그렇게 막혔다.
+        #
+        # Sheets/Slides 는 넣지 않는다. `read_text` 가 export 하는 것은 Docs 뿐이고,
+        # 다루지 못하는 형식을 통과시키면 더 뒤에서 알 수 없는 실패가 된다.
+        "application/vnd.google-apps.document",
     }
     return not (
         artifact_kind is ArtifactKind.DOCUMENT_TEXT and normalized in document_types
