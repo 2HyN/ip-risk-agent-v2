@@ -1260,3 +1260,49 @@ def test_actual_kipris_calls_are_counted_separately_from_cache_hits(caplog):
     dumped = json.dumps(calls)
     assert query not in dumped
     assert PATENT_A not in dumped
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "expected"),
+    [
+        ("22", "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR", "RATE_LIMITED"),
+        ("30", "SERVICE_KEY_IS_NOT_REGISTERED_ERROR", "AUTH"),
+        ("31", "DEADLINE_HAS_EXPIRED_ERROR", "AUTH"),
+    ],
+)
+def test_every_known_kipris_rejection_stops_instead_of_retrying(code, message, expected):
+    """셋 다 다시 걸어도 결과가 같다. 재시도는 상황만 악화시킨다.
+
+    30 과 31 은 실측으로 갈랐다 — 같은 키로 특허는 22, 상표·디자인은 31 이 왔고,
+    다른 키는 세 서비스 모두 30 이었다. 즉 31 은 "신청했으나 기간 만료",
+    30 은 "키가 발급 대장에 없음" 이다.
+    """
+    import httpx
+
+    from ip_risk_agent.intelligence.common.errors import ProviderFailureError
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    body = (
+        f"<response><header><resultCode>{code}</resultCode>"
+        f"<resultMsg>{message}</resultMsg></header><body/></response>"
+    ).encode("utf-8")
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=body)
+
+    client = KiprisClient(
+        "unused-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        retry_backoff_seconds=0.0,
+    )
+
+    async def scenario():
+        with pytest.raises(ProviderFailureError) as failure:
+            await client.search("음성")
+        assert failure.value.category.value == expected
+        assert len(calls) == 1, "다시 걸지 않는다"
+        await client.aclose()
+
+    asyncio.run(scenario())

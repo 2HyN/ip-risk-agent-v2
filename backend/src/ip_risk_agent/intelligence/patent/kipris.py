@@ -37,11 +37,20 @@ SUCCESS_RESULT_CODE = "00"
 
 #: 실측한 KIPRIS 오류 코드. 코드가 곧 분류다.
 #:
-#: 22 는 호출 한도 초과다. 이것을 UNAVAILABLE 로 두면 재시도가 한도를 더 쓴다.
-#: 30 은 키/서비스 미등록이라 다시 걸어도 같다.
+#: 셋 다 **다시 걸어도 결과가 같다.** 그래서 어느 것도 재시도 대상이 아니다.
+#: 메시지로 추정하면 이 구분이 흐려져 재시도가 상황을 악화시킨다 — 22 를
+#: UNAVAILABLE 로 분류했을 때 실제로 그랬다.
+#:
+#: * 22 호출 한도 초과. 재시도가 한도를 더 쓴다
+#: * 30 키가 발급 대장에 없다. 서비스 미신청이면 30 이 아니라 31 이 온다
+#: * 31 신청은 했으나 이용기간이 끝났다. 갱신 전에는 계속 같다
+#:
+#: 30 과 31 은 실측으로 갈랐다. 같은 키로 특허는 22, 상표·디자인은 31 이 왔고,
+#: 다른 키는 세 서비스 모두 30 이었다.
 _RESULT_CODE_CATEGORIES = {
     "22": FailureCategory.RATE_LIMITED,
     "30": FailureCategory.AUTH,
+    "31": FailureCategory.AUTH,
 }
 
 PROVIDER = "KIPRIS"
@@ -138,6 +147,8 @@ def _require_successful_result(root: Element) -> None:
             )
             else FailureCategory.RATE_LIMITED
             if "limited_number" in message or "exceeds" in message
+            else FailureCategory.AUTH
+            if "expired" in message or "deadline" in message
             else FailureCategory.UNAVAILABLE
         )
     raise ProviderFailureError(
