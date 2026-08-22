@@ -137,6 +137,18 @@ secret create/add/access, webhook/mount token refresh에서 add/access를 사용
 source fetch 중 access와 refresh 시 add를 사용한다. 현재 runtime 경로는 disable을 호출하지
 않으므로 disable 권한을 부여하지 않는다.
 
+> **[2026-08-23] `secrets.delete` 가 빠져 있다 — workspace 삭제가 끝나지 못한다.**
+> `deploy/iam-policy-contract.yaml` 에 `secretmanager.secrets.delete` 가 **0 건**인데
+> `gcp/secret_vault.py` 의 `delete()` 는 `delete_secret` 을 부르고 `NotFound` 만 잡는다.
+> `gcp/operational_eraser.py:90-99` 는 그 실패를 일부러 올려 workspace 를 `DELETING` 으로
+> 남기므로, 자격증명이 붙은 workspace 는 **영영 지워지지 않고 재시도만 반복한다.**
+>
+> `secrets.create` 와 달리 삭제는 존재하는 secret resource 에 대해 평가되므로 위 문단이
+> 말한 prefix 조건의 한계가 적용되지 않는다 — `iprisk-v2-cred-` prefix condition 을 실제로
+> 걸 수 있다. 실제 IAM 에 무엇이 붙어 있는지 먼저 확인한 뒤, 없으면 이 문서의 표와 custom
+> role 을 함께 고치고 **자격증명이 붙은 workspace 를 실제로 지워** 끝나는지 확인한다.
+> `docs/DEVELOPMENT_SPEC.md` §9.4 · 결함 23.
+
 중요한 IAM 한계가 있다. `secretmanager.secrets.create`는 새 secret이 아니라 project parent에
 대해 평가되므로 IAM resource-name condition으로 미래의 `iprisk-v2-cred-*` ID만 생성하도록
 제한할 수 없다. 유지할 최소 custom role은 API에 project scope의

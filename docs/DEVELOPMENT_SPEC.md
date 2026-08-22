@@ -713,6 +713,7 @@ poetry.lock    깨진 TOML  → []   (예외 없음)
 | 20 | `WITH` 예외 식별자를 검증하지 않음 — 날조된 예외가 통과 | 조용한 하향 | §5.3 |
 | 21 | 되살릴 때 사람의 처분이 초기화됨 | 조용한 유실 | §7.1 |
 | 22 | 이전 작업이 남긴 근거가 그대로 붙어 있다 | 판본과 근거의 시점 불일치 | **열림** — 0-H 가 닫지 않는다 (§5.6) |
+| 23 | 런타임 SA 에 `secrets.delete` 가 없어 **workspace 삭제가 끝나지 못한다** | **운영 정지** | §9.4 (배포 영역) |
 | — | 좀비 실행을 손으로 못 푼다 | — | **닫힘** (`bfc615d`) |
 | — | Overview 가 실패를 영구 누적 | — | **닫힘** (`5f19ccf`) |
 
@@ -817,6 +818,36 @@ KIPRIS 무료 등급은 **월 1,000 회**다.
 초라 실질 창은 **약 10 분**이다. 하루가 아니다.
 
 `bfc615d` 로 사람이 손으로 되살릴 수 있게 되어 급한 정도는 줄었다. 값 조정은 배포 영역이다.
+
+### 9.4 workspace 삭제가 끝나지 못한다
+
+**[확인]** `deploy/iam-policy-contract.yaml` 이 런타임에 주는 Secret 권한은 셋뿐이다 —
+`secretmanager.secrets.create`(project scope), `versions.add`, `versions.access`(뒤의 둘은
+`iprisk-v2-cred-` prefix 조건). **`secrets.delete` 는 없다.** 파일 전체에 `secrets.delete`
+가 0 건이다.
+
+그런데 `gcp/secret_vault.py` 의 `delete()` 는 `delete_secret` 을 부르고 `NotFound` 만
+잡는다. 권한 거부는 그대로 올라간다. 그리고 `gcp/operational_eraser.py:90-99` 의
+`_erase_credential` 은 그 실패를 **일부러 올린다** — 주석이 이유를 적어 두었다:
+"workspace 는 `DELETING` 으로 남아 다시 시도할 수 있고, 그것이 자격증명을 남기는 것보다
+낫다."
+
+의도는 옳은데 전제가 틀렸다. **다시 시도해도 권한이 없다.** 자격증명이 붙은 workspace 는
+영영 지워지지 않고 `DELETING` 에서 재시도만 반복한다. 조용한 실패보다 나쁘다 — 실패가
+눈에 보이는데 끝나지 않는다.
+
+전에 고아 secret 19 개를 지운 적이 있으나 그것은 **사용자 자격증명**으로 한 것이라 런타임
+권한을 증명하지 않는다.
+
+**명세** — 배포 영역이다. 문서 표시로 닫히지 않는다.
+
+1. 실제 IAM 에 무엇이 붙어 있는지 **먼저 확인한다.** 계약 파일과 실제 정책이 다를 수 있다.
+2. 없으면 런타임 SA 에 `secretmanager.secrets.delete` 를 `iprisk-v2-cred-` prefix 조건으로
+   붙인다. `secrets.create` 와 달리 삭제는 **존재하는 secret resource 에 대해 평가되므로**
+   prefix 조건이 실제로 걸린다 (§12.1 이 인용한 create 의 한계가 여기엔 적용되지 않는다).
+3. `deploy/iam-policy-contract.yaml` 의 표와 custom role 을 함께 고친다.
+4. 고친 뒤 **자격증명이 붙은 workspace 를 실제로 지워** 끝나는지 본다. 계약 파일만 고치면
+   같은 상태가 남는다.
 
 ---
 
