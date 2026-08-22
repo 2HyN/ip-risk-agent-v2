@@ -64,11 +64,19 @@ class SecretManagerCredentialVault:
         await self._add_version(self._validate_ref(ref), secret)
 
     async def delete(self, ref: CredentialRef) -> None:
+        """자격증명을 실제로 없앤다.
+
+        예전에는 최신 버전을 **비활성화**만 했다. 그러면 Secret 도 이전 버전도
+        남아 있어, refresh token 이 지워진 것처럼 보이면서 그대로 복구 가능한
+        상태로 남는다. Workspace 삭제는 전체 말소이고, 이 vault 의 다른 구현
+        (:class:`InMemoryCredentialVault`) 도 항목을 통째로 없앤다. 두 구현이
+        다르게 동작하면 시험이 통과해도 운영에는 자격증명이 남는다.
+
+        이미 없으면 성공으로 본다. 삭제는 다시 시도될 수 있다.
+        """
         name = self._validate_ref(ref)
         try:
-            await self._client.disable_secret_version(
-                name=f"{name}/versions/latest"
-            )
+            await self._client.delete_secret(name=name)
         except google_exceptions.NotFound:
             return
 

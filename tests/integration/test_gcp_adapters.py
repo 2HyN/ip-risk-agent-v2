@@ -25,6 +25,7 @@ from ip_risk_agent.connectors.common.credential_vault import (
     CredentialRef,
     CredentialScope,
 )
+from ip_risk_agent.connectors.common.errors import NotFoundError
 from ip_risk_agent.application.process_change.queue import TaskEnqueueError
 from ip_risk_agent.connectors.common.runtime_store import DriveRuntime
 from ip_risk_agent.connectors.github.tracking_scope import GitHubTrackingScope
@@ -323,7 +324,7 @@ class FakeSecretClient:
     def __init__(self) -> None:
         self.secrets: set[str] = set()
         self.versions: dict[str, list[bytes]] = {}
-        self.disabled: list[str] = []
+        self.deleted: list[str] = []
         self.created: list[dict] = []
 
     async def create_secret(self, *, parent, secret_id, secret):
@@ -342,8 +343,12 @@ class FakeSecretClient:
             raise google_exceptions.NotFound("missing")
         return SimpleNamespace(payload=SimpleNamespace(data=self.versions[parent][-1]))
 
-    async def disable_secret_version(self, *, name):
-        self.disabled.append(name)
+    async def delete_secret(self, *, name):
+        if name not in self.secrets:
+            raise google_exceptions.NotFound("missing")
+        self.secrets.discard(name)
+        self.versions.pop(name, None)
+        self.deleted.append(name)
 
 
 class FakeRuntimeSecretClient:
@@ -380,7 +385,14 @@ def test_secret_manager_vault_uses_opaque_project_scoped_reference() -> None:
         await vault.update(ref, "token-b")
         assert await vault.get(ref) == "token-b"
         await vault.delete(ref)
-        assert client.disabled == [f"{ref.key_id}/versions/latest"]
+        # 비활성화가 아니라 Secret 자체가 사라져야 한다. 비활성화만 하면 refresh
+        # token 이 지워진 것처럼 보이면서 그대로 복구 가능한 상태로 남는다.
+        assert client.deleted == [ref.key_id]
+        assert client.secrets == set()
+        with pytest.raises(NotFoundError):
+            await vault.get(ref)
+        # 이미 없는 것을 다시 지워도 성공이다. 삭제는 다시 시도될 수 있다.
+        await vault.delete(ref)
 
     run(scenario())
 

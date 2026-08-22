@@ -147,6 +147,9 @@ def test_deletion_only_happens_behind_the_confirm_flag(monkeypatch) -> None:
 
     client = _FakeClient(_sample())
     monkeypatch.setattr(purge_workspace, "_client", lambda database: client)
+    # 시험이 실제 Secret Manager 에 손대면 안 된다. 자격증명 삭제 자체는
+    # eraser 수준의 시험이 fake vault 로 따로 확인한다.
+    monkeypatch.setattr(purge_workspace, "_credential_vault", lambda: None)
     counts = asyncio.run(
         purge_workspace.purge(
             "workspace-abc", database=FIRESTORE_DATABASE, confirm=False
@@ -167,6 +170,9 @@ def test_workspace_document_is_deleted_last(monkeypatch) -> None:
 
     client = _FakeClient(_sample())
     monkeypatch.setattr(purge_workspace, "_client", lambda database: client)
+    # 시험이 실제 Secret Manager 에 손대면 안 된다. 자격증명 삭제 자체는
+    # eraser 수준의 시험이 fake vault 로 따로 확인한다.
+    monkeypatch.setattr(purge_workspace, "_credential_vault", lambda: None)
     asyncio.run(
         purge_workspace.purge(
             "workspace-abc", database=FIRESTORE_DATABASE, confirm=True
@@ -187,6 +193,9 @@ def test_the_unique_key_index_is_erased_with_its_owner(monkeypatch) -> None:
 
     client = _FakeClient(_sample())
     monkeypatch.setattr(purge_workspace, "_client", lambda database: client)
+    # 시험이 실제 Secret Manager 에 손대면 안 된다. 자격증명 삭제 자체는
+    # eraser 수준의 시험이 fake vault 로 따로 확인한다.
+    monkeypatch.setattr(purge_workspace, "_credential_vault", lambda: None)
     asyncio.run(
         purge_workspace.purge(
             "workspace-abc", database=FIRESTORE_DATABASE, confirm=True
@@ -219,6 +228,17 @@ def _shared_connection_sample() -> dict[str, dict]:
             "mount-ours": {"record": {"mount_id": "mount-ours"}},
             "mount-theirs": {"record": {"mount_id": "mount-theirs"}},
         },
+        "source_operational_pending_connections": {
+            "conn-shared": {
+                "connection_id": "conn-shared",
+                "credential_ref": {
+                    "provider": "GOOGLE_DRIVE",
+                    "connection_id": "conn-shared",
+                    "secret_name": "oauth-token",
+                    "key_id": CREDENTIAL_KEY_ID,
+                },
+            },
+        },
         "risk_workspaces": {"workspace-abc": {}, "workspace-other": {}},
     }
 
@@ -236,6 +256,9 @@ def test_a_connection_shared_with_another_workspace_is_kept(monkeypatch) -> None
 
     client = _FakeClient(_shared_connection_sample())
     monkeypatch.setattr(purge_workspace, "_client", lambda database: client)
+    # 시험이 실제 Secret Manager 에 손대면 안 된다. 자격증명 삭제 자체는
+    # eraser 수준의 시험이 fake vault 로 따로 확인한다.
+    monkeypatch.setattr(purge_workspace, "_credential_vault", lambda: None)
     asyncio.run(
         purge_workspace.purge(
             "workspace-abc", database=FIRESTORE_DATABASE, confirm=True
@@ -260,9 +283,83 @@ def test_a_connection_no_other_workspace_uses_is_erased(monkeypatch) -> None:
     del sample["source_operational_drive_tracking"]["mount-theirs"]
     client = _FakeClient(sample)
     monkeypatch.setattr(purge_workspace, "_client", lambda database: client)
+    # 시험이 실제 Secret Manager 에 손대면 안 된다. 자격증명 삭제 자체는
+    # eraser 수준의 시험이 fake vault 로 따로 확인한다.
+    monkeypatch.setattr(purge_workspace, "_credential_vault", lambda: None)
     asyncio.run(
         purge_workspace.purge(
             "workspace-abc", database=FIRESTORE_DATABASE, confirm=True
         )
+    )
+    assert ("source_operational_drive_runtime", "conn-shared") in set(client.deleted)
+
+
+CREDENTIAL_KEY_ID = "projects/p/secrets/iprisk-v2-cred-google_drive-" + "a" * 40
+
+
+class _RecordingVault:
+    def __init__(self) -> None:
+        self.deleted: list[str] = []
+
+    async def delete(self, ref) -> None:
+        self.deleted.append(ref.key_id)
+
+
+def _erase_with_vault(sample: dict[str, dict]) -> tuple[_FakeClient, _RecordingVault]:
+    import asyncio
+
+    from ip_risk_agent.gcp.operational_eraser import FirestoreOperationalEraser
+
+    client = _FakeClient(sample)
+    vault = _RecordingVault()
+    asyncio.run(
+        FirestoreOperationalEraser(client, credential_vault=vault).erase("workspace-abc")
+    )
+    return client, vault
+
+
+def test_the_credential_of_a_connection_nobody_else_uses_is_destroyed() -> None:
+    """전체 말소인데 자격증명만 남으면 안 된다.
+
+    남은 Secret 은 Drive refresh token 을 담고 있고, 그것을 가리키던 기록이 함께
+    사라진 뒤라 **아무도 다시 찾아 지울 수 없다.** 실제로 workspace 를 전부 지운
+    뒤 Secret 19 개가 그렇게 남아 있었다.
+    """
+    sample = _shared_connection_sample()
+    del sample["workspace_mounts"]["mount-theirs"]
+    del sample["source_operational_drive_tracking"]["mount-theirs"]
+
+    client, vault = _erase_with_vault(sample)
+
+    assert vault.deleted == [CREDENTIAL_KEY_ID]
+    assert ("source_operational_pending_connections", "conn-shared") in set(
+        client.deleted
+    )
+
+
+def test_the_credential_of_a_connection_another_workspace_uses_is_kept() -> None:
+    """연결은 계정 단위다. 자격증명을 지우면 남은 workspace 의 감시가 끊긴다."""
+    client, vault = _erase_with_vault(_shared_connection_sample())
+
+    assert vault.deleted == []
+    assert ("source_operational_pending_connections", "conn-shared") not in set(
+        client.deleted
+    )
+
+
+def test_a_broken_credential_reference_does_not_stop_the_rest_of_the_erasure() -> None:
+    """참조가 깨졌다고 삭제 전체가 멈추면 나머지 데이터가 더 많이 남는다."""
+    sample = _shared_connection_sample()
+    del sample["workspace_mounts"]["mount-theirs"]
+    del sample["source_operational_drive_tracking"]["mount-theirs"]
+    sample["source_operational_pending_connections"]["conn-shared"][
+        "credential_ref"
+    ] = {"provider": "GOOGLE_DRIVE"}
+
+    client, vault = _erase_with_vault(sample)
+
+    assert vault.deleted == []
+    assert ("source_operational_pending_connections", "conn-shared") in set(
+        client.deleted
     )
     assert ("source_operational_drive_runtime", "conn-shared") in set(client.deleted)

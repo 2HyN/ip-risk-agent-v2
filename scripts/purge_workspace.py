@@ -10,11 +10,13 @@
     python scripts/purge_workspace.py --workspace-id workspace-XXXX          # dry-run
     python scripts/purge_workspace.py --workspace-id workspace-XXXX --confirm
 
+다른 workspace 가 더 이상 쓰지 않는 연결의 Secret Manager 자격증명도 함께
+지운다. 제품 경로와 같은 eraser 를 쓰므로 동작도 같다.
+
 지우지 않는 것:
 
 * `users` — 계정은 workspace 소유가 아니다
-* Secret Manager 의 provider credential — 다른 workspace 가 같은 provider
-  연결을 쓸 수 있다. 필요하면 `gcloud secrets delete` 로 따로 지운다
+* 다른 workspace 가 아직 쓰는 연결의 자격증명 — 지우면 그쪽 감시가 끊긴다
 * Drive/GitHub 쪽 실제 파일 — 이 도구는 우리 저장소만 건드린다
 """
 
@@ -33,6 +35,31 @@ def _client(database: str):
     from google.cloud import firestore  # noqa: PLC0415 - 지연 import
 
     return firestore.AsyncClient(project=PROJECT_ID, database=database)
+
+
+def _credential_vault():
+    """제품 경로와 같은 vault. 접근 권한이 없으면 ``None`` 을 준다.
+
+    자격증명을 못 지우는 것과 아무것도 못 지우는 것 중에서는 전자가 낫다.
+    남은 Secret 은 `--confirm` 출력의 개수 차이로 드러난다.
+    """
+    from google.cloud import secretmanager  # noqa: PLC0415 - 지연 import
+
+    from ip_risk_agent.gcp.secret_vault import (  # noqa: PLC0415 - 지연 import
+        SecretManagerCredentialVault,
+    )
+    from ip_risk_agent.gcp_contract import (  # noqa: PLC0415 - 지연 import
+        DYNAMIC_CREDENTIAL_SECRET_PREFIX,
+    )
+
+    try:
+        return SecretManagerCredentialVault(
+            client=secretmanager.SecretManagerServiceAsyncClient(),
+            project_id=PROJECT_ID,
+            secret_prefix=DYNAMIC_CREDENTIAL_SECRET_PREFIX,
+        )
+    except Exception:  # noqa: BLE001 - 자격증명 정리는 최선 노력이다
+        return None
 
 
 async def count_only(client, workspace_id: str) -> dict[str, int]:
@@ -92,7 +119,9 @@ async def purge(workspace_id: str, *, database: str, confirm: bool) -> dict[str,
         # 살아 있을 때 읽을 수 있다.
         merged: dict[str, int] = {}
         for eraser in (
-            FirestoreOperationalEraser(client),
+            FirestoreOperationalEraser(
+                client, credential_vault=_credential_vault()
+            ),
             FirestoreWorkspaceEraser(client),
         ):
             for name, count in (await eraser.erase(workspace_id)).items():

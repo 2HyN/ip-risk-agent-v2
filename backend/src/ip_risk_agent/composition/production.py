@@ -433,7 +433,10 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
         # operational 이 먼저다. canonical 참조(mount·connection)를 살아 있을 때
         # 읽어야 어떤 operational 기록이 이 workspace 것인지 알 수 있다.
         workspace_erasers=(
-            FirestoreOperationalEraser(foundation.clients.firestore),
+            FirestoreOperationalEraser(
+                foundation.clients.firestore,
+                credential_vault=foundation.credential_vault,
+            ),
             FirestoreWorkspaceEraser(foundation.clients.firestore),
         ),
     )

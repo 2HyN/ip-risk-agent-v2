@@ -8,13 +8,23 @@ provider 연결의 런타임 상태(감시 커서, 추적 범위, 기기 자격�
 기록이 가리킬 곳을 잃는다. 반대 순서라면 workspace 는 아직 ``DELETING`` 으로 남아
 있어 다시 시도할 수 있다.
 
-지우지 않는 것 — Secret Manager 의 provider credential. 다른 workspace 가 같은
-연결을 쓸 수 있어 여기서 판단할 수 없다. 필요하면 따로 지운다.
+Secret Manager 의 provider credential 도 함께 지운다. 단 **다른 workspace 가 더
+이상 쓰지 않는 연결의 것만** 이다. 그 판단은 canonical mount 를 훑어 이미 하고
+있으므로(:meth:`_references`) 여기서 할 수 있다.
+
+예전에는 지우지 않았다. 그 결과 workspace 를 전부 지워도 Drive refresh token 을
+담은 Secret 이 남았고, 그것을 가리키는 기록이 사라진 뒤라 **아무도 다시 찾아
+지울 수 없었다.** Workspace 삭제는 전체 말소이므로 자격증명이 남으면 안 된다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+
+from ip_risk_agent.connectors.common.credential_vault import CredentialRef
+
+#: 자격증명 참조가 들어 있는 컬렉션. 문서를 지우기 전에 Secret 을 먼저 없앤다.
+PENDING_CONNECTIONS = "source_operational_pending_connections"
 
 #: mount / connection 참조로 걸러야 하는 컬렉션. record 아래에 값이 들어 있다.
 OPERATIONAL_COLLECTIONS = (
@@ -34,9 +44,18 @@ OPERATIONAL_COLLECTIONS = (
 
 
 class FirestoreOperationalEraser:
-    def __init__(self, client, *, collections=OPERATIONAL_COLLECTIONS) -> None:
+    def __init__(
+        self,
+        client,
+        *,
+        collections=OPERATIONAL_COLLECTIONS,
+        credential_vault=None,
+    ) -> None:
         self._client = client
         self._collections = tuple(collections)
+        # ``None`` 이면 Secret 을 건드리지 않는다. 자격증명 저장소가 없는 조립
+        # (메모리 vault 를 쓰는 시험 등)을 위한 것이다.
+        self._credential_vault = credential_vault
 
     async def erase(self, risk_workspace_id: str) -> dict[str, int]:
         mount_ids, connection_ids = await self._references(risk_workspace_id)
@@ -51,11 +70,40 @@ class FirestoreOperationalEraser:
                     data, record, risk_workspace_id, mount_ids, connection_ids
                 ):
                     continue
+                if collection == PENDING_CONNECTIONS:
+                    # 문서보다 **먼저** 지운다. 문서를 먼저 지우면 Secret 삭제가
+                    # 실패했을 때 그것을 가리킬 기록이 사라져 영영 남는다.
+                    if await self._erase_credential(data, record):
+                        counts["secret_manager_credentials"] = (
+                            counts.get("secret_manager_credentials", 0) + 1
+                        )
                 await self._client.collection(collection).document(document.id).delete()
                 removed += 1
             if removed:
                 counts[collection] = removed
         return counts
+
+    async def _erase_credential(
+        self, data: Mapping[str, object], record: Mapping[str, object]
+    ) -> bool:
+        """연결에 매달린 Secret 을 없앤다. 없앴으면 ``True``.
+
+        참조가 깨져 있으면 지울 대상을 특정할 수 없다. 그때 예외를 올리면 삭제
+        전체가 멈춰 나머지도 남으므로, 건너뛰고 나머지를 계속 지운다. Secret
+        삭제 자체의 실패는 올린다 — workspace 는 ``DELETING`` 으로 남아 다시
+        시도할 수 있고, 그것이 자격증명을 남기는 것보다 낫다.
+        """
+        if self._credential_vault is None:
+            return False
+        raw = data.get("credential_ref") or record.get("credential_ref")
+        if not isinstance(raw, Mapping):
+            return False
+        try:
+            ref = CredentialRef.model_validate(dict(raw))
+        except Exception:  # noqa: BLE001 - 깨진 참조 하나가 삭제를 막으면 안 된다
+            return False
+        await self._credential_vault.delete(ref)
+        return True
 
     async def _references(self, risk_workspace_id: str) -> tuple[set[str], set[str]]:
         """canonical mount 에서 참조 값을 미리 모은다.
