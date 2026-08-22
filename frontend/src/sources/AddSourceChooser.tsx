@@ -54,19 +54,26 @@ export function AddSourceChooser({
     }
   };
 
-  const handleGithubClick = async (): Promise<void> => {
+  /** GitHub 설치 화면으로 보낸다. 저장소를 설치에 **추가**하려면 이 길뿐이다. */
+  const startGithubInstall = async (): Promise<void> => {
     onSelect("GITHUB");
     setError(null);
-    if (onUseExistingGithub !== null) {
-      onUseExistingGithub();
-      return;
-    }
     try {
       const { authorizeUrl } = await connectionApiClient.startGithubConnection(riskWorkspaceId);
       navigateExternal(authorizeUrl);
     } catch {
       setError("GitHub 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
     }
+  };
+
+  const handleGithubClick = async (): Promise<void> => {
+    if (onUseExistingGithub !== null) {
+      onSelect("GITHUB");
+      setError(null);
+      onUseExistingGithub();
+      return;
+    }
+    await startGithubInstall();
   };
 
   return (
@@ -79,9 +86,23 @@ export function AddSourceChooser({
         GitHub Repository
       </Button>
       {onUseExistingGithub === null ? null : (
-        <p className="source-hint">
-          이미 연결된 GitHub 설치가 있습니다. 접근 가능한 저장소를 바로 고를 수 있습니다.
-        </p>
+        <>
+          <p className="source-hint">
+            이미 연결된 GitHub 설치가 있습니다. 접근 가능한 저장소는 위에서 바로
+            고를 수 있습니다.
+          </p>
+          {/*
+            설치에 없는 저장소를 붙이려면 GitHub 으로 가야 한다. App 이 스스로
+            저장소 접근 권한을 얻는 API 는 없기 때문이다.
+
+            이 길을 없애면 **설치에 없는 저장소는 영영 붙일 수 없다.** 실제로
+            그렇게 만들어 버린 적이 있다 — 기존 연결을 쓰게 하면서 GitHub 으로
+            나가는 유일한 버튼을 대체해 버렸다.
+          */}
+          <Button type="button" variant="secondary" onClick={() => void startGithubInstall()}>
+            GitHub 에서 저장소 추가
+          </Button>
+        </>
       )}
       <Button type="button" variant="secondary" onClick={() => onSelect("LOCAL")} disabled={!isDesktop}>
         Local Folder{isDesktop ? "" : " (Desktop only)"}

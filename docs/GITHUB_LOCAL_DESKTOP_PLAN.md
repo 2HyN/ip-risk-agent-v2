@@ -79,9 +79,37 @@ requirements.txt                       sample_github/requirements.txt
 
 ---
 
-## 2. 이번 마운트가 함께 증명한 것
+## 2. GitHub 경로 실측 결과
 
-고칠 것만 있는 것은 아니다. 실측으로 확인된 것을 남긴다.
+저장소 셋을 붙이고 push 까지 태워 확인한 것이다.
+
+**push 변경 감지가 동작한다.** `sample_github_deps` 에 의존성 한 줄을 더해 push 한
+결과다.
+
+| 시각(UTC) | 일 |
+|---|---|
+| 12:37:23 | push |
+| 12:37:24 | webhook 수신, 200 |
+| 12:38:12 | 분석 점유 — 45 초 coalesce 지연 뒤 |
+
+새 줄이 그대로 Risk 가 됐다(`pypi:python-dateutil@2.9.0`). GitHub 은 push webhook
+하나에만 의존하는데(예약 조정 작업이 없다) 그 하나가 동작한다.
+
+**저장소별 Risk 수와 무시 규칙**
+
+| 저장소 | Risk | 기대와 |
+|---|---|---|
+| `sample_github` | 18 | 맞음 |
+| `sample_github_deps` | 4 | 맞음 (3 + push 로 더한 1) |
+| `sample_github_quiet` | **0** | 맞음 — Risk 가 없어야 하는 저장소다 |
+
+**`.ipriskignore` 가 저장소마다 따로 동작한다.** 새어 나오면 보이도록 심어 둔
+`flask`(sample_github)와 `bottle`(sample_github_quiet)이 **둘 다 나타나지 않았다.**
+
+**하위 폴더 파일도 통과한다.** 1 절의 수정 뒤 `docs/battery-thermal-runaway-design.md`
+가 재검사에서 통과했다.
+
+그 밖에 확인된 것.
 
 * **`.ipriskignore` 가 GitHub 마운트에서 동작한다.** 파일 12 개 중 artifact 는
   10 개다. `.ipriskignore` 와 `vendor/requirements.txt` 는 변경 이벤트조차 생기지
@@ -190,8 +218,8 @@ v3 는 지금 배경 칩(`evidence-highlight.tsx`)이고, v1 은 그 길을 가 
 | 2 | 저장소 추가 마운트 (`79207f2`) | 배포됨 (`00038`) |
 | 2-1 | "Add Source → GitHub" 도 기존 연결을 쓰도록 | **완료, 배포 대기** |
 | 3 | 3-3 state 만료 안내 | **완료, 배포 대기** |
-| 4 | 배포 후 나머지 두 저장소 마운트 + 기대값 대조 | — |
-| 5 | push → 변경 감지 확인 (GitHub 은 webhook 하나에만 의존) | — |
+| 4 | 나머지 두 저장소 마운트 + 기대값 대조 | **확인됨** |
+| 5 | push → 변경 감지 확인 | **확인됨** |
 | 6 | 3-1 재연결 부활 — 실측으로 재현부터 | 확인 후 판단 |
 | 7 | 3-2 좀비 회수 허용 | **완료, 배포 대기** |
 | 8 | Local · Desktop 실측 | — |

@@ -30,6 +30,18 @@ const connectedDriveSummary = {
     mounted_by_user_id: "user-1",
   }],
 };
+const connectedGithubSummary = {
+  ...emptySummary,
+  connected_sources: [{
+    mount_id: "mount-github-1",
+    alias: "sample_github",
+    source_type: "GITHUB",
+    provider_account_label: "2HyN",
+    status: "ACTIVE",
+    tracking_scope_summary: {},
+    mounted_by_user_id: "user-1",
+  }],
+};
 const unavailablePicker: DrivePickerAdapter = { available: false, pick: async () => [] };
 
 class FakePlatform implements PlatformAdapter {
@@ -406,6 +418,50 @@ describe("SourcePanel product integration", () => {
       repo: "private",
       tracked_branch: "main",
     });
+  });
+
+  it("lists repositories from a live GitHub connection instead of leaving for GitHub", async () => {
+    // 저장소를 더 붙이려는 사람이 먼저 누르는 것은 "Add Source" 다. 거기서 설치
+    // 화면으로 보내면 GitHub 은 저장소 선택이 바뀔 때만 돌려보내므로, 새로 고를
+    // 것이 없는 사람은 돌아오지 못한다.
+    window.location.hash = "#/w/vws-1/sources";
+    let installStarted = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/workspaces/vws-1/security/data-access-summary")) return response(connectedGithubSummary);
+      const base = baseResponse(path);
+      if (base !== null) return base;
+      if (path.endsWith("/github/install/start")) { installStarted = true; return response({ authorize_url: "https://github.invalid/x", state: "s" }); }
+      if (path.endsWith("/github/repositories")) return response({ repositories: [{ id: 7, full_name: "2HyN/sample_github_deps", owner: "2HyN", name: "sample_github_deps", private: false, default_branch: "main" }] });
+      return response({ code: "NOT_FOUND" }, 404);
+    }));
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={unavailablePicker} /> }} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "GitHub Repository" }));
+
+    expect(await screen.findByText("Add another repository")).toBeInTheDocument();
+    expect(installStarted).toBe(false);
+  });
+
+  it("still offers a way to GitHub for a repository the installation cannot reach", async () => {
+    // 설치에 없는 저장소는 GitHub 에서만 넣을 수 있다 — App 이 스스로 접근 권한을
+    // 얻는 API 는 없다. 기존 연결을 쓰게 하면서 이 길까지 없애 버린 적이 있다.
+    window.location.hash = "#/w/vws-1/sources";
+    const visited: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/workspaces/vws-1/security/data-access-summary")) return response(connectedGithubSummary);
+      const base = baseResponse(path);
+      if (base !== null) return base;
+      if (path.endsWith("/github/install/start")) { visited.push(path); return response({ authorize_url: "https://github.invalid/install", state: "s" }); }
+      if (path.endsWith("/github/repositories")) return response({ repositories: [] });
+      return response({ code: "NOT_FOUND" }, 404);
+    }));
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={unavailablePicker} /> }} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "GitHub 에서 저장소 추가" }));
+
+    await waitFor(() => expect(visited).toHaveLength(1));
   });
 
   it("enrolls Desktop and connects an opaque folder selection without exposing its path", async () => {
