@@ -148,9 +148,25 @@ export class SourceApiClient {
   }
 
   async githubRepositories(connectionId: string): Promise<GitHubRepository[]> {
-    const response = await this.client.request<GitHubRepositoriesApiResponse>(
+    return this.mapRepositories(
       `/api/v1/source-connections/${encodeURIComponent(connectionId)}/github/repositories`,
     );
+  }
+
+  /**
+   * 이미 붙어 있는 mount 를 통해 같은 설치의 저장소 목록을 본다.
+   *
+   * 저장소를 하나 붙이고 나면 화면에 남는 것은 mount 뿐이다. 연결 식별자를 화면에
+   * 두면 같은 계정의 여러 workspace 경계가 흐려지므로 mount 로 되찾는다.
+   */
+  async githubRepositoriesForMount(mountId: string): Promise<GitHubRepository[]> {
+    return this.mapRepositories(
+      `/api/v1/source-mounts/${encodeURIComponent(mountId)}/github/repositories`,
+    );
+  }
+
+  private async mapRepositories(path: string): Promise<GitHubRepository[]> {
+    const response = await this.client.request<GitHubRepositoriesApiResponse>(path);
     return response.repositories.map((repository) => ({
       id: repository.id,
       fullName: repository.full_name,
@@ -167,8 +183,37 @@ export class SourceApiClient {
     repository: GitHubRepository,
     trackedBranch: string,
   ): Promise<MountCreationResponse> {
-    const response = await this.client.request<MountCreationApiResponse>(
+    return this.mountGithubRepository(
       `/api/v1/source-connections/${encodeURIComponent(connectionId)}/github/mounts`,
+      riskWorkspaceId,
+      repository,
+      trackedBranch,
+    );
+  }
+
+  /** 같은 연결에 저장소를 **더** 붙인다. GitHub 설치 화면을 거치지 않는다. */
+  async createGithubMountForMount(
+    mountId: string,
+    riskWorkspaceId: string,
+    repository: GitHubRepository,
+    trackedBranch: string,
+  ): Promise<MountCreationResponse> {
+    return this.mountGithubRepository(
+      `/api/v1/source-mounts/${encodeURIComponent(mountId)}/github/mounts`,
+      riskWorkspaceId,
+      repository,
+      trackedBranch,
+    );
+  }
+
+  private async mountGithubRepository(
+    path: string,
+    riskWorkspaceId: string,
+    repository: GitHubRepository,
+    trackedBranch: string,
+  ): Promise<MountCreationResponse> {
+    const response = await this.client.request<MountCreationApiResponse>(
+      path,
       {
         method: "POST",
         body: JSON.stringify({

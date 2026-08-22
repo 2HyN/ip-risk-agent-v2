@@ -72,7 +72,10 @@ from .scheduler_routes import create_scheduler_router
 from .settings import AppRole, Settings, SettingsError
 from .sinks import ControlSourceChangeSink
 from .source_auth import SessionSourceAuthorizer, SourceResourceScope
-from .source_bindings import DriveMountConnectionLookup, GitHubMountConnectionLookup
+from .source_bindings import (
+    DriveMountConnectionLookup,
+    GitHubMountConnectionLookup,
+)
 from .source_completion import ProductSourceCompletionRedirect
 from .source_registration import SourceRegistrationService
 from .source_initialization import (
@@ -310,8 +313,13 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
             adapter=source.github_adapter,
             change_sink=sink,
         ),
+        # 저장소를 하나 붙인 뒤에도 같은 연결로 더 붙일 수 있어야 한다. GitHub 은
+        # 저장소 선택이 바뀔 때만 되돌려 보내므로, 설치 화면을 다시 거치는 길로는
+        # 안 된다.
+        mount_connection_lookup=GitHubMountConnectionLookup(source.pending),
         connection_authz_dependency=connection_auth,
         workspace_authz_dependency=workspace_auth,
+        mount_authz_dependency=mount_auth,
     )
     github_webhook = create_github_webhook_router(
         webhook_processor=GitHubWebhookProcessor(

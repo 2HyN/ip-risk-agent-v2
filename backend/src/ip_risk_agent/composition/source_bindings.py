@@ -57,7 +57,12 @@ class GitHubMountConnectionLookup:
                 provider="github",
                 safe_message="GitHub mount connection binding was not found",
             )
-        return GitHubConnectionContext(installation_id=pending.installation_id)
+        return GitHubConnectionContext(
+            installation_id=pending.installation_id,
+            operational_connection_id=(
+                None if binding is None else binding.pending_connection_id
+            ),
+        )
 
 
 __all__ = ["DriveMountConnectionLookup", "GitHubMountConnectionLookup"]

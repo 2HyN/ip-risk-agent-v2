@@ -9,7 +9,11 @@ from fastapi.testclient import TestClient
 
 from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
 from ip_risk_agent.connectors.common.authz import allow_all_authz
-from ip_risk_agent.connectors.github.connection_lookup import InMemoryGitHubConnectionInstallationLookup
+from ip_risk_agent.connectors.common.errors import NotFoundError
+from ip_risk_agent.connectors.github.connection_lookup import (
+    GitHubConnectionContext,
+    InMemoryGitHubConnectionInstallationLookup,
+)
 from ip_risk_agent.connectors.github.models import GitHubRepository
 from ip_risk_agent.connectors.github.mounts_routes import (
     GitHubMountCreationResponse,
@@ -75,6 +79,24 @@ class FakeInitialChangeSync:
         self.mount_ids.append(mount_id)
 
 
+class FakeMountConnectionLookup:
+    """mount -> 그 mount 를 만든 연결."""
+
+    def __init__(self, mapping: dict[str, str]) -> None:
+        self._mapping = mapping
+
+    async def resolve(self, mount_id: str) -> GitHubConnectionContext:
+        try:
+            connection_id = self._mapping[mount_id]
+        except KeyError as exc:
+            raise NotFoundError(
+                provider="github", safe_message="unknown mount"
+            ) from exc
+        return GitHubConnectionContext(
+            installation_id="inst-1", operational_connection_id=connection_id
+        )
+
+
 def _build_client(provider: FakeGitHubProvider | None = None, *, initial_change_sync=None):
     factory = FakeGitHubProviderFactory(provider or FakeGitHubProvider())
     lookup = InMemoryGitHubConnectionInstallationLookup()
@@ -88,8 +110,10 @@ def _build_client(provider: FakeGitHubProvider | None = None, *, initial_change_
         tracking_scope_store=tracking_scope_store,
         mount_creation_callback=callback,
         initial_change_sync=initial_change_sync,
+        mount_connection_lookup=FakeMountConnectionLookup({"mount-1": "conn-1"}),
         connection_authz_dependency=allow_all_authz,
         workspace_authz_dependency=allow_all_authz,
+        mount_authz_dependency=allow_all_authz,
     )
     app = FastAPI()
     app.include_router(router)
@@ -193,3 +217,52 @@ def test_create_mount_publishes_initial_repository_changes_after_scope_save():
     import asyncio
 
     asyncio.run(scenario())
+
+
+# ------------------------------------------- 저장소를 하나 붙인 뒤 더 붙이기
+
+
+def test_a_second_repository_can_be_mounted_without_going_back_to_github():
+    """저장소를 하나 붙이고 나면 다음 것을 붙일 길이 없었다.
+
+    연결 범위 라우트는 connection_id 를 요구하는데 화면에 남는 것은 mount 뿐이다.
+    그래서 GitHub 설치 화면을 다시 거쳐야 했는데, GitHub 은 **저장소 선택이 바뀔
+    때만** 되돌려 보내므로 그 길도 막혀 있었다. 저장소 세 개를 한 번에 설치에
+    추가해도 앱에서는 하나밖에 붙일 수 없었다.
+    """
+    repos = [
+        GitHubRepository(id=1, full_name="acme/widgets", owner="acme", name="widgets", private=False, default_branch="main"),
+        GitHubRepository(id=2, full_name="acme/gadgets", owner="acme", name="gadgets", private=False, default_branch="main"),
+    ]
+    client, factory, _, callback = _build_client(FakeGitHubProvider(repos=repos))
+
+    listed = client.get("/api/v1/source-mounts/mount-1/github/repositories")
+    assert listed.status_code == 200
+    assert [item["full_name"] for item in listed.json()["repositories"]] == [
+        "acme/widgets",
+        "acme/gadgets",
+    ]
+
+    created = client.post(
+        "/api/v1/source-mounts/mount-1/github/mounts",
+        json={"risk_workspace_id": "vws-1", "owner": "acme", "repo": "gadgets"},
+    )
+    assert created.status_code == 200
+    # 화면은 mount 만 알지만, 붙는 것은 그 mount 를 만든 **연결**이다.
+    assert callback.calls[-1]["connection_id"] == "conn-1"
+    assert callback.calls[-1]["repo"] == "gadgets"
+
+
+def test_an_unknown_mount_cannot_reach_a_connection():
+    """mount 를 통해 연결을 되찾는 길이 열려 있으므로, 그 입구가 좁아야 한다."""
+    client, _, _, callback = _build_client()
+
+    listed = client.get("/api/v1/source-mounts/not-a-mount/github/repositories")
+    created = client.post(
+        "/api/v1/source-mounts/not-a-mount/github/mounts",
+        json={"risk_workspace_id": "vws-1", "owner": "acme", "repo": "gadgets"},
+    )
+
+    assert listed.status_code == 404
+    assert created.status_code == 404
+    assert callback.calls == []

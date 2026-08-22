@@ -43,6 +43,7 @@ export function SourcePanel({
   const sourcePath = useParams()["*"] ?? "";
   const [selected, setSelected] = useState<SourceProviderType | null>(null);
   const [managedDrive, setManagedDrive] = useState<ConnectedSource | null>(null);
+  const [managedGithub, setManagedGithub] = useState<ConnectedSource | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<Error | null>(null);
   const sources = useResource(() => api.dataAccess(workspace.id), [api, workspace.id]);
@@ -189,6 +190,20 @@ export function SourcePanel({
                     Add files
                   </Button>
                 ) : null}
+                {source.source_type === "GITHUB" && source.status === "ACTIVE" ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setManagedGithub(source);
+                      setManagedDrive(null);
+                      setSelected(null);
+                      setMutationError(null);
+                    }}
+                  >
+                    Add repository
+                  </Button>
+                ) : null}
                 {source.status === "REAUTH_REQUIRED" && source.source_type !== "LOCAL" ? (
                   <Button
                     type="button"
@@ -291,8 +306,15 @@ export function SourcePanel({
               connectionApiClient={sourceApi}
             />
           </Card>
-          {managedDrive !== null || completion || selected === "LOCAL" ? <Card>
-          {managedDrive !== null ? (
+          {managedDrive !== null || managedGithub !== null || completion || selected === "LOCAL" ? <Card>
+          {managedGithub !== null ? (
+            <GitHubCompletion
+              sourceApi={sourceApi}
+              mountId={managedGithub.mount_id}
+              riskWorkspaceId={workspace.id}
+              onComplete={() => complete("GitHub repository를 추가로 연결했습니다.")}
+            />
+          ) : managedDrive !== null ? (
             <DriveCompletion
               sourceApi={sourceApi}
               drivePicker={drivePicker}
@@ -521,14 +543,24 @@ function DriveCompletion({
   );
 }
 
+/**
+ * 설치에서 접근 가능한 저장소를 보여 주고 고른 것을 mount 로 만든다.
+ *
+ * 방금 설치를 마치고 돌아왔으면 `connectionId` 로, 이미 붙어 있는 GitHub 연결에
+ * 저장소를 **더** 붙이는 것이면 `mountId` 로 온다. 뒤엣것이 없으면 저장소를 하나
+ * 붙인 뒤 다음 것을 붙일 길이 없다 — GitHub 은 저장소 선택이 바뀔 때만 되돌려
+ * 보내므로 설치 화면을 다시 거치는 것으로는 돌아오지 못한다.
+ */
 function GitHubCompletion({
   sourceApi,
   connectionId,
+  mountId,
   riskWorkspaceId,
   onComplete,
 }: {
   sourceApi: SourceApiClient;
-  connectionId: string;
+  connectionId?: string;
+  mountId?: string;
   riskWorkspaceId: string;
   onComplete: () => void;
 }) {
@@ -540,7 +572,10 @@ function GitHubCompletion({
 
   useEffect(() => {
     let active = true;
-    void sourceApi.githubRepositories(connectionId).then((items) => {
+    const load = mountId === undefined
+      ? sourceApi.githubRepositories(connectionId ?? "")
+      : sourceApi.githubRepositoriesForMount(mountId);
+    void load.then((items) => {
       if (!active) return;
       setRepositories(items);
       const first = items[0];
@@ -550,7 +585,7 @@ function GitHubCompletion({
       }
     }).catch(() => active && setError("설치에서 접근 가능한 repository를 불러오지 못했습니다.")).finally(() => active && setBusy(false));
     return () => { active = false; };
-  }, [connectionId, sourceApi]);
+  }, [connectionId, mountId, sourceApi]);
 
   const repository = repositories.find((item) => String(item.id) === selectedId) ?? null;
 
@@ -559,7 +594,11 @@ function GitHubCompletion({
     setBusy(true);
     setError(null);
     try {
-      await sourceApi.createGithubMount(connectionId, riskWorkspaceId, repository, branch.trim());
+      if (mountId === undefined) {
+        await sourceApi.createGithubMount(connectionId ?? "", riskWorkspaceId, repository, branch.trim());
+      } else {
+        await sourceApi.createGithubMountForMount(mountId, riskWorkspaceId, repository, branch.trim());
+      }
       onComplete();
     } catch {
       setError("선택한 repository/branch를 mount로 만들지 못했습니다.");
@@ -571,7 +610,11 @@ function GitHubCompletion({
   return (
     <div className="source-completion">
       <p className="eyebrow">GitHub App installed</p>
-      <h2>Select repository and branch</h2>
+      <h2>{mountId === undefined ? "Select repository and branch" : "Add another repository"}</h2>
+      <p>
+        아래 목록은 이 설치에서 접근할 수 있는 저장소입니다. 원하는 저장소가 없으면
+        GitHub 에서 설치에 추가한 뒤 다시 열어 주세요.
+      </p>
       <Field label="Repository">
         <Select
           value={selectedId}

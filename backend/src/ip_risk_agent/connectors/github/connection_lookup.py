@@ -16,6 +16,10 @@ from ..common.errors import NotFoundError
 
 class GitHubConnectionContext(StrictModel):
     installation_id: str
+    #: 이 mount 를 만든 연결. 같은 연결로 저장소를 **더** 붙일 때 필요하다.
+    #: 저장소 하나를 붙인 뒤 다음 것을 붙이려면 연결을 다시 찾아야 하는데,
+    #: 화면이 가진 것은 mount 뿐이다.
+    operational_connection_id: str | None = None
 
 
 class GitHubConnectionLookup(Protocol):
