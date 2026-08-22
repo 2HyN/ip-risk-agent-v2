@@ -45,13 +45,20 @@ def complete_analysis_job(
     )
 
 
-def reanalyze_analysis_job(job: AnalysisJob) -> AnalysisJob:
+def reanalyze_analysis_job(
+    job: AnalysisJob, *, reclaim_stale: bool = False
+) -> AnalysisJob:
     """재검사를 위해 job 을 초기 상태로 되돌린다.
 
     이전 판정(analysis_outcomes)을 지운다. 남겨 두면 새 결과가 "이미 있는 결과"
     로 취급되어 수용 검사를 다르게 통과한다.
     """
-    if job.status in {AnalysisJobStatus.QUEUED, AnalysisJobStatus.RUNNING}:
+    # 진행 중인지는 **이벤트의 lease** 가 정한다. worker 가 죽으면 job 은 RUNNING
+    # 인 채로 남으므로 상태만 보면 좀비를 영영 풀 수 없다. 호출자가 lease 를 보고
+    # 정해 넘긴다.
+    if job.status is AnalysisJobStatus.QUEUED or (
+        job.status is AnalysisJobStatus.RUNNING and not reclaim_stale
+    ):
         raise DomainInvariantError("analysis is already in flight")
     return replace(
         job,

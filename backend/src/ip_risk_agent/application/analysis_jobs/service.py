@@ -20,6 +20,7 @@ from ip_risk_agent.application.process_change.models import (
 )
 from ip_risk_agent.application.process_change.queue import TaskEnqueuer
 from ip_risk_agent.application.process_change.transitions import (
+    analysis_lease_is_live,
     reanalyze_change_event,
     claim_change_event,
     complete_change_event,
@@ -242,8 +243,12 @@ class AnalysisJobOrchestrationService:
         """
         async with self._unit_of_work_factory() as uow:
             event, job = await _load_execution(uow, change_event_id)
-            event = reanalyze_change_event(event, occurred_at=self._clock())
-            job = reanalyze_analysis_job(job)
+            occurred_at = self._clock()
+            # 좀비는 진행 중이 아니다. lease 가 만료됐으면 회수해 되돌린다 —
+            # 그러지 않으면 큐 재시도가 소진된 뒤 사람이 손으로 풀 길이 없다.
+            reclaim_stale = not analysis_lease_is_live(event, occurred_at=occurred_at)
+            event = reanalyze_change_event(event, occurred_at=occurred_at)
+            job = reanalyze_analysis_job(job, reclaim_stale=reclaim_stale)
             await uow.change_events.save(event)
             await uow.analysis_jobs.save(job)
             await uow.commit()

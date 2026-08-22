@@ -728,6 +728,67 @@ def test_reanalysis_refuses_an_in_flight_analysis() -> None:
     run(scenario())
 
 
+def test_reanalysis_recovers_a_run_whose_worker_died() -> None:
+    """좀비는 진행 중이 아니다.
+
+    worker 가 죽으면 상태는 PROCESSING/RUNNING 으로 남고 lease 만 만료된다.
+    예전에는 그것까지 "이미 진행 중" 으로 거절해 사람이 손으로 풀 수 없었다. 큐
+    재시도가 소진되면 두드릴 것도 없어 **영영 갇혔다.**
+
+    되돌려도 옛 시도의 결과가 새 시도를 덮지는 않는다 — 결과 수락이 ``started_at``
+    으로 시도를 구분한다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        receipt = await facade.register_source_change(make_change(source))
+
+        claim = await facade.claim_analysis(receipt.change_event_id)
+        assert claim is not None  # PROCESSING / RUNNING 인 채로 worker 가 죽는다
+
+        # lease 가 끝날 때까지 시간이 흐른다.
+        clock.current = claim.lease_expires_at + timedelta(minutes=1)
+
+        before = len(queue.attempts)
+        await facade.request_reanalysis(receipt.change_event_id)
+        assert len(queue.attempts) == before + 1
+
+        again = await facade.claim_analysis(receipt.change_event_id)
+        assert again is not None
+        assert again.attempt > claim.attempt
+
+    run(scenario())
+
+
+def test_reanalysis_still_refuses_while_the_lease_is_alive() -> None:
+    """lease 가 살아 있으면 진짜로 돌고 있는 것이다. 건드리지 않는다."""
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        receipt = await facade.register_source_change(make_change(source))
+
+        claim = await facade.claim_analysis(receipt.change_event_id)
+        assert claim is not None
+
+        # 아직 만료 전이다.
+        clock.current = claim.lease_expires_at - timedelta(seconds=1)
+
+        with pytest.raises(DomainInvariantError):
+            await facade.request_reanalysis(receipt.change_event_id)
+
+    run(scenario())
+
+
 def test_reanalysis_authorization_requires_the_mount() -> None:
     """`MOUNT_SOURCE_OPERATION` 은 mount 단위 권한이다.
 
