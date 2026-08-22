@@ -69,6 +69,12 @@ _POLICY: tuple[tuple[LicensePolicyOutcome, str, tuple[str, ...]], ...] = (
             "OSL-1.0", "OSL-1.1", "OSL-2.0", "OSL-2.1", "OSL-3.0",
             "EUPL-1.0", "EUPL-1.1", "EUPL-1.2",
             "Sleepycat", "NPOSL-3.0",
+            # GPL 을 그대로 쓰거나 단순화한 것
+            "NGPL", "SimPL-2.0",
+            # 상호주의가 결합물 전체에 미친다
+            "LiLiQ-Rplus-1.1",
+            # 하드웨어 설계의 강한 상호주의. 설계를 쓴 제품에까지 미친다
+            "CERN-OHL-S-2.0",
         ),
     ),
     (
@@ -78,6 +84,10 @@ _POLICY: tuple[tuple[LicensePolicyOutcome, str, tuple[str, ...]], ...] = (
             "AGPL-1.0-only", "AGPL-1.0-or-later",
             "AGPL-3.0-only", "AGPL-3.0-or-later",
             "SSPL-1.0", "RPL-1.1", "RPL-1.5",
+            # 네트워크 이용자에게 소스를 제공해야 한다
+            "CPAL-1.0", "RPSL-1.0",
+            # 이용자에게 데이터와 소스를 함께 제공할 의무가 있다
+            "CAL-1.0",
         ),
     ),
     (
@@ -105,6 +115,17 @@ _POLICY: tuple[tuple[LicensePolicyOutcome, str, tuple[str, ...]], ...] = (
             "CDDL-1.0", "CDDL-1.1",
             "CPL-1.0", "IPL-1.0", "APSL-2.0", "SISSL",
             "CECILL-C", "MS-RL",
+            # APSL 계열 — 파일 단위 copyleft
+            "APSL-1.0", "APSL-1.1", "APSL-1.2",
+            # MPL 을 바탕으로 만든 회사별 판본
+            "SPL-1.0", "CUA-OPL-1.0", "Motosoto", "Nokia", "OSET-PL-2.1",
+            # 그 밖의 상호주의 — 수정한 파일의 소스를 내놓아야 한다
+            "CATOSL-1.1", "LPL-1.0", "LPL-1.02", "RSCPL", "APL-1.0",
+            "LiLiQ-R-1.1",
+            # 하드웨어 설계의 약한 상호주의. 설계 자체에만 미친다
+            "CERN-OHL-W-2.0",
+            # CAL 의 결합 저작물 예외판 — 결합은 풀리지만 데이터 제공 의무는 남는다
+            "CAL-1.0-Combined-Work-Exception",
         ),
     ),
     (
@@ -122,7 +143,17 @@ _POLICY: tuple[tuple[LicensePolicyOutcome, str, tuple[str, ...]], ...] = (
     (
         LicensePolicyOutcome.REVIEW_REQUIRED,
         "용도나 배포 형태에 조건이 붙어 있어 문면만으로 끝나지 않는다",
-        ("JSON", "QPL-1.0", "Artistic-1.0", "Artistic-1.0-Perl", "SGI-B-1.1"),
+        (
+            "JSON", "QPL-1.0", "Artistic-1.0", "Artistic-1.0-Perl", "Artistic-1.0-cl8",
+            "SGI-B-1.1",
+            # 배포하면 수정본의 소스를 공개해야 한다
+            "Watcom-1.0",
+        ),
+    ),
+    (
+        LicensePolicyOutcome.REVIEW_REQUIRED,
+        "파생물에 이름 변경이나 별도 표시를 요구한다 — 우리가 고쳐 쓰면 걸린다",
+        ("LPPL-1.3c", "LPPL-1.3a", "IPA", "OGTSL"),
     ),
     (
         LicensePolicyOutcome.NOTICE_REQUIRED,
@@ -143,6 +174,20 @@ _POLICY: tuple[tuple[LicensePolicyOutcome, str, tuple[str, ...]], ...] = (
             "curl", "Vim", "Ruby", "PHP-3.0", "PHP-3.01", "TCL", "UPL-1.0",
             "HPND", "HPND-sell-variant", "ICU", "Unicode-DFS-2016",
             "FTL", "IJG", "SMLNJ", "bzip2-1.0.6", "Xnet", "OpenSSL",
+            # OSI 승인 permissive — BSD·MIT 계열이거나 그와 같은 무게다
+            "AAL", "BSD-2-Clause-Patent", "BSD-3-Clause-LBNL",
+            "BSD-3-Clause-Open-MPI", "BlueOak-1.0.0", "CNRI-Python",
+            "ECL-1.0", "ECL-2.0", "EFL-1.0", "EFL-2.0", "EUDatagrid", "Entessa",
+            "Fair", "Intel", "Jam", "LiLiQ-P-1.1", "MirOS", "MulanPSL-2.0",
+            "Multics", "NASA-1.3", "NTP", "Naumen", "OLDAP-2.8", "Unicode-3.0",
+            "VSL-1.0", "WordNet",
+            # 하드웨어 설계의 permissive 판
+            "CERN-OHL-P-2.0",
+            # SPDX 가 폐기했으나 대체 식별자를 주지 않은 것
+            "Net-SNMP", "Nunit",
+            # 목록 밖이지만 패키지 메타데이터에 자주 보이는 permissive
+            "libtiff", "Info-ZIP", "SGI-B-2.0", "Spencer-99", "NAIST-2003",
+            "mpich2", "Adobe-Glyph", "Bitstream-Vera",
         ),
     ),
     (
@@ -151,6 +196,8 @@ _POLICY: tuple[tuple[LicensePolicyOutcome, str, tuple[str, ...]], ...] = (
         (
             "0BSD", "CC0-1.0", "Unlicense", "WTFPL", "MIT-0",
             "blessing", "NIST-PD", "PDDL-1.0", "CC-PDDC", "SAX-PD",
+            # 고지조차 요구하지 않는다
+            "Beerware", "Zed",
         ),
     ),
 )
