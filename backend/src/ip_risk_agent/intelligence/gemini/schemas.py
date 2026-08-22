@@ -54,7 +54,10 @@ class PatentComparison(_Output):
     distinct_elements: list[str] = Field(
         default_factory=list, description="문서에만 있는 구성"
     )
-    uncertainty_flags: list[str] = Field(default_factory=list)
+    review_caveats: list[str] = Field(
+        default_factory=list,
+        description="검토자가 알아야 할 한계. 등급을 바꾸지 않는다",
+    )
 
 
 class LicenseExplanationOutput(_Output):

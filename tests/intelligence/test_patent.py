@@ -171,15 +171,30 @@ def test_priority_is_computed_from_verified_evidence_not_the_model():
     abstract_only_multi = grounding.GroundedComparison(
         PATENT_A, ["a", "b"], ["x"], [], has_claim_evidence=False
     )
-    uncertain = grounding.GroundedComparison(
-        PATENT_A, ["a", "b"], ["x"], ["abstract only"], has_claim_evidence=True
+    truncated = grounding.GroundedComparison(
+        PATENT_A,
+        ["a", "b"],
+        ["x"],
+        ["청구항이 구현 세부를 한정하지 않음"],
+        has_claim_evidence=True,
+        evidence_truncated=True,
+    )
+    caveat_only = grounding.GroundedComparison(
+        PATENT_A,
+        ["a", "b"],
+        ["x"],
+        ["같은 용어가 다른 뜻으로 쓰임"],
+        has_claim_evidence=True,
     )
     assert grounding.suggested_priority(claim_backed) is ReviewPriority.HIGH
     assert grounding.suggested_priority(abstract_only_single) is ReviewPriority.LOW
     # KIPRIS 는 청구항을 주지 않는다. 초록만으로도 둘 이상 겹치면 올린다.
     assert grounding.suggested_priority(abstract_only_multi) is ReviewPriority.MEDIUM
-    # 불확실 표시가 있으면 한 단계 낮춘다.
-    assert grounding.suggested_priority(uncertain) is ReviewPriority.MEDIUM
+    # 잘린 근거로 내린 판단은 원문 일부만 본 것이므로 한 단계 낮춘다.
+    assert grounding.suggested_priority(truncated) is ReviewPriority.MEDIUM
+    # 모델이 남긴 참고사항은 등급을 바꾸지 않는다. 실측에서 대조 80 건 중 77 건이
+    # 표시를 달아 HIGH 가 한 번도 나오지 않았다.
+    assert grounding.suggested_priority(caveat_only) is ReviewPriority.HIGH
 
 
 def test_prompts_expose_a_stable_version():
@@ -632,7 +647,8 @@ def test_the_priority_diagnostic_separates_the_three_paths_to_medium(caplog):
             "event",
             "match_count",
             "has_claim_evidence",
-            "uncertainty_flag_count",
+            "caveat_count",
+            "evidence_truncated",
             "segment_count",
             "distinct_segments",
             "priority",

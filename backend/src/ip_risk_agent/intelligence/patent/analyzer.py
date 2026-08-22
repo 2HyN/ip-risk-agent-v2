@@ -63,7 +63,8 @@ def _priority_diagnostic(
     *,
     match_count: int,
     has_claim_evidence: bool,
-    uncertainty_flag_count: int,
+    caveat_count: int,
+    evidence_truncated: bool,
     segment_count: int,
     distinct_segments: int,
     priority: str,
@@ -85,7 +86,8 @@ def _priority_diagnostic(
                 "event": "patent_priority_diagnostic",
                 "match_count": match_count,
                 "has_claim_evidence": has_claim_evidence,
-                "uncertainty_flag_count": uncertainty_flag_count,
+                "caveat_count": caveat_count,
+                "evidence_truncated": evidence_truncated,
                 "segment_count": segment_count,
                 "distinct_segments": distinct_segments,
                 "priority": priority,
@@ -98,7 +100,7 @@ def _priority_diagnostic(
 
 
 ANALYZER_VERSION = "patent-analyzer-1.0.0"
-COMPARE_PROMPT = "patent_compare_v1"
+COMPARE_PROMPT = "patent_compare_v2"
 
 # 기획·설계 문서만 본다. 의존성 파일에는 발명이 없다.
 _DOCUMENT_KINDS = frozenset(
@@ -133,7 +135,13 @@ class PatentAnalyzer:
         builder = ResultBuilder(artifact, self.analysis_type, ANALYZER_VERSION)
         versions: dict[str, str | None] = {
             "model_id": self._client.model_id,
-            "prompt_version": self._extractor.prompt_version,
+            # 등급을 정하는 것은 대조 프롬프트이므로 함께 남긴다. 규칙이나 프롬프트가
+            # 바뀌면 과거 판정의 뜻이 조용히 달라지는데, 무엇이 판정했는지 남아 있지
+            # 않으면 "그때의 상" 이 무엇이었는지 설명할 수 없다.
+            "prompt_version": (
+                f"{self._extractor.prompt_version}+"
+                f"{self._prompts.get(COMPARE_PROMPT).prompt_version}"
+            ),
         }
 
         # ── 1. 기술 요소 추출
@@ -271,6 +279,8 @@ class PatentAnalyzer:
                 comparison,
                 allowed_segment_ids={s.segment_id for s in artifact.text_segments},
                 evidence_types=evidence.types,
+                # 잘렸는지는 모델에게 묻지 않는다. 원장이 아는 사실이다.
+                truncated_evidence_ids=builder.ledger.truncated_ids,
             )
         except MalformedProviderOutputError as failure:
             # 지어낸 근거가 섞였다. 이 특허에 대한 판단 전체를 버린다.
@@ -281,7 +291,8 @@ class PatentAnalyzer:
         _priority_diagnostic(
             match_count=grounded.match_count,
             has_claim_evidence=grounded.has_claim_evidence,
-            uncertainty_flag_count=len(grounded.uncertainty_flags),
+            caveat_count=len(grounded.review_caveats),
+            evidence_truncated=grounded.evidence_truncated,
             segment_count=len(artifact.text_segments),
             distinct_segments=sum(
                 1 for value in grounded.evidence_ids if value.startswith("src:")
@@ -299,7 +310,8 @@ class PatentAnalyzer:
                 provider_metadata_safe={
                     "query_hits": candidate.query_hits,
                     "matched_queries": candidate.matched_queries,
-                    "uncertainty_flags": grounded.uncertainty_flags,
+                    "review_caveats": grounded.review_caveats,
+                    "evidence_truncated": grounded.evidence_truncated,
                     "has_claim_evidence": grounded.has_claim_evidence,
                 },
             ),

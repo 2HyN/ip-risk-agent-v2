@@ -66,6 +66,9 @@ class EvidenceLedger:
     def __init__(self, excerpt_limit: int = MAX_EXCERPT_CHARS) -> None:
         self._items: dict[str, Evidence] = {}
         self._excerpt_limit = excerpt_limit
+        # 잘린 근거는 대조가 본 것이 원문의 일부라는 뜻이다. 등급을 내릴지 결정할 때
+        # 쓰므로, 모델에게 묻지 않고 여기서 사실로 기록한다.
+        self._truncated: set[str] = set()
 
     def add(
         self,
@@ -81,6 +84,9 @@ class EvidenceLedger:
         인용될 수 있다. 다만 같은 ID 로 다른 내용을 넣으려 하면 ID 설계가 잘못된
         것이므로 막는다.
         """
+        collapsed = excerpt.strip()
+        if len(collapsed) > self._excerpt_limit:
+            self._truncated.add(evidence_id)
         prepared = Evidence(
             evidence_id=evidence_id,
             evidence_type=evidence_type,
@@ -98,6 +104,11 @@ class EvidenceLedger:
 
     def has(self, evidence_id: str) -> bool:
         return evidence_id in self._items
+
+    @property
+    def truncated_ids(self) -> frozenset[str]:
+        """잘린 채로 등록된 근거 ID. 등급 강등 판단에 쓴다."""
+        return frozenset(self._truncated)
 
     def require(self, evidence_ids: list[str]) -> list[str]:
         """참조가 전부 등록되어 있는지 확인한다. 모델 출력 검증에 쓴다."""
