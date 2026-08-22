@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 from iprisk_contracts import AnalysisArtifact
 from iprisk_contracts.common import (
     AnalysisCoverage,
@@ -34,6 +37,57 @@ from .explanation import ReferenceRetriever, reference_query
 from .package_metadata import PackageMetadataProvider
 
 ANALYZER_VERSION = "license-analyzer-1.0.0"
+
+logger = logging.getLogger(__name__)
+
+
+def _log_analysis(
+    artifact: AnalysisArtifact,
+    *,
+    declarations: int,
+    candidates: int,
+    coverage: AnalysisCoverage | None,
+) -> None:
+    """라이선스 경로가 무엇을 읽었는지 한 줄로 남긴다.
+
+    ## 왜 필요한가
+
+    이 경로에는 로그가 한 줄도 없었다. 그래서 ``pyproject.toml`` 하나에서 통짜로는
+    20 건이 나오는데 조각을 거치면 3 건만 나오는 손실이 **운영에서 보이지 않았다.**
+    결과는 ``SUCCEEDED`` 이고 화면에는 Risk 가 줄어든 것으로만 보인다. 세 수를 나란히
+    남기면 그 손실이 한 줄에서 드러난다 — 조각 수, 선언 수, 후보 수.
+
+    ## 무엇을 넣지 않는가
+
+    **패키지 이름도 파일 경로도 넣지 않는다.** 둘 다 사용자 소스에서 온 내용이고, 로그
+    정책이 금지한다. 대신 ``artifact_id`` 와 ``revision`` 을 남긴다 — 그것으로 어느
+    파일인지 canonical 저장소에서 되짚을 수 있고, 로그 자체는 내용을 담지 않는다.
+
+    형식(``PYPROJECT_TOML`` 같은 값)은 파일 이름이 아니라 **종류**라 남긴다. 어느 파서가
+    돌았는지 모르면 수를 해석할 수 없다.
+    """
+    logger.info(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "event": "license_analysis_diagnostic",
+                "analysis_job_id": artifact.analysis_job_id,
+                "artifact_id": artifact.artifact_id,
+                "revision": artifact.revision,
+                "dependency_format": getattr(
+                    dependency_format(artifact.logical_path), "value", None
+                ),
+                "content_scope": artifact.content_scope.value,
+                "segment_count": len(artifact.text_segments),
+                "declaration_count": declarations,
+                "candidate_count": candidates,
+                "coverage": coverage.value if coverage is not None else None,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
 
 # 파일명 -> 매니페스트 파서. 잠금 파일은 lockfiles.parser_for 가 맡는다.
 #: 형식마다 파서 하나. 어떤 이름이 어떤 형식인지는 커넥터와 함께 쓰는 표가 정한다
@@ -93,7 +147,10 @@ class LicenseAnalyzer:
             dependencies.extend(parser(segment.text, artifact.logical_path))
 
         if not len(dependencies):
-            # 파일은 맞지만 선언이 없다. 실패가 아니라 위험이 없는 것이다.
+            # 파일은 맞지만 선언이 없다. 여기가 조용한 오보가 시작되는 자리다 —
+            # 읽기가 망가져도 결과는 똑같이 "0 건" 이고 SUCCEEDED 로 올라간다.
+            # 그래서 나가기 전에 반드시 남긴다. 해소를 막는 것은 Control 쪽 0-L 이다.
+            _log_analysis(artifact, declarations=0, candidates=0, coverage=None)
             return builder.succeeded([], **versions)
 
         candidates: list[LicenseCandidate] = []
@@ -108,6 +165,12 @@ class LicenseAnalyzer:
             AnalysisCoverage.PARTIAL
             if partial or builder.has_failures
             else AnalysisCoverage.COMPLETE
+        )
+        _log_analysis(
+            artifact,
+            declarations=len(dependencies),
+            candidates=len(candidates),
+            coverage=coverage,
         )
         return builder.succeeded(candidates, coverage=coverage, **versions)
 

@@ -156,3 +156,37 @@ def test_only_an_excluded_risk_is_revived_when_tracking_resumes() -> None:
         ReviewDisposition.ACCEPTED_RISK,
     ):
         assert not should_revive(kept)
+
+
+# --------------------------------------------------------------------- 0-L
+
+
+def test_a_dependency_result_with_no_declarations_cannot_resolve() -> None:
+    """망가진 읽기와 "위험 없음" 이 같은 모양으로 올라온다.
+
+    조각화·redaction·삼킨 파싱 실패·게이트 절단이 전부 선언 0 건을 만들고, 그 결과는
+    ``SUCCEEDED`` + ``COMPLETE`` 라 권위를 얻는다. 길마다 막지 않고 결말 하나를 막는다.
+    """
+    from iprisk_contracts.common import AnalysisType
+
+    from ip_risk_agent.core.risk import absence_can_resolve
+
+    assert absence_can_resolve(AnalysisType.LICENSE, 0) is False
+
+
+def test_one_declaration_is_enough_to_trust_what_is_missing() -> None:
+    """파일이 읽혔다면 목록에서 빠진 패키지는 사람이 실제로 지운 것이다."""
+    from iprisk_contracts.common import AnalysisType
+
+    from ip_risk_agent.core.risk import absence_can_resolve
+
+    assert absence_can_resolve(AnalysisType.LICENSE, 1) is True
+
+
+def test_the_rule_does_not_reach_the_patent_path() -> None:
+    """문서에서 후보가 사라지는 것은 파싱 손실이 아니라 판정 변화다."""
+    from iprisk_contracts.common import AnalysisType
+
+    from ip_risk_agent.core.risk import absence_can_resolve
+
+    assert absence_can_resolve(AnalysisType.PATENT, 0) is True

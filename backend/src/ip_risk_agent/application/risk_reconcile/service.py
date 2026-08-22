@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -55,6 +56,7 @@ from ip_risk_agent.core.risk import (
     RiskEventType,
     RiskEvidence,
     RiskLifecycleState,
+    absence_can_resolve,
     analysis_is_authoritative,
     decide_lifecycle,
     should_revive,
@@ -73,6 +75,8 @@ from .retention import (
     sanitize_reference,
     sanitize_summary,
 )
+
+logger = logging.getLogger(__name__)
 
 Clock = Callable[[], datetime]
 
@@ -431,6 +435,31 @@ class AnalysisResultIntakeService:
                     )
                 )
             affected.append(risk.id)
+
+        # 0-L — 의존성 파일에서 선언이 통째로 사라진 결과는 해소 권한이 없다.
+        # 읽기가 망가진 것과 사람이 다 지운 것을 지금은 가르지 못하므로, 가르지 못하는
+        # 동안에는 막는 쪽을 고른다. 과경보는 화면에 보이지만 잘못된 해소는 조용하다.
+        if not absence_can_resolve(result.analysis_type, len(result.candidates)):
+            if existing_by_key:
+                logger.warning(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "event": "risk_resolution_withheld",
+                            "reason": "ZERO_DECLARATIONS",
+                            "analysis_type": result.analysis_type.value,
+                            "analysis_job_id": result.analysis_job_id,
+                            "artifact_id": result.artifact_id,
+                            "revision": result.revision,
+                            "coverage": result.coverage.value,
+                            "withheld_risks": len(existing_by_key),
+                        },
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                )
+            existing_by_key = {}
 
         for risk in existing_by_key.values():
             decision = decide_lifecycle(

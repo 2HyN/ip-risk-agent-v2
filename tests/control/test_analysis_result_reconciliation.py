@@ -1189,3 +1189,140 @@ def test_a_document_no_analyzer_handles_finishes_rather_than_looking_unfinished(
             assert job.failure_safe == "ANALYSIS:NOT_APPLICABLE"
 
     run(scenario())
+
+
+# --------------------------------------------------------------------- 0-L
+
+
+def test_zero_declarations_cannot_resolve_a_dependency_files_risks() -> None:
+    """읽기가 망가진 결과가 위험을 "해소" 로 바꾸지 못한다.
+
+    의존성 파일을 읽다가 망가지면 결과가 **선언 0 건**으로 나온다. 조각화도, redaction
+    도, 파서가 삼킨 실패도, 게이트의 절단도 전부 같은 모양이다. 그리고 0 건은 실패가
+    아니라 ``SUCCEEDED`` + ``COMPLETE`` 로 올라와 권위를 얻는다. 그러면 그 파일의 Risk 가
+    전부 닫히고 알림은 0 건이다 — 위험을 놓치는 것이 아니라 **사라졌다고 오보한다.**
+
+    그래서 길마다 막지 않고 결말 하나를 막는다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(
+            store,
+            suffix="zero-1",
+            revision="revision-1",
+            requested=(AnalysisType.LICENSE,),
+        )
+        await service.accept_analysis_result(
+            license_result(job1, "revision-1", started1)
+        )
+        async with store() as uow:
+            risks = await uow.risks.list_for_artifact("artifact-1", AnalysisType.LICENSE)
+            assert len(risks) == 1
+            assert risks[0].lifecycle_state is RiskLifecycleState.NEW
+
+        # 판본이 달라졌고 coverage 도 COMPLETE 다. 그래도 선언이 0 건이면 권위가 없다.
+        job2, started2 = await add_running_job(
+            store,
+            suffix="zero-2",
+            revision="revision-2",
+            requested=(AnalysisType.LICENSE,),
+            offset_seconds=10,
+        )
+        emptied = license_result(job2, "revision-2", started2).model_copy(
+            update={"candidates": [], "evidence": []}
+        )
+        assert emptied.status is AnalysisStatus.SUCCEEDED
+        assert emptied.coverage is AnalysisCoverage.COMPLETE
+
+        acceptance = await service.accept_analysis_result(emptied)
+        assert not acceptance.resolved_risk_ids
+
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.LICENSE)
+            )[0]
+            assert risk.lifecycle_state is not RiskLifecycleState.RESOLVED
+            assert risk.resolved_at is None
+            assert RiskEventType.RESOLVED not in {
+                event.event_type for event in await uow.risks.list_events(risk.id)
+            }
+
+    run(scenario())
+
+
+def test_a_package_removed_from_a_readable_manifest_still_resolves() -> None:
+    """막는 것은 "통째로 0 건" 하나뿐이다.
+
+    선언이 하나라도 나왔다면 파일은 제대로 읽혔고, 그중 어떤 패키지가 목록에서 빠진 것은
+    **사람이 실제로 그 의존성을 지운 것**이다. 그것까지 막으면 정상적인 제거가 영영
+    검토 대기에 남는다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(
+            store,
+            suffix="kept-1",
+            revision="revision-1",
+            requested=(AnalysisType.LICENSE,),
+        )
+        first = license_result(job1, "revision-1", started1)
+        second_candidate = first.candidates[0].model_copy(
+            update={"normalized_package_name": "Other-Package"}
+        )
+        await service.accept_analysis_result(
+            first.model_copy(update={"candidates": [*first.candidates, second_candidate]})
+        )
+        async with store() as uow:
+            assert (
+                len(await uow.risks.list_for_artifact("artifact-1", AnalysisType.LICENSE))
+                == 2
+            )
+
+        # 둘 중 하나만 남았다. 파일은 읽혔으므로 사라진 쪽은 진짜로 지워진 것이다.
+        job2, started2 = await add_running_job(
+            store,
+            suffix="kept-2",
+            revision="revision-2",
+            requested=(AnalysisType.LICENSE,),
+            offset_seconds=10,
+        )
+        acceptance = await service.accept_analysis_result(
+            license_result(job2, "revision-2", started2)
+        )
+        assert len(acceptance.resolved_risk_ids) == 1
+
+    run(scenario())
+
+
+def test_a_patent_document_with_no_candidates_still_resolves() -> None:
+    """0-L 은 의존성 경로에만 건다.
+
+    문서에서 특허 후보가 사라지는 것은 파싱 손실이 아니라 판정 변화다. 그쪽을 함께 막으면
+    정상적인 해소가 전부 멈춘다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(
+            store, suffix="pat-1", revision="revision-1"
+        )
+        await service.accept_analysis_result(patent_result(job1, "revision-1", started1))
+
+        job2, started2 = await add_running_job(
+            store, suffix="pat-2", revision="revision-2", offset_seconds=10
+        )
+        emptied = patent_result(job2, "revision-2", started2).model_copy(
+            update={"candidates": [], "evidence": []}
+        )
+        acceptance = await service.accept_analysis_result(emptied)
+        assert len(acceptance.resolved_risk_ids) == 1
+
+    run(scenario())

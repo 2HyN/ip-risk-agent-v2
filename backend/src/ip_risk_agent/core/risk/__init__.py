@@ -21,6 +21,7 @@ from .models import (
 from .transitions import (
     LifecycleDecision,
     ReviewDecision,
+    absence_can_resolve,
     analysis_is_authoritative,
     ExclusionDecision,
     decide_exclusion,
@@ -41,6 +42,7 @@ __all__ = [
     "RiskEventType",
     "RiskEvidence",
     "RiskLifecycleState",
+    "absence_can_resolve",
     "analysis_is_authoritative",
     "ExclusionDecision",
     "decide_exclusion",

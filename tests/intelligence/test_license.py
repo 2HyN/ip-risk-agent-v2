@@ -324,3 +324,73 @@ def test_npm_lockfile_artifact_is_analyzed():
     assert result.candidates[0].normalized_package_name == "express"
     assert result.candidates[0].resolved_version == "4.19.2"
     assert result.candidates[0].ecosystem == Ecosystem.NPM.value
+
+
+# ----------------------------------------------------------------- 0-I 로그
+
+
+def test_the_license_path_reports_what_it_read(caplog):
+    """이 경로에 로그가 한 줄도 없어서 20 → 3 손실이 운영에서 안 보였다.
+
+    조각 수·선언 수·후보 수를 나란히 남기면 그 손실이 한 줄에서 드러난다.
+    """
+    import json
+
+    with caplog.at_level("INFO", logger="ip_risk_agent.intelligence.license.analyzer"):
+        run(LicenseAnalyzer(PROVIDER).analyze(make_artifact("requests==2.32.3")))
+
+    lines = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{")
+    ]
+    diagnostics = [
+        line for line in lines if line.get("event") == "license_analysis_diagnostic"
+    ]
+    assert len(diagnostics) == 1
+    entry = diagnostics[0]
+    assert entry["segment_count"] == 1
+    assert entry["declaration_count"] == 1
+    assert entry["candidate_count"] == 1
+    assert entry["dependency_format"] == "REQUIREMENTS_TXT"
+    assert entry["artifact_id"] == "artifact-1"
+    assert entry["revision"] == "rev-1"
+
+
+def test_a_file_that_declared_nothing_is_reported_before_it_returns(caplog):
+    """0 건으로 나가는 자리가 조용한 오보가 시작되는 곳이다. 반드시 남긴다."""
+    import json
+
+    with caplog.at_level("INFO", logger="ip_risk_agent.intelligence.license.analyzer"):
+        result = run(LicenseAnalyzer(PROVIDER).analyze(make_artifact("# 주석뿐이다\n")))
+
+    assert not result.candidates
+    entry = next(
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{")
+        and json.loads(record.message).get("event") == "license_analysis_diagnostic"
+    )
+    assert entry["declaration_count"] == 0
+    assert entry["candidate_count"] == 0
+
+
+def test_the_diagnostic_carries_no_package_name_and_no_path(caplog):
+    """패키지 이름도 파일 경로도 사용자 소스에서 온 내용이라 로그에 넣지 않는다.
+
+    되짚을 수단은 남긴다 — ``artifact_id`` 와 ``revision`` 으로 canonical 저장소에서
+    어느 파일인지 찾을 수 있고, 로그 자체는 내용을 담지 않는다.
+    """
+    with caplog.at_level("INFO", logger="ip_risk_agent.intelligence.license.analyzer"):
+        run(
+            LicenseAnalyzer(PROVIDER).analyze(
+                make_artifact("requests==2.32.3", logical_path="deps/api/requirements.txt")
+            )
+        )
+
+    emitted = " ".join(
+        record.message for record in caplog.records if record.message.startswith("{")
+    )
+    assert "requests" not in emitted
+    assert "deps/api" not in emitted
+    assert "requirements.txt" not in emitted
