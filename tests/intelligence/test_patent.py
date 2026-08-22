@@ -649,6 +649,7 @@ def test_the_priority_diagnostic_separates_the_three_paths_to_medium(caplog):
             "has_claim_evidence",
             "caveat_count",
             "evidence_truncated",
+            "evidence_strength",
             "segment_count",
             "distinct_segments",
             "priority",
@@ -951,3 +952,50 @@ def test_the_offline_corpus_is_never_wired_into_production():
 
     source = Path(production.__file__).read_text(encoding="utf-8")
     assert "offline_corpus" not in source
+
+
+def test_the_evidence_strength_score_is_recorded_but_does_not_judge():
+    """점수를 먼저 관측만 하면 되돌릴 것이 없다 (설계 노트 §6-3).
+
+    라벨을 모으기 전의 가중치는 사람이 정한 값이라 판정에 쓸 근거가 없다.
+    """
+    from ip_risk_agent.intelligence.patent.score import (
+        SCORE_VERSION,
+        evidence_strength,
+    )
+
+    weak = evidence_strength(
+        matched_elements=1, extracted_elements=8,
+        claim_backed_evidence=0, patent_evidence=1,
+        answered_queries=1, total_queries=5,
+    )
+    strong = evidence_strength(
+        matched_elements=6, extracted_elements=6,
+        claim_backed_evidence=3, patent_evidence=3,
+        answered_queries=5, total_queries=5,
+    )
+    assert 0.0 <= weak.score < strong.score <= 1.0
+    assert strong.score == 1.0
+    assert weak.as_metadata()["score_version"] == SCORE_VERSION
+
+    # 분모가 0 이어도 터지지 않는다. 다만 그것은 "모른다" 이지 "낮다" 가 아니므로
+    # 호출자가 분모 0 을 만들지 않아야 한다 (§4.1).
+    unknown = evidence_strength(
+        matched_elements=0, extracted_elements=0,
+        claim_backed_evidence=0, patent_evidence=0,
+        answered_queries=0, total_queries=0,
+    )
+    assert unknown.score == 0.0
+
+
+def test_the_score_reaches_the_candidate_metadata_without_changing_the_grade():
+    analyzer = make_analyzer([extraction(), comparison(PATENT_A), comparison(PATENT_B)])
+    result = run(analyzer.analyze(patent_artifact()))
+    assert result.candidates
+    for candidate in result.candidates:
+        meta = candidate.provider_metadata_safe
+        assert "evidence_strength" in meta
+        assert "score_version" in meta
+        assert 0.0 <= float(meta["evidence_strength"]) <= 1.0
+        # 등급은 여전히 규칙이 정한다.
+        assert candidate.suggested_review_priority in set(ReviewPriority)

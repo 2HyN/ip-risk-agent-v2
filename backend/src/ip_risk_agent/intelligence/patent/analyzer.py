@@ -34,6 +34,7 @@ from . import evidence_builder, grounding
 from .candidate_rank import DEFAULT_CANDIDATE_CAP, RankedCandidate, rank_candidates
 from .extraction import TechnicalExtractor, render_segments
 from .kipris import PatentDocument, PatentSearchProvider
+from .score import evidence_strength
 from .query_builder import run_searches
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ def _priority_diagnostic(
     has_claim_evidence: bool,
     caveat_count: int,
     evidence_truncated: bool,
+    evidence_strength: float,
     segment_count: int,
     distinct_segments: int,
     priority: str,
@@ -88,6 +90,7 @@ def _priority_diagnostic(
                 "has_claim_evidence": has_claim_evidence,
                 "caveat_count": caveat_count,
                 "evidence_truncated": evidence_truncated,
+                "evidence_strength": evidence_strength,
                 "segment_count": segment_count,
                 "distinct_segments": distinct_segments,
                 "priority": priority,
@@ -213,7 +216,14 @@ class PatentAnalyzer:
             document = documents.get(candidate.application_number)
             if document is None or not document.has_content:
                 continue
-            evaluated = await self._compare(artifact, candidate, document, builder)
+            evaluated = await self._compare(
+                artifact,
+                candidate,
+                document,
+                builder,
+                extracted_elements=len(extraction.technical_elements),
+                total_queries=len(extraction.search_queries),
+            )
             if evaluated is not None:
                 assessed += 1
                 if evaluated.matched_elements:
@@ -258,6 +268,9 @@ class PatentAnalyzer:
         candidate: RankedCandidate,
         document: PatentDocument,
         builder: ResultBuilder,
+        *,
+        extracted_elements: int,
+        total_queries: int,
     ):
         """특허 한 건과 대조한다. 실패하면 None 을 돌려 미판정으로 남긴다."""
         evidence = evidence_builder.build_patent_evidence(document, builder.ledger)
@@ -288,6 +301,21 @@ class PatentAnalyzer:
             return None
 
         priority = grounding.suggested_priority(grounded)
+        # 점수는 관측만 한다. 판정은 위 규칙이 하고 이 값은 기록만 된다 (설계 노트 §6-3).
+        strength = evidence_strength(
+            matched_elements=grounded.match_count,
+            extracted_elements=extracted_elements,
+            claim_backed_evidence=sum(
+                1
+                for evidence_id in grounded.evidence_ids
+                if evidence.types.get(evidence_id) is EvidenceType.PATENT_CLAIM
+            ),
+            patent_evidence=sum(
+                1 for evidence_id in grounded.evidence_ids if evidence_id in evidence.types
+            ),
+            answered_queries=len(candidate.matched_queries),
+            total_queries=total_queries,
+        )
         _priority_diagnostic(
             match_count=grounded.match_count,
             has_claim_evidence=grounded.has_claim_evidence,
@@ -298,6 +326,7 @@ class PatentAnalyzer:
                 1 for value in grounded.evidence_ids if value.startswith("src:")
             ),
             priority=priority.value,
+            evidence_strength=strength.score,
         )
         return _Evaluated(
             matched_elements=grounded.matched_elements,
@@ -312,6 +341,7 @@ class PatentAnalyzer:
                     "matched_queries": candidate.matched_queries,
                     "review_caveats": grounded.review_caveats,
                     "evidence_truncated": grounded.evidence_truncated,
+                    **strength.as_metadata(),
                     "has_claim_evidence": grounded.has_claim_evidence,
                 },
             ),
