@@ -36,7 +36,9 @@ from __future__ import annotations
 
 import re
 
-from iprisk_contracts.common import SegmentKind, TextSegment
+from iprisk_contracts.common import ArtifactKind, SegmentKind, TextSegment
+
+from ...core.artifacts.dependency_files import DEPENDENCY_KINDS
 
 #: 이보다 작은 블록은 앞 조각에 붙인다. 한두 줄짜리 조각은 문맥이 되지 못한다.
 MIN_SEGMENT_CHARS = 160
@@ -53,8 +55,60 @@ _FENCE = re.compile(r"^\s*(```|~~~)")
 _SENTENCE_END = re.compile(r"(?<=[.!?。？！])\s+|(?<=다\.)\s+|\n")
 
 
+def whole_document(text: str) -> list[TextSegment]:
+    """통짜 한 조각. 나누면 읽을 수 없게 되는 문서에 쓴다."""
+    lines = text.splitlines()
+    if not any(line.strip() for line in lines):
+        return []
+    return [
+        TextSegment(
+            segment_id="full",
+            text=text,
+            line_start=1,
+            line_end=max(len(lines), 1),
+            segment_kind=SegmentKind.FULL,
+        )
+    ]
+
+
+def segments_for(text: str, artifact_kind: ArtifactKind) -> list[TextSegment]:
+    """종류에 맞는 조각을 만든다. 커넥터는 이것을 부른다.
+
+    ## 왜 종류를 봐야 하는가
+
+    조각화는 **산문**을 위해 만들어졌다. 특허 대조가 "이 문서 어딘가" 가 아니라 매칭된
+    문단을 가리킬 수 있게 하려는 것이다. 그런데 세 커넥터가 종류를 가리지 않고 적용해서
+    **의존성 파일까지 조각났다.**
+
+    의존성 파일은 나누면 읽을 수 없다. 파서는 조각마다 따로 도는데, ``pyproject.toml``
+    을 빈 줄에서 자르면 ``[project]`` 표 밖에 떨어진 줄은 어느 표에 속했는지 알 수 없고,
+    ``package.json`` 을 자르면 그냥 깨진 JSON 이다. 실측이 그대로다.
+
+    ```
+    pyproject.toml   통짜 20 건  →  조각 경유 3 건
+    package.json     통짜  1 건  →  조각 경유 0 건
+    ```
+
+    그리고 0 건은 실패가 아니라 ``SUCCEEDED`` + ``COMPLETE`` 로 올라가 **기존 Risk 를
+    해소한다.** 위험을 놓치는 것이 아니라 사라졌다고 오보하는 것이다.
+
+    ## 잃는 것
+
+    의존성 파일에서는 줄 단위 근거를 못 가리킨다. 아깝지 않다 — 그쪽 근거는 원문 인용이
+    아니라 **패키지와 라이선스**이고, 그것은 파서가 이미 정확히 안다. 조각으로 얻을 것이
+    애초에 없었다.
+    """
+    if artifact_kind in DEPENDENCY_KINDS:
+        return whole_document(text)
+    return split_document(text)
+
+
 def split_document(text: str) -> list[TextSegment]:
-    """문서를 검토 단위 조각으로 나눈다. 빈 문서면 빈 목록을 돌려준다."""
+    """문서를 검토 단위 조각으로 나눈다. 빈 문서면 빈 목록을 돌려준다.
+
+    산문과 소스 코드에만 쓴다. 의존성 파일은 :func:`whole_document` 로 간다 —
+    고르는 것은 :func:`segments_for` 다.
+    """
     lines = text.splitlines()
     if not any(line.strip() for line in lines):
         return []
@@ -195,5 +249,7 @@ __all__ = [
     "MAX_SEGMENTS",
     "MAX_SEGMENT_CHARS",
     "MIN_SEGMENT_CHARS",
+    "segments_for",
     "split_document",
+    "whole_document",
 ]

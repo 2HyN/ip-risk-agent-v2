@@ -35,7 +35,7 @@ from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
-from ..common.segmentation import split_document
+from ..common.segmentation import segments_for
 from ..common.credential_vault import SourceCredentialVault
 from ..common.errors import (
     AuthRequiredError,
@@ -192,7 +192,7 @@ class GoogleDriveAdapter:
         text = provider.read_text(file_id, drive_file.mime_type)
         await self._persist_refreshed_token(connection, provider)
 
-        segments = split_document(text)
+        segments = segments_for(text, self._infer_artifact_kind(drive_file.name))
         checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
         receipt = build_access_receipt(
             SourceAccessType.FULL_CONTENT, content_bytes=bytes_of_text(text)

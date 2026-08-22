@@ -181,3 +181,67 @@ def test_the_gate_never_sends_a_file_where_no_analyzer_will_take_it(
             f"{source} 가 {name!r} 을 {kind.value} 로 두어 관문이 "
             f"{analysis_type.value} 를 요청했는데 그 분석기가 맡지 않는다"
         )
+
+
+# --------------------------------------------------------------------- 0-A
+
+
+@pytest.mark.parametrize("name", READABLE)
+def test_a_dependency_file_reaches_the_analyzer_whole(name: str) -> None:
+    """조각내면 읽을 수 없다.
+
+    ``pyproject.toml`` 을 빈 줄에서 자르면 ``[project]`` 표 밖에 떨어진 줄이 어느 표에
+    속했는지 알 수 없고, ``package.json`` 조각은 그냥 깨진 JSON 이다. 실측에서 20 건이
+    3 건으로, 1 건이 0 건으로 줄었다.
+    """
+    from iprisk_contracts.common import ArtifactKind
+
+    from ip_risk_agent.connectors.common.segmentation import segments_for
+
+    for kind in (ArtifactKind.MANIFEST, ArtifactKind.LOCKFILE):
+        segments = segments_for("[project]\nname = 'x'\n\ndependencies = ['a==1']\n", kind)
+        assert len(segments) == 1
+        assert segments[0].segment_id == "full"
+
+
+def test_prose_is_still_split_so_patent_evidence_can_point() -> None:
+    """조각화 자체를 되돌리는 것이 아니다.
+
+    특허 근거가 "이 문서 어딘가" 가 아니라 매칭된 문단을 가리키려면 산문은 나뉘어야
+    한다. 종류로 가를 뿐이다.
+    """
+    from iprisk_contracts.common import ArtifactKind
+
+    from ip_risk_agent.connectors.common.segmentation import segments_for
+
+    # 조각이 MIN_SEGMENT_CHARS(160) 보다 작으면 앞 조각에 붙으므로 넉넉히 만든다.
+    paragraph = "이것은 검토 단위가 될 만큼 충분히 긴 문단이다. " * 12
+    prose = "\n\n".join(f"{index} 번째 문단. {paragraph}" for index in range(4))
+    segments = segments_for(prose, ArtifactKind.DOCUMENT_TEXT)
+    assert len(segments) > 1
+
+
+def test_a_manifest_survives_the_round_trip_that_used_to_lose_it() -> None:
+    """이 저장소 자신의 매니페스트로 잰다 — 재현에 쓴 것과 같은 파일이다."""
+    from pathlib import Path
+
+    from iprisk_contracts.common import ArtifactKind
+
+    from ip_risk_agent.connectors.common.segmentation import segments_for, split_document
+    from ip_risk_agent.intelligence.license.analyzer import _select_parser
+
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    parser = _select_parser("pyproject.toml")
+
+    whole = len(parser(text, "pyproject.toml"))
+    through_segments = sum(
+        len(parser(segment.text, "pyproject.toml")) for segment in split_document(text)
+    )
+    now = sum(
+        len(parser(segment.text, "pyproject.toml"))
+        for segment in segments_for(text, ArtifactKind.MANIFEST)
+    )
+
+    assert whole > through_segments, "재현 조건이 사라졌다면 이 시험은 뜻이 없다"
+    assert now == whole

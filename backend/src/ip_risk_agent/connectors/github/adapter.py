@@ -30,7 +30,7 @@ from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
-from ..common.segmentation import split_document
+from ..common.segmentation import segments_for
 from ..common.fingerprint import github_change_fingerprint
 from ..common.errors import (
     AuthRequiredError,
@@ -137,7 +137,9 @@ class GitHubAdapter:
                 change, resolved_revision=change.revision or file_content.sha
             )
 
-        segments = split_document(file_content.text)
+        segments = segments_for(
+            file_content.text, self._infer_artifact_kind(identity.path)
+        )
         checksum = hashlib.sha256(file_content.text.encode("utf-8")).hexdigest()
         receipt = build_access_receipt(
             SourceAccessType.FULL_CONTENT, content_bytes=bytes_of_text(file_content.text)

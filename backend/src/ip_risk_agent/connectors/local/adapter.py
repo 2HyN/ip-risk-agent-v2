@@ -27,7 +27,7 @@ from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
-from ..common.segmentation import split_document
+from ..common.segmentation import segments_for
 from ..common.errors import NotFoundError, SourceConnectorError, UnsupportedContentError
 from ..common.runtime_store import LocalConnectionStatus, LocalRuntime
 from .device_lookup import LocalDeviceLookup
@@ -84,7 +84,9 @@ class LocalAdapter:
         ref = StagingRef(object_name=staging_object_name)
         text = await self._staging_store.get(ref)
 
-        segments = split_document(text)
+        segments = segments_for(
+            text, self._infer_artifact_kind(change.artifact.display_name)
+        )
         checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
         receipt = build_access_receipt(
             SourceAccessType.FULL_CONTENT, content_bytes=bytes_of_text(text)

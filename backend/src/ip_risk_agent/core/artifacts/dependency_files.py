@@ -31,6 +31,15 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from iprisk_contracts.common import ArtifactKind
+
+#: 의존성 선언을 담은 종류. 커넥터가 이 종류로 분류한 것만 License 분석기가 맡는다.
+#:
+#: 여기 두는 이유는 이 표를 보는 곳이 셋이기 때문이다 — 커넥터가 종류를 정할 때,
+#: 분석기가 맡을지 고를 때, 그리고 **조각내지 않고 통짜로 넘길지 정할 때**
+#: (``connectors.common.segmentation``).
+DEPENDENCY_KINDS = frozenset({ArtifactKind.MANIFEST, ArtifactKind.LOCKFILE})
+
 #: ``requirements`` 로 시작하면 모두 같은 형식이다 — ``requirements-dev.txt``,
 #: ``requirements.in`` 처럼 쓰는 관행이 넓다.
 _REQUIREMENTS_PREFIX = "requirements"
