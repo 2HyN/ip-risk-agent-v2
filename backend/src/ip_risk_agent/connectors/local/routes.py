@@ -171,7 +171,10 @@ def create_local_desktop_router(
             ),
             previous_artifact=previous_artifact,
             change_type=ChangeType[event.change_type],
-            revision=event.revision,
+            # Local 에는 provider 가 주는 판본이 없다. 기기가 내용 해시를 보내고,
+            # 지운 경우처럼 내용이 없을 때는 fingerprint 가 이미 쓰고 있는 표시를
+            # 그대로 쓴다. 판본이 비면 계약이 변경 자체를 거절한다.
+            revision=event.revision or content_marker,
             observed_at=datetime.now(timezone.utc),
             safe_metadata=safe_metadata,
         )

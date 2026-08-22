@@ -80,7 +80,7 @@ export class DesktopEventReporter {
 
   async report(event: LocalChangeEvent): Promise<void> {
     if (event.changeType === "DELETE") {
-      await this.postEvent(event.relativePath, "DELETE", undefined, undefined);
+      await this.postEvent(event.relativePath, "DELETE", undefined, undefined, undefined);
       return;
     }
 
@@ -102,7 +102,8 @@ export class DesktopEventReporter {
       event.relativePath,
       event.changeType,
       stagingResponse.object_name,
-      event.changeType === "MOVE" ? event.previousRelativePath : undefined
+      event.changeType === "MOVE" ? event.previousRelativePath : undefined,
+      event.contentHash
     );
   }
 
@@ -110,7 +111,8 @@ export class DesktopEventReporter {
     relativePath: string,
     changeType: LocalChangeType,
     stagingObjectName: string | undefined,
-    previousRelativePath: string | undefined
+    previousRelativePath: string | undefined,
+    revision: string | undefined
   ): Promise<void> {
     await this.http.postJson("/desktop/events", {
       risk_workspace_id: this.config.riskWorkspaceId,
@@ -121,6 +123,8 @@ export class DesktopEventReporter {
       change_type: changeType,
       staging_object_name: stagingObjectName,
       previous_relative_path: previousRelativePath,
+      // Local 에는 provider 판본이 없다. 내용 해시가 그 자리다.
+      revision,
     });
   }
 }

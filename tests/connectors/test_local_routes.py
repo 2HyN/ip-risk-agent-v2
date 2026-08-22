@@ -332,3 +332,66 @@ def test_mount_registration_authz_uses_risk_workspace_id():
     )
 
     assert seen == ["rw-target"]
+
+
+def test_every_change_carries_a_revision_even_without_one_from_the_device():
+    """판본이 비면 intake 가 변경 자체를 거절한다.
+
+    가짜 sink 는 그 검증을 하지 않으므로 라우트 시험만으로는 드러나지 않았다.
+    실제로는 데스크톱이 보낸 이벤트가 전부 422 로 죽었고
+    (`source_change.revision-must-not-be-empty`), 폴더를 연결해도 파일이 하나도
+    보이지 않았다. 그래서 라우트가 **무엇을 내놓는지**를 직접 본다.
+    """
+    client, _staging, sink, _, _ = _build_client()
+
+    upload = client.post("/desktop/staging", json={"mount_id": "mount-1", "content": "print(1)"})
+    created = client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-1",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/main.py",
+            "change_type": "UPDATE",
+            "staging_object_name": upload.json()["object_name"],
+        },
+    )
+    deleted = client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-1",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/gone.py",
+            "change_type": "DELETE",
+        },
+    )
+
+    assert created.status_code == 200
+    assert deleted.status_code == 200
+    for change in sink.received:
+        assert change.revision, f"{change.change_type} 이 판본 없이 나갔다"
+
+
+def test_the_device_revision_is_used_when_it_sends_one():
+    """기기는 내용 해시를 보낸다. 같은 내용이면 같은 판본이어야 중복이 걸러진다."""
+    client, _staging, sink, _, _ = _build_client()
+
+    upload = client.post("/desktop/staging", json={"mount_id": "mount-1", "content": "print(1)"})
+    client.post(
+        "/desktop/events",
+        json={
+            "risk_workspace_id": "rw1",
+            "mount_id": "mount-1",
+            "source_workspace_id": "sw1",
+            "device_id": "dev-1",
+            "relative_path": "src/main.py",
+            "change_type": "UPDATE",
+            "revision": "sha256-of-content",
+            "staging_object_name": upload.json()["object_name"],
+        },
+    )
+
+    assert sink.received[-1].revision == "sha256-of-content"

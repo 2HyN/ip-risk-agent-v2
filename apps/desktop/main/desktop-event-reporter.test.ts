@@ -111,3 +111,31 @@ test("silently ignores a file that disappeared before it could be read", async (
 
   assert.equal(http.calls.length, 0);
 });
+
+test("내용 해시를 판본으로 함께 보낸다", async () => {
+  // Local 에는 provider 판본이 없다. 아무것도 보내지 않으면 서버가 변경을 거절
+  // 한다 — 데스크톱이 보낸 이벤트가 전부 그렇게 422 로 죽었다.
+  //
+  // staging 객체 이름은 올릴 때마다 무작위라 그 자리를 대신할 수 없다. 내용
+  // 해시여야 같은 내용이 같은 판본으로 수렴해 중복이 걸러진다.
+  const root = mkdtempSync(join(tmpdir(), "iprisk-reporter-"));
+  try {
+    const filePath = join(root, "main.py");
+    writeFileSync(filePath, "print(1)");
+
+    const http = new FakeHttpClient();
+    const reporter = new DesktopEventReporter(http, config());
+
+    await reporter.report({
+      relativePath: "main.py",
+      changeType: "CREATE",
+      absolutePath: filePath,
+      contentHash: "sha256-of-print-1",
+    });
+
+    const eventBody = http.calls[1]?.body as Record<string, unknown>;
+    assert.equal(eventBody["revision"], "sha256-of-print-1");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

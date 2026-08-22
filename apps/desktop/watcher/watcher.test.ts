@@ -264,3 +264,79 @@ test("respects source-level .ipriskignore for newly created files", async () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("첫 훑기에서는 이미 있던 파일도 보고한다", async () => {
+  // 폴더를 연결했는데 파일이 하나도 보이지 않던 원인이다. 감시는 준비되기 전의
+  // add 를 버리는데(다시 켤 때마다 전부 다시 올라오는 것을 막는다), 처음 붙일
+  // 때는 그 규칙 때문에 아무것도 올라가지 않았다.
+  const root = mkdtempSync(join(tmpdir(), "iprisk-watch-"));
+  writeFileSync(join(root, "main.py"), "print(1)");
+  writeFileSync(join(root, "design.md"), "# 설계\n");
+  writeFileSync(join(root, "notes.bin"), "binary");
+  await delay(200);
+
+  const events: LocalChangeEvent[] = [];
+  const handle = await startLocalWatcher(root, (e) => events.push(e), {
+    debounceMs: TEST_DEBOUNCE_MS,
+    moveCorrelationWindowMs: TEST_MOVE_WINDOW_MS,
+    emitExisting: true,
+  });
+
+  try {
+    await delay(TEST_DEBOUNCE_MS + 400);
+    const reported = events.map((event) => event.relativePath).sort();
+    // 감시 대상만 올라온다. .bin 은 코드도 문서도 아니다.
+    assert.deepEqual(reported, ["design.md", "main.py"]);
+    assert.ok(events.every((event) => event.changeType === "CREATE"));
+  } finally {
+    await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("다시 켤 때는 이미 있던 파일을 다시 보고하지 않는다", async () => {
+  // 켤 때마다 전부 다시 올라오면 같은 내용을 계속 올려 보내게 된다.
+  const root = mkdtempSync(join(tmpdir(), "iprisk-watch-"));
+  writeFileSync(join(root, "main.py"), "print(1)");
+  await delay(200);
+
+  const events: LocalChangeEvent[] = [];
+  const handle = await startLocalWatcher(root, (e) => events.push(e), {
+    debounceMs: TEST_DEBOUNCE_MS,
+    moveCorrelationWindowMs: TEST_MOVE_WINDOW_MS,
+  });
+
+  try {
+    await delay(TEST_DEBOUNCE_MS + 400);
+    assert.deepEqual(events, []);
+  } finally {
+    await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("하위 폴더 파일의 상대 경로는 슬래시로 온다", async () => {
+  // Windows 의 path.relative 는 `docs\design.md` 를 준다. 서버는 provider 상대
+  // 경로만 받고 역슬래시를 거부하므로, 그대로 보내면 하위 폴더 파일만 422 로
+  // 죽는다 — 루트 파일은 구분자가 없어 우연히 통과한다. 실제로 그 상태로
+  // 폴더를 붙여 놓고 파일이 하나도 보이지 않았다.
+  const root = mkdtempSync(join(tmpdir(), "iprisk-watch-"));
+  mkdirSync(join(root, "docs"));
+  const handle = await startLocalWatcher(root, (e) => events.push(e), {
+    debounceMs: TEST_DEBOUNCE_MS,
+    moveCorrelationWindowMs: TEST_MOVE_WINDOW_MS,
+  });
+  const events: LocalChangeEvent[] = [];
+
+  try {
+    writeFileSync(join(root, "docs", "design.md"), "# 설계\n");
+    await delay(TEST_DEBOUNCE_MS + 300);
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.relativePath, "docs/design.md");
+    assert.ok(!events[0]?.relativePath.includes("\\"));
+  } finally {
+    await handle.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

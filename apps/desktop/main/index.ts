@@ -60,9 +60,31 @@ async function bootstrap(): Promise<void> {
       deviceId: record.deviceId,
     });
     const queue = new RetryingDesktopEventQueue(reporter);
-    const handle = await startLocalWatcher(record.canonicalRootPath, (event) => {
-      queue.enqueue(event);
-    });
+    // 폴더에 **이미 있던** 파일도 매번 보고한다. 그러지 않으면 폴더를 연결해도
+    // 그 뒤에 고친 파일만 올라간다 — 붙였는데 아무것도 보이지 않는 상태가
+    // 그것이었다.
+    //
+    // "한 번만 훑었다" 고 표시해 두는 방법은 쓰지 않는다. 표시하는 시점에는 아직
+    // 전달됐는지 알 수 없고(큐가 재시도 중일 수 있다), 그 사이 앱이 닫히면 그
+    // 파일들은 **영영 올라가지 않는다.** 실제로 그렇게 잃었다.
+    //
+    // 대신 서버가 fingerprint 로 중복을 걸러 준다 — 같은 내용이면 같은 변경으로
+    // 수렴해 다시 분석하지 않는다. 대가는 앱을 켤 때마다 내용을 다시 올린다는
+    // 것이고, 감시 대상이 코드와 문서로 좁혀져 있어 지금은 감당할 만하다.
+
+    // 감시가 시작됐는지, 무엇을 집었는지 알 길이 없었다. 경로는 적지 않는다 —
+    // 사용자의 폴더 안이다.
+    let reported = 0;
+    const handle = await startLocalWatcher(
+      record.canonicalRootPath,
+      (event) => {
+        reported += 1;
+        console.log(`local watcher: ${event.changeType} (${reported} so far)`);
+        queue.enqueue(event);
+      },
+      { emitExisting: true },
+    );
+    console.log(`local watcher started for mount ${record.serverMountId}`);
     activeWatchers.set(record.localMountHandle, handle);
     eventQueues.set(record.localMountHandle, queue);
   };

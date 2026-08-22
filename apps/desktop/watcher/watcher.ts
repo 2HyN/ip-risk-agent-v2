@@ -14,7 +14,7 @@
 import chokidar, { type FSWatcher } from "chokidar";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { relative } from "node:path";
+import { relative, sep } from "node:path";
 
 import { DEBOUNCE_MS, MAX_FILE_BYTES, isWatchedPath } from "./filters.js";
 import { isDeniedByIpriskignore, loadIpriskignorePatterns } from "./ipriskignore.js";
@@ -27,12 +27,35 @@ export interface LocalChangeEvent {
   changeType: LocalChangeType;
   absolutePath: string;
   previousRelativePath?: string;
+  /**
+   * 이 판본을 가리키는 값. 내용의 SHA-256 이다.
+   *
+   * Local 에는 provider 가 주는 판본 번호가 없다. 내용 해시가 그 자리를 대신한다 —
+   * 같은 내용이면 같은 판본이므로 앱을 다시 켜서 같은 파일을 또 올려도 **같은
+   * 변경으로 수렴한다.** staging 객체 이름은 올릴 때마다 무작위로 붙으므로 그 자리를
+   * 대신할 수 없다.
+   *
+   * 지워진 파일에는 없다. 내용이 이미 사라졌기 때문이다.
+   */
+  contentHash?: string;
 }
 
 export interface LocalWatcherOptions {
   debounceMs?: number;
   maxFileBytes?: number;
   moveCorrelationWindowMs?: number;
+  /**
+   * 폴더에 **이미 있던** 파일도 보고할 것인가.
+   *
+   * 감시는 준비되기 전의 `add` 를 버린다 — 앱을 다시 켤 때마다 이미 보고한 파일이
+   * 전부 다시 올라오는 것을 막기 위해서다. 그런데 **처음 연결할 때는** 그 규칙
+   * 때문에 아무것도 올라가지 않는다. 폴더를 붙였는데 파일이 하나도 보이지 않는
+   * 상태가 그것이었다.
+   *
+   * GitHub 은 마운트 시점에 저장소를 훑는 별도 경로(`initial_changes`)가 있다.
+   * Local 은 그 자리가 비어 있어 여기서 채운다.
+   */
+  emitExisting?: boolean;
 }
 
 export interface LocalWatcherHandle {
@@ -79,6 +102,7 @@ export async function startLocalWatcher(
   const debounceMs = options.debounceMs ?? DEBOUNCE_MS;
   const maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
   const moveCorrelationWindowMs = options.moveCorrelationWindowMs ?? DEFAULT_MOVE_CORRELATION_WINDOW_MS;
+  const emitExisting = options.emitExisting ?? false;
 
   // Source-level .ipriskignore (Agent2 Spec §28). watcher 시작 시 한 번만
   // 로드한다 — 파일이 없으면 빈 목록(제약 없음)이 조용히 반환된다.
@@ -97,8 +121,19 @@ export async function startLocalWatcher(
 
   let isReady = false;
 
+  /**
+   * 감시 뿌리 기준 상대 경로. **구분자는 항상 `/`** 다.
+   *
+   * Windows 에서 `path.relative` 는 `docs\design.md` 처럼 역슬래시를 준다. 서버는
+   * provider 상대 경로만 받고 역슬래시를 거부하므로, 그대로 보내면 **하위 폴더에
+   * 있는 파일만** 422 로 죽는다 — 루트 파일은 구분자가 없어 우연히 통과해서
+   * 폴더를 붙여 보고도 한참 모른 채 지나간다.
+   */
+  const toRelativePath = (absolutePath: string): string =>
+    relative(canonicalRoot, absolutePath).split(sep).join("/");
+
   const warmCacheFor = (absolutePath: string): void => {
-    const relativePath = relative(canonicalRoot, absolutePath);
+    const relativePath = toRelativePath(absolutePath);
     if (!isPathAllowed(relativePath)) {
       return;
     }
@@ -164,13 +199,19 @@ export async function startLocalWatcher(
           changeType: "MOVE",
           absolutePath: entry.absolutePath,
           previousRelativePath: matchedDelete.relativePath,
+          contentHash: hash,
         });
         return;
       }
     }
 
     contentHashCache.set(relativePath, hash);
-    onChange({ relativePath, changeType: entry.changeType, absolutePath: entry.absolutePath });
+    onChange({
+      relativePath,
+      changeType: entry.changeType,
+      absolutePath: entry.absolutePath,
+      contentHash: hash,
+    });
   };
 
   const schedule = (relativePath: string, changeType: PendingChangeType, absolutePath: string): void => {
@@ -183,12 +224,12 @@ export async function startLocalWatcher(
   };
 
   const handleRawEvent = (rawEvent: RawEvent, absolutePath: string): void => {
-    if (!isReady && rawEvent === "add") {
+    if (!isReady && rawEvent === "add" && !emitExisting) {
       warmCacheFor(absolutePath);
       return;
     }
 
-    const relativePath = relative(canonicalRoot, absolutePath);
+    const relativePath = toRelativePath(absolutePath);
 
     if (!isPathAllowed(relativePath)) {
       return;
