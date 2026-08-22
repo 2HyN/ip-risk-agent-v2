@@ -426,3 +426,68 @@ def test_the_diagnostic_carries_no_package_name_and_no_path(caplog):
     assert "requests" not in emitted
     assert "deps/api" not in emitted
     assert "requirements.txt" not in emitted
+
+
+# ----------------------------------------------------------------- 0-D
+
+
+def test_a_truncated_manifest_is_not_reported_as_complete():
+    """줄 지향 파일은 잘려도 파서가 아무 말을 안 한다.
+
+    깨진 JSON·TOML 은 §6.6 이 잡는다. 그런데 ``requirements.txt`` 는 뒤가 잘려도 앞부분이
+    멀쩡한 파일처럼 읽힌다 — 선언 스무 개 중 여덟만 나오고 그것이 `COMPLETE` 로 올라가
+    나머지 열둘의 Risk 가 해소된다. `content_scope` 가 그 사실을 들고 있는데 분석기가
+    읽지 않고 있었다.
+    """
+    from iprisk_contracts.common import AnalysisCoverage, ContentScope
+
+    artifact = make_artifact("requests==2.32.3")
+    cut = artifact.model_copy(
+        update={"content_scope": ContentScope.CHANGESET_WITH_CONTEXT}
+    )
+
+    whole = run(LicenseAnalyzer(PROVIDER).analyze(artifact))
+    partial = run(LicenseAnalyzer(PROVIDER).analyze(cut))
+
+    assert whole.coverage is AnalysisCoverage.COMPLETE
+    assert partial.coverage is AnalysisCoverage.PARTIAL
+    # 후보는 그대로 나온다 — 읽은 것까지는 사실이다. 권위만 잃는다.
+    assert len(partial.candidates) == len(whole.candidates)
+
+
+def test_a_dependency_file_gets_room_that_prose_does_not():
+    """락파일은 크다. 산문 상한으로 자르면 깨진 JSON 이라 한 건도 못 읽는다.
+
+    산문 상한이 작은 것은 그 내용이 provider 로 나가기 때문인데, 라이선스 경로는 파일
+    내용을 아무 데도 보내지 않는다 — 패키지 이름과 버전만 레지스트리에 묻는다.
+    """
+    from iprisk_contracts.common import ArtifactKind, ContentScope, SegmentKind, TextSegment
+
+    from ip_risk_agent.application.security_gate.minimization import minimize_segments
+    from ip_risk_agent.application.security_gate.policy import SecurityGatePolicy
+
+    policy = SecurityGatePolicy(policy_version="test")
+    big = "x" * 100_000
+    segment = TextSegment(
+        segment_id="full", text=big, line_start=1, line_end=1, segment_kind=SegmentKind.FULL
+    )
+
+    kept, scope = minimize_segments(
+        artifact_kind=ArtifactKind.LOCKFILE,
+        content_scope=ContentScope.FULL_TEXT,
+        segments=[segment],
+        source_byte_size=len(big),
+        policy=policy,
+    )
+    assert len(kept[0].text) == len(big), "락파일이 잘리면 파싱이 통째로 실패한다"
+    assert scope is ContentScope.FULL_TEXT
+
+    cut, cut_scope = minimize_segments(
+        artifact_kind=ArtifactKind.DOCUMENT_TEXT,
+        content_scope=ContentScope.FULL_TEXT,
+        segments=[segment],
+        source_byte_size=len(big),
+        policy=policy,
+    )
+    assert len(cut[0].text) < len(big), "산문에는 상한이 그대로 걸린다"
+    assert cut_scope is not ContentScope.FULL_TEXT

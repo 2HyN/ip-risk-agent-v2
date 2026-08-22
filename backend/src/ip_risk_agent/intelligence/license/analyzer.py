@@ -17,6 +17,7 @@ from iprisk_contracts.common import (
     AnalysisCoverage,
     AnalysisType,
     ArtifactKind,
+    ContentScope,
     EvidenceType,
     LicenseCandidate,
 )
@@ -117,6 +118,23 @@ def _select_parser(logical_path: str):
     return None if found is None else _PARSERS[found]
 
 
+def _input_was_cut(artifact: AnalysisArtifact) -> bool:
+    """게이트가 입력을 잘랐는가.
+
+    ``content_scope`` 는 계약에 처음부터 있었고 게이트가 채워 보내는데
+    **`intelligence/` 전체에서 아무도 읽지 않았다.** 그래서 바이트 상한에 걸려 잘린
+    파일을 분석기가 온전한 것으로 알고 파싱했다.
+
+    줄 지향 파일에서 특히 조용하다. 잘린 JSON·TOML 은 파서가 못 읽었다고 말하지만
+    (§6.6), ``requirements.txt`` 는 뒤가 잘려도 **앞부분이 멀쩡한 파일처럼 읽힌다.**
+    선언 스무 개 중 여덟 개만 나오고 그것이 `COMPLETE` 로 올라간다 — 나머지 열둘은
+    "없는 것" 이 되어 그 Risk 가 해소된다.
+
+    잘렸으면 이 결과는 파일을 설명하지 못하므로 ``PARTIAL`` 이다.
+    """
+    return artifact.content_scope is not ContentScope.FULL_TEXT
+
+
 class LicenseAnalyzer:
     """``AnalysisType.LICENSE`` 담당."""
 
@@ -187,7 +205,7 @@ class LicenseAnalyzer:
 
         coverage = (
             AnalysisCoverage.PARTIAL
-            if partial or builder.has_failures
+            if partial or builder.has_failures or _input_was_cut(artifact)
             else AnalysisCoverage.COMPLETE
         )
         _log_analysis(

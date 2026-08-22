@@ -16,6 +16,18 @@ class SecurityGatePolicy:
     max_output_bytes: int = 256_000
     max_segments: int = 64
     max_segment_bytes: int = 32_000
+    #: 의존성 파일에만 쓰는 상한. 산문 상한과 따로 두는 이유가 있다.
+    #:
+    #: 산문 상한(``max_output_bytes``)이 작은 것은 **그 내용이 provider 로 나가기**
+    #: 때문이다 — Gemini 추출과 KIPRIS 대조가 원문을 받는다. 그런데 라이선스 경로는
+    #: 파일 내용을 아무 데도 보내지 않는다. 로컬에서 파싱해 **패키지 이름과 버전만**
+    #: 레지스트리에 묻고, RAG 질의도 표현식과 판정으로만 만든다. 그러니 그 상한이
+    #: 지키려는 것이 여기에는 해당하지 않는다.
+    #:
+    #: 그리고 잘린 락파일은 쓸모가 없다. ``package-lock.json`` 은 메가바이트 단위이고
+    #: 32KB 에서 자르면 깨진 JSON 이라 **한 건도 못 읽는다.** 이 저장소의
+    #: ``pnpm-lock.yaml`` 만 해도 51,862 바이트다.
+    dependency_output_bytes: int = 2_000_000
     document_full_text_bytes: int = 128_000
     allow_text_patent: bool = True
     denied_mime_prefixes: tuple[str, ...] = (
@@ -43,6 +55,7 @@ class SecurityGatePolicy:
             "max_output_bytes",
             "max_segments",
             "max_segment_bytes",
+            "dependency_output_bytes",
             "document_full_text_bytes",
         ):
             if getattr(self, field_name) < 1:
@@ -51,6 +64,11 @@ class SecurityGatePolicy:
             raise DomainInvariantError(
                 "security_gate_policy.max_output_bytes cannot exceed max_input_bytes"
             )
+        # 오류가 아니라 깎는다. 게이트가 받은 것보다 많이 내보낼 수는 없으므로 이 값이
+        # 입력 상한을 넘는 것은 잘못된 설정이 아니라 **의미가 없는 것**이다. 작은 상한으로
+        # 게이트를 만드는 자리(시험·부분 정책)를 이 기본값이 깨뜨리지 않게 한다.
+        if self.dependency_output_bytes > self.max_input_bytes:
+            object.__setattr__(self, "dependency_output_bytes", self.max_input_bytes)
         object.__setattr__(
             self,
             "denied_mime_prefixes",

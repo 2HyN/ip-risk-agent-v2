@@ -9,6 +9,8 @@ from iprisk_contracts import (
     TextSegment,
 )
 
+from ip_risk_agent.core.artifacts.dependency_files import DEPENDENCY_KINDS
+
 from .policy import SecurityGatePolicy
 
 
@@ -45,10 +47,19 @@ def minimize_segments(
                 selected = changed + context
 
     output: list[TextSegment] = []
-    remaining = policy.max_output_bytes
+    # 의존성 파일은 다른 상한을 쓴다. 왜 따로인지는 정책의 주석에 있다 — 요약하면
+    # 이 경로는 파일 내용을 provider 에 보내지 않고, 잘린 락파일은 못 읽는다.
+    is_dependency = artifact_kind in DEPENDENCY_KINDS
+    budget = (
+        policy.dependency_output_bytes if is_dependency else policy.max_output_bytes
+    )
+    per_segment = (
+        policy.dependency_output_bytes if is_dependency else policy.max_segment_bytes
+    )
+    remaining = budget
     minimized = len(selected) != len(segments)
     for segment in selected[: policy.max_segments]:
-        segment_limit = min(policy.max_segment_bytes, remaining)
+        segment_limit = min(per_segment, remaining)
         if segment_limit < 1:
             minimized = True
             break
