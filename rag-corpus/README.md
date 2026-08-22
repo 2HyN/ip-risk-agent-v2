@@ -35,6 +35,20 @@ python scripts/build_rag_corpus.py --check  # 달라지는지만 본다 (CI 용)
 `rag_corpus_version` 이 내용을 설명하지 못한다. 판정이 왜 달라졌는지 되짚는 §7.4 의
 전제가 거기서 무너진다.
 
+### 갱신 절차
+
+corpus 가 바뀌면 판정이 바뀐다. 그래서 **사람이 diff 를 보고 나서** 들어간다.
+
+1. `python scripts/build_rag_corpus.py` — 받고, 지문과 판본을 갱신한다.
+2. `git diff rag-corpus/` — 무엇이 달라졌는지 **읽는다.** 새로 들어온 라이선스가 정말
+   `needs_review` 대상인지, 전문이 통째로 바뀌었다면 SPDX 쪽에서 무엇이 바뀐 것인지.
+3. `python -m pytest tests/integration/test_deployment_assets.py` — 매니페스트 · 색인 ·
+   게이트가 서로 맞는지.
+4. 커밋한다. `corpus_version` 이 함께 올라가 있어야 한다.
+
+`--check` 는 네트워크를 쓰므로 시험에 넣지 않았다. 갱신을 **사람이 시작한다**는 것이
+이 절차의 전제다 — 아무도 모르는 사이에 corpus 가 달라지면 안 된다.
+
 ## 커버리지 색인
 
 매니페스트의 `covers` 가 "이 문서가 어느 라이선스를 다루는가" 의 유일한 원천이다.
