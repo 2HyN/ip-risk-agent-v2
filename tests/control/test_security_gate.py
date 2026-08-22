@@ -286,7 +286,10 @@ def test_gate_approves_minimized_redacted_input_and_records_access_once() -> Non
         artifact = first.analysis_artifact
         assert artifact is not None
         assert artifact.artifact_id == artifact_id
-        assert artifact.logical_path == "/Backend/src/main.py"
+        # 분석기에 주는 경로는 상대 경로다. "/"-선행 canonical 은 ignore
+        # 매칭 전용이며, 분석기가 이 값을 근거 reference 로 쓰면 보존 검증이
+        # 로컬 절대경로로 보고 거부한다.
+        assert artifact.logical_path == "Backend/src/main.py"
         assert artifact.requested_analyzers == [AnalysisType.PATENT]
         assert artifact.content_scope is ContentScope.CHANGESET_WITH_CONTEXT
         assert [segment.segment_id for segment in artifact.text_segments] == [
@@ -623,3 +626,28 @@ def test_missing_policy_is_retryable_failed_state_and_idempotent_on_redelivery()
             assert len(await uow.audit.list_source_access("vws-1")) == 1
 
     run(scenario())
+
+
+def test_gate_logical_path_survives_evidence_retention() -> None:
+    """게이트가 분석기에 주는 경로는 보존 검증을 통과해야 한다.
+
+    분석기는 이 경로를 근거의 reference 로 그대로 쓴다. 게이트가 "/"-선행
+    canonical 경로를 내보내면 보존 검증이 로컬 절대경로로 보고 거부해,
+    특허 결과 전부가 수락 단계에서 죽는다 — 운영에서 그랬다. 두 규칙은
+    같은 Plane 안에 있으므로 여기서 서로를 검증한다.
+    """
+    from ip_risk_agent.application.risk_reconcile.retention import (
+        EvidenceRetentionError,
+        EvidenceRetentionPolicy,
+        sanitize_reference,
+    )
+
+    policy = EvidenceRetentionPolicy()
+    # 게이트가 실제로 내보내는 형태 (mount alias 로 시작하는 상대 경로).
+    assert (
+        sanitize_reference("Drive (31 items)/1-blatant/docs/기획서.md", policy)
+        == "Drive (31 items)/1-blatant/docs/기획서.md"
+    )
+    # canonical("/"-선행) 형태가 다시 새어 나오면 여기서 걸린다.
+    with pytest.raises(EvidenceRetentionError):
+        sanitize_reference("/Drive (31 items)/docs/기획서.md", policy)

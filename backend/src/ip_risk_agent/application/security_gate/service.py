@@ -299,7 +299,12 @@ class SecurityGateService:
             risk_workspace_id=context.workspace.id,
             mount_id=context.mount.id,
             artifact_id=context.artifact.id,
-            logical_path=logical_path,
+            # 분석기에는 canonical("/"-선행) 경로가 아니라 원래의 상대 경로를
+            # 준다. "/" 정규화는 ignore 규칙 매칭 전용이다. 분석기는 이 값을
+            # 근거의 reference 로 그대로 쓰는데, 보존 검증이 선행 "/" 를
+            # 로컬 절대경로로 보고 거부한다 — 특허 결과 전부가 수락 단계에서
+            # 그렇게 죽었다. 라이선스는 경로를 reference 로 쓰지 않아 살았다.
+            logical_path=context.artifact.logical_path,
             revision=context.analysis_job.revision,
             artifact_kind=snapshot.artifact_kind,
             mime_type=snapshot.mime_type,
