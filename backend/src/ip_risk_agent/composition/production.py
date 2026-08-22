@@ -56,7 +56,9 @@ from ip_risk_agent.gcp.operational_firestore import (
 from ip_risk_agent.intelligence.gemini.client import GoogleGenAIClient
 from ip_risk_agent.intelligence.license.gemini_explainer import GeminiLicenseExplainer
 from ip_risk_agent.intelligence.license.package_metadata import HttpPackageMetadataProvider
+from ip_risk_agent.intelligence.patent.cache import CachingPatentSearchProvider
 from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+from ip_risk_agent.gcp.patent_cache import FirestorePatentResponseCache
 from ip_risk_agent.intelligence.public import IntelligenceFacade, create_analyzer_registry
 from ip_risk_agent.intelligence.rag.engine import RagEngineConfig, RagEngineRetriever
 from ip_risk_agent.gcp_contract import TASKS_SERVICE_ACCOUNT
@@ -378,7 +380,12 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             "location": settings.vertex_config,
         },
     )
-    kipris = KiprisClient(_secret(foundation, settings.kipris_api_key_secret_id))
+    # KIPRIS 무료 등급은 월 1,000 회다. 같은 특허를 재분석마다 다시 받으면 재검증
+    # 자체가 불가능해지므로 프로세스 밖에 캐시를 둔다.
+    kipris = CachingPatentSearchProvider(
+        KiprisClient(_secret(foundation, settings.kipris_api_key_secret_id)),
+        FirestorePatentResponseCache(foundation.clients.firestore),
+    )
     retriever = None
     close_callbacks = [metadata.aclose, kipris.aclose]
     if settings.rag_enabled:

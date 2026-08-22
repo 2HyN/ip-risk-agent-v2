@@ -780,3 +780,116 @@ def test_a_quota_error_is_rate_limited_and_not_retried():
         await client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_the_cache_spends_a_kipris_call_only_once_per_thing():
+    """무료 한도는 월 1,000 회다. 같은 것을 다시 받으면 재검증이 불가능해진다.
+
+    분석 한 건이 11 회쯤 쓰므로 문서 20 건 재분석이 220 회다. 실제로 하루 만에
+    한도를 소진했고, 그 호출의 대부분은 같은 특허를 다시 받아온 것이었다.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from ip_risk_agent.intelligence.patent.cache import (
+        CachingPatentSearchProvider,
+        InMemoryPatentResponseCache,
+    )
+
+    class CountingProvider:
+        def __init__(self) -> None:
+            self.searches = 0
+            self.details = 0
+
+        async def search(self, query, *, rows=5):
+            self.searches += 1
+            return list(HITS.get(query, []))[:rows]
+
+        async def fetch_detail(self, application_number):
+            self.details += 1
+            return DOCUMENTS[application_number]
+
+    inner = CountingProvider()
+    now = datetime(2026, 8, 22, tzinfo=timezone.utc)
+    clock = {"value": now}
+    provider = CachingPatentSearchProvider(
+        inner, InMemoryPatentResponseCache(), clock=lambda: clock["value"]
+    )
+
+    async def scenario():
+        query = "voice phishing detection"
+        first = await provider.search(query)
+        second = await provider.search(query)
+        assert first == second
+        assert inner.searches == 1, "같은 검색어를 두 번 받지 않는다"
+
+        a = await provider.fetch_detail(PATENT_A)
+        b = await provider.fetch_detail(PATENT_A)
+        assert a == b
+        assert inner.details == 1, "같은 출원번호를 두 번 받지 않는다"
+
+        # 검색은 오래 두지 않는다. 새 공보가 나오면 달라진다.
+        clock["value"] = now + timedelta(days=8)
+        await provider.search(query)
+        assert inner.searches == 2
+        # 등록된 특허의 서지는 그 사이에 바뀌지 않는다.
+        await provider.fetch_detail(PATENT_A)
+        assert inner.details == 1
+
+    asyncio.run(scenario())
+
+
+def test_a_broken_cache_does_not_break_the_analysis():
+    """캐시는 있으면 좋은 것이지 정확성의 일부가 아니다.
+
+    캐시 때문에 분석이 실패하면 아끼려던 호출을 오히려 더 쓰게 된다.
+    """
+    from ip_risk_agent.intelligence.patent.cache import CachingPatentSearchProvider
+
+    class BrokenCache:
+        async def get_search(self, key):
+            raise RuntimeError("cache is down")
+
+        async def put_search(self, key, value):
+            raise RuntimeError("cache is down")
+
+        async def get_document(self, application_number):
+            raise RuntimeError("cache is down")
+
+        async def put_document(self, application_number, value):
+            raise RuntimeError("cache is down")
+
+    provider = CachingPatentSearchProvider(
+        StaticPatentSearchProvider(HITS, DOCUMENTS), BrokenCache()
+    )
+
+    async def scenario():
+        hits = await provider.search("voice phishing detection")
+        assert hits, "캐시가 죽어도 검색은 되어야 한다"
+        document = await provider.fetch_detail(PATENT_A)
+        assert document.application_number == PATENT_A
+
+    asyncio.run(scenario())
+
+
+def test_the_cache_wrapper_still_closes_the_provider():
+    """감쌌다고 자원 수명 관리가 사라지지 않는다.
+
+    production 의 close_callbacks 가 이 이름을 부른다.
+    """
+    from ip_risk_agent.intelligence.patent.cache import (
+        CachingPatentSearchProvider,
+        InMemoryPatentResponseCache,
+    )
+
+    class ClosableProvider(StaticPatentSearchProvider):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    inner = ClosableProvider(HITS, DOCUMENTS)
+    provider = CachingPatentSearchProvider(inner, InMemoryPatentResponseCache())
+    asyncio.run(provider.aclose())
+    assert inner.closed
