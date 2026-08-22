@@ -193,7 +193,11 @@ def build(*, check: bool, version: str | None = None) -> int:
     for text, identifiers in sorted(by_text.items(), key=lambda item: item[1][0]):
         identifiers = sorted(identifiers)
         slug = _slug(identifiers)
-        path = LICENSE_DIR / f"{slug}.md"
+        # 파일 이름이 곧 source_id 다. RAG 가 검색 결과에 `sourceDisplayName` 으로
+        # 무엇을 돌려주든 — source_id 든 파일명이든 — 게이트가 표에서 찾을 수 있어야
+        # 한다. 둘이 다르면 전문이 붙어도 게이트가 "관련 없음" 으로 버린다.
+        source_id = f"spdx-{slug}"
+        path = LICENSE_DIR / f"{source_id}.md"
         body = _document(identifiers, details[identifiers[0]], list_version)
         if not path.is_file() or path.read_text("utf-8") != body:
             changed = True
@@ -201,14 +205,14 @@ def build(*, check: bool, version: str | None = None) -> int:
                 path.write_text(body, encoding="utf-8", newline="\n")
         written.append(
             {
-                "source_id": f"spdx-{slug}",
+                "source_id": source_id,
                 "version": list_version,
                 "source_type": TEXT_SOURCE_TYPE,
                 "canonical_reference": (
                     f"https://spdx.org/licenses/{identifiers[0]}.html"
                 ),
                 "checksum": corpus_checksum(body),
-                "path": f"licenses/{slug}.md",
+                "path": f"licenses/{source_id}.md",
                 "tags": ["license", "full-text", "spdx"],
                 "approved_for_rag": True,
                 "covers": identifiers,

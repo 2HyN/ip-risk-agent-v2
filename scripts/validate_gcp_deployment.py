@@ -698,6 +698,16 @@ def _validate_rag_corpus_manifest(root: Path, errors: list[str]) -> None:
             errors.append(f"RAG corpus source file is missing: {relative}")
             continue
 
+        # 파일 이름과 source_id 가 같아야 한다. 검색 결과의 `sourceDisplayName` 이
+        # 둘 중 무엇으로 오는지 정해져 있지 않아서다 (`rag/engine.py`). 같게 두면
+        # 어느 쪽이 오든 참조 게이트가 표에서 찾는다. 다르면 전문이 검색되어도
+        # 게이트가 "관련 없음" 으로 버리고, 그 실패는 조용하다.
+        if target.stem != source_id:
+            errors.append(
+                f"RAG corpus source_id must match its file name: {source_id} "
+                f"vs {target.name}"
+            )
+
         declared = source.get("checksum")
         actual = _corpus_checksum(target.read_text(encoding="utf-8"))
         if declared != actual:

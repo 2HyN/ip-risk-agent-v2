@@ -1,4 +1,4 @@
-corpus_version: 2026-08-23.2
+corpus_version: 2026-08-23.3
 description: 라이선스 의무사항 참조 지식. 공개 자료만 포함한다. 전문은 SPDX license-list-data(CC0)에서 스크립트로 받는다.
 sources:
 - source_id: agpl-3.0-obligations
@@ -51,7 +51,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/AGPL-1.0-only.html
   checksum: sha256:0ca8140e470b06c9ec7a45907f3c87d1b72f7e500302e1d44aa596b46405b272
-  path: licenses/agpl-1.0-only.md
+  path: licenses/spdx-agpl-1.0-only.md
   tags:
   - license
   - full-text
@@ -65,7 +65,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/AGPL-3.0-only.html
   checksum: sha256:5daac66b598bec1aedca0c18ad89a5daef812b6359c5cca4115e09a935c5956c
-  path: licenses/agpl-3.0-only.md
+  path: licenses/spdx-agpl-3.0-only.md
   tags:
   - license
   - full-text
@@ -79,7 +79,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/APSL-2.0.html
   checksum: sha256:9ef1cfdc65e8f3fbcfff8c3470666a2293353b9a83427b300b4a04a72eb9c7e4
-  path: licenses/apsl-2.0.md
+  path: licenses/spdx-apsl-2.0.md
   tags:
   - license
   - full-text
@@ -92,7 +92,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/Artistic-1.0.html
   checksum: sha256:fc9727656ec3ddf808c07059b616df8877ca3c469f0bae7fbf1e23c33f300126
-  path: licenses/artistic-1.0.md
+  path: licenses/spdx-artistic-1.0.md
   tags:
   - license
   - full-text
@@ -105,7 +105,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/Artistic-1.0-Perl.html
   checksum: sha256:c6b10fc9f0cf9f31e1b83471957cb0c8934a0d113fc7f2c4b13cbd5d02846118
-  path: licenses/artistic-1.0-perl.md
+  path: licenses/spdx-artistic-1.0-perl.md
   tags:
   - license
   - full-text
@@ -118,7 +118,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/BUSL-1.1.html
   checksum: sha256:bbc5af2f5cba9c7a0c2b052f8ff6f28adb10f2b01346154ab4c1a2f28551a448
-  path: licenses/busl-1.1.md
+  path: licenses/spdx-busl-1.1.md
   tags:
   - license
   - full-text
@@ -131,7 +131,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-1.0.html
   checksum: sha256:99d9e7313f35997c9e1a387608c2eade0e3ffe80298789acf45ca7023ef54ed9
-  path: licenses/cc-by-nc-1.0.md
+  path: licenses/spdx-cc-by-nc-1.0.md
   tags:
   - license
   - full-text
@@ -144,7 +144,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-2.0.html
   checksum: sha256:abdfa644f66fdc741f995300e67fb58265171d445cc4bd6c3d74a6d0da142487
-  path: licenses/cc-by-nc-2.0.md
+  path: licenses/spdx-cc-by-nc-2.0.md
   tags:
   - license
   - full-text
@@ -157,7 +157,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-2.5.html
   checksum: sha256:003725541f0150d9a1f53eb0cfd35f3b93eb55a156d61b89c051ac5ef0f47b1d
-  path: licenses/cc-by-nc-2.5.md
+  path: licenses/spdx-cc-by-nc-2.5.md
   tags:
   - license
   - full-text
@@ -170,7 +170,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-3.0.html
   checksum: sha256:8c5598e04481990bd51765ef0ebd36fb02c096577a39b47037d98a011ec0ef91
-  path: licenses/cc-by-nc-3.0.md
+  path: licenses/spdx-cc-by-nc-3.0.md
   tags:
   - license
   - full-text
@@ -183,7 +183,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-4.0.html
   checksum: sha256:ad94c171eca32dded8f5124a170d278c68d4a96df4951b66fc9e98aef3fdcb6b
-  path: licenses/cc-by-nc-4.0.md
+  path: licenses/spdx-cc-by-nc-4.0.md
   tags:
   - license
   - full-text
@@ -196,7 +196,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-ND-3.0.html
   checksum: sha256:58791ac9fdd77c3934cb3ecbc3f1d66a8a10d0beed56386850adc9e36cb45704
-  path: licenses/cc-by-nc-nd-3.0.md
+  path: licenses/spdx-cc-by-nc-nd-3.0.md
   tags:
   - license
   - full-text
@@ -209,7 +209,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-ND-4.0.html
   checksum: sha256:46fbd1bbbb5597475da637d545f753c184a75d1d84e1b4b2a3568db5e538143d
-  path: licenses/cc-by-nc-nd-4.0.md
+  path: licenses/spdx-cc-by-nc-nd-4.0.md
   tags:
   - license
   - full-text
@@ -222,7 +222,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-SA-1.0.html
   checksum: sha256:4c564a12a44a2318efc36d72bb756d939ad6ad7a2835e245eb533a312bbbf2dd
-  path: licenses/cc-by-nc-sa-1.0.md
+  path: licenses/spdx-cc-by-nc-sa-1.0.md
   tags:
   - license
   - full-text
@@ -235,7 +235,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-SA-2.0.html
   checksum: sha256:4302edfd9938748404fb7b446ff1526692eb110d8308a12b0d1fb4b4700056e2
-  path: licenses/cc-by-nc-sa-2.0.md
+  path: licenses/spdx-cc-by-nc-sa-2.0.md
   tags:
   - license
   - full-text
@@ -248,7 +248,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-SA-2.5.html
   checksum: sha256:3153392d91ba247f29097c017122abf9c5d9c12fc3763e3c3e4c7f011a2048e3
-  path: licenses/cc-by-nc-sa-2.5.md
+  path: licenses/spdx-cc-by-nc-sa-2.5.md
   tags:
   - license
   - full-text
@@ -261,7 +261,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-SA-3.0.html
   checksum: sha256:b6ee7ffe1557da1c8f2d6fdb05d84094c2693dc8108ec1e74e7b3b9e04d65f39
-  path: licenses/cc-by-nc-sa-3.0.md
+  path: licenses/spdx-cc-by-nc-sa-3.0.md
   tags:
   - license
   - full-text
@@ -274,7 +274,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-NC-SA-4.0.html
   checksum: sha256:325575d721953eecc3154c52108805928a3fff3e9f6fb8543d5dbc74297e4e61
-  path: licenses/cc-by-nc-sa-4.0.md
+  path: licenses/spdx-cc-by-nc-sa-4.0.md
   tags:
   - license
   - full-text
@@ -287,7 +287,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-ND-3.0.html
   checksum: sha256:f863f72d73d0fa3a856a1f2d4c6ec8f3bdf888071a748c8826bf5065656a5b5a
-  path: licenses/cc-by-nd-3.0.md
+  path: licenses/spdx-cc-by-nd-3.0.md
   tags:
   - license
   - full-text
@@ -300,7 +300,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-ND-4.0.html
   checksum: sha256:2fec39a3f8da0c01a87cc812e144be729bf71ab568d9c9f9cffeefe09a9d7b90
-  path: licenses/cc-by-nd-4.0.md
+  path: licenses/spdx-cc-by-nd-4.0.md
   tags:
   - license
   - full-text
@@ -313,7 +313,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-SA-1.0.html
   checksum: sha256:ecd2deeba2d24c465aa756d21a3c6b7d8ca06c77504f685ba208f66f8290ec93
-  path: licenses/cc-by-sa-1.0.md
+  path: licenses/spdx-cc-by-sa-1.0.md
   tags:
   - license
   - full-text
@@ -326,7 +326,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-SA-2.0.html
   checksum: sha256:1ca3074f790af0597b83836e692fc27eb27678b6bbc1621258134943c22a19b0
-  path: licenses/cc-by-sa-2.0.md
+  path: licenses/spdx-cc-by-sa-2.0.md
   tags:
   - license
   - full-text
@@ -339,7 +339,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-SA-2.5.html
   checksum: sha256:8fb426fb0379199794ec506c807a00f813241d35fb0e6793bff5f54237b03aa7
-  path: licenses/cc-by-sa-2.5.md
+  path: licenses/spdx-cc-by-sa-2.5.md
   tags:
   - license
   - full-text
@@ -352,7 +352,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-SA-3.0.html
   checksum: sha256:7fe11b94526faf31efe13c994dd2a945c766a933c4b95bf90003589b34e888ae
-  path: licenses/cc-by-sa-3.0.md
+  path: licenses/spdx-cc-by-sa-3.0.md
   tags:
   - license
   - full-text
@@ -365,7 +365,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CC-BY-SA-4.0.html
   checksum: sha256:47559e151322af5c10029dfec041389b4e3283cff1d52c8595c389c48e88cbcc
-  path: licenses/cc-by-sa-4.0.md
+  path: licenses/spdx-cc-by-sa-4.0.md
   tags:
   - license
   - full-text
@@ -378,7 +378,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CDDL-1.0.html
   checksum: sha256:3fdd72a0a23810e3c064de95b5965ff87e2e66e597753a34770485e75309e82c
-  path: licenses/cddl-1.0.md
+  path: licenses/spdx-cddl-1.0.md
   tags:
   - license
   - full-text
@@ -391,7 +391,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CDDL-1.1.html
   checksum: sha256:bfa2545470af14b8f95b454eec4091bf82f8a4832298b1d998961b8dab863f0a
-  path: licenses/cddl-1.1.md
+  path: licenses/spdx-cddl-1.1.md
   tags:
   - license
   - full-text
@@ -404,7 +404,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CECILL-2.0.html
   checksum: sha256:65d9d9b081a772ae4ed23529f0dea6a05e9382333ff46303272613a6983104ef
-  path: licenses/cecill-2.0.md
+  path: licenses/spdx-cecill-2.0.md
   tags:
   - license
   - full-text
@@ -417,7 +417,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CECILL-2.1.html
   checksum: sha256:a0304bf0694f83c2c22f57798b49caceeb5bba1534d954ce9b2559fa4d07eb2c
-  path: licenses/cecill-2.1.md
+  path: licenses/spdx-cecill-2.1.md
   tags:
   - license
   - full-text
@@ -430,7 +430,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CECILL-C.html
   checksum: sha256:4d5bcb1edc4e815de67bdd1461ad6599a909cb52374c3bc489bf1192ef4d2f07
-  path: licenses/cecill-c.md
+  path: licenses/spdx-cecill-c.md
   tags:
   - license
   - full-text
@@ -443,7 +443,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/CPL-1.0.html
   checksum: sha256:5bb9c32a6367dead208a76c2e3c427680612d11b9eaf2ebf10841d64c58bfeb1
-  path: licenses/cpl-1.0.md
+  path: licenses/spdx-cpl-1.0.md
   tags:
   - license
   - full-text
@@ -456,7 +456,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/EPL-1.0.html
   checksum: sha256:a9e18ef35091906f0a9619d04140969193479d283b901a45c95485e708d07a86
-  path: licenses/epl-1.0.md
+  path: licenses/spdx-epl-1.0.md
   tags:
   - license
   - full-text
@@ -469,7 +469,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/EPL-2.0.html
   checksum: sha256:37a6d482effcc78539fef9cf6457ff2ee3212c3c363264f1fbc7bbbb3601b1ae
-  path: licenses/epl-2.0.md
+  path: licenses/spdx-epl-2.0.md
   tags:
   - license
   - full-text
@@ -482,7 +482,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/EUPL-1.0.html
   checksum: sha256:62c296cbfce13f4d2dcf6159c4d55474bb655edaf1db75b85f662a4124282d65
-  path: licenses/eupl-1.0.md
+  path: licenses/spdx-eupl-1.0.md
   tags:
   - license
   - full-text
@@ -495,7 +495,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/EUPL-1.1.html
   checksum: sha256:35a843f7bc51f72cddb8d1f687b2dd10bbb6bcde66dfad4f56cbdd0bc52b4da9
-  path: licenses/eupl-1.1.md
+  path: licenses/spdx-eupl-1.1.md
   tags:
   - license
   - full-text
@@ -508,7 +508,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/EUPL-1.2.html
   checksum: sha256:bdc4026ff2413541925b4ec6a073f3fa87f30c6af1b94fe659773969701d9857
-  path: licenses/eupl-1.2.md
+  path: licenses/spdx-eupl-1.2.md
   tags:
   - license
   - full-text
@@ -521,7 +521,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/Elastic-2.0.html
   checksum: sha256:7103b1d71aa9959c494f5bd59137f1427df26a97488ca5ddc576e9704c1f3dc8
-  path: licenses/elastic-2.0.md
+  path: licenses/spdx-elastic-2.0.md
   tags:
   - license
   - full-text
@@ -534,7 +534,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/GFDL-1.1-only.html
   checksum: sha256:5904e5ae2aea6c21746be7637ce2d48cbad27dc9a83004f9d76f1aa2e0716ed5
-  path: licenses/gfdl-1.1-only.md
+  path: licenses/spdx-gfdl-1.1-only.md
   tags:
   - license
   - full-text
@@ -548,7 +548,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/GFDL-1.2-only.html
   checksum: sha256:cf682931540d8adca638dcc43ca7bf482845f75c4fa8ca0d0db204d4008bf65d
-  path: licenses/gfdl-1.2-only.md
+  path: licenses/spdx-gfdl-1.2-only.md
   tags:
   - license
   - full-text
@@ -562,7 +562,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/GFDL-1.3-only.html
   checksum: sha256:e5900daa45c453eabb6c2a9725c0a1a969649b5f500dbad8682aab1478201bd5
-  path: licenses/gfdl-1.3-only.md
+  path: licenses/spdx-gfdl-1.3-only.md
   tags:
   - license
   - full-text
@@ -576,7 +576,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/GPL-1.0-only.html
   checksum: sha256:e4b712e22c778ac9ad9eea361971f13f43096334939fa97c2759ccf6c640075f
-  path: licenses/gpl-1.0-only.md
+  path: licenses/spdx-gpl-1.0-only.md
   tags:
   - license
   - full-text
@@ -590,7 +590,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/GPL-2.0-only.html
   checksum: sha256:fb8d33c67cf97efb936ba976af74551b7283e591eb16cdd6fab325cb4c8c4877
-  path: licenses/gpl-2.0-only.md
+  path: licenses/spdx-gpl-2.0-only.md
   tags:
   - license
   - full-text
@@ -604,7 +604,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/GPL-3.0-only.html
   checksum: sha256:9bb1fb4f2e196a04e7fbd3e9390bada5335fb103e3ce45f8dc0547c230a512cf
-  path: licenses/gpl-3.0-only.md
+  path: licenses/spdx-gpl-3.0-only.md
   tags:
   - license
   - full-text
@@ -618,7 +618,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/IPL-1.0.html
   checksum: sha256:af84533ca8a59a99de05432f160d0b41e69c1f2b5c23a39d6f4d9be778a7084f
-  path: licenses/ipl-1.0.md
+  path: licenses/spdx-ipl-1.0.md
   tags:
   - license
   - full-text
@@ -631,7 +631,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/JSON.html
   checksum: sha256:bb3b166c5c2d614c296095e7ef9d4e171fd6cc9cbf9f66888e368218d624bcc5
-  path: licenses/json.md
+  path: licenses/spdx-json.md
   tags:
   - license
   - full-text
@@ -644,7 +644,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/LGPL-2.0-only.html
   checksum: sha256:bd1c1bf6f17f561f606ecb528a8f28fd1dbfca6bc276d85e219ba47eebd133aa
-  path: licenses/lgpl-2.0-only.md
+  path: licenses/spdx-lgpl-2.0-only.md
   tags:
   - license
   - full-text
@@ -658,7 +658,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/LGPL-2.1-only.html
   checksum: sha256:896068caefd22489accc58622b13a1e72480b74347987213c1d63629d3bb716f
-  path: licenses/lgpl-2.1-only.md
+  path: licenses/spdx-lgpl-2.1-only.md
   tags:
   - license
   - full-text
@@ -672,7 +672,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/LGPL-3.0-only.html
   checksum: sha256:d0207b73556978f206797306f2efadccb9115f1f89280029a5fd518e397f8298
-  path: licenses/lgpl-3.0-only.md
+  path: licenses/spdx-lgpl-3.0-only.md
   tags:
   - license
   - full-text
@@ -686,7 +686,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/MPL-1.0.html
   checksum: sha256:19e75eb28c4b5eec97d48d3b58eae72295589e64aa1abe93efd2866055e1ccbe
-  path: licenses/mpl-1.0.md
+  path: licenses/spdx-mpl-1.0.md
   tags:
   - license
   - full-text
@@ -699,7 +699,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/MPL-1.1.html
   checksum: sha256:f43c429aa97e8f9905433764c24ae7ac0c3954dc5bc4c1c35d835f3bc248e4fa
-  path: licenses/mpl-1.1.md
+  path: licenses/spdx-mpl-1.1.md
   tags:
   - license
   - full-text
@@ -712,7 +712,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/MPL-2.0.html
   checksum: sha256:3d3d1506e625f2fec55f789956a52bd14abea55e4d48c510dab99950ef507bab
-  path: licenses/mpl-2.0.md
+  path: licenses/spdx-mpl-2.0.md
   tags:
   - license
   - full-text
@@ -726,7 +726,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/MS-RL.html
   checksum: sha256:7e0a47a5b66a1d082c3a3d3d52fdace20b1658469ee9c557bee0bdf52b79eaae
-  path: licenses/ms-rl.md
+  path: licenses/spdx-ms-rl.md
   tags:
   - license
   - full-text
@@ -739,7 +739,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/NPOSL-3.0.html
   checksum: sha256:330ba3154e8f1e07e1fc93f1a2721326376108d9fc71d08604a9335ade1001ec
-  path: licenses/nposl-3.0.md
+  path: licenses/spdx-nposl-3.0.md
   tags:
   - license
   - full-text
@@ -752,7 +752,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/ODbL-1.0.html
   checksum: sha256:c74ddf94e197d2c648bd362da5932e8a04b209e88b823604a8d02af59210313c
-  path: licenses/odbl-1.0.md
+  path: licenses/spdx-odbl-1.0.md
   tags:
   - license
   - full-text
@@ -765,7 +765,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/OFL-1.0.html
   checksum: sha256:d207d887786839aa5cb1eba2924d15e5952d5bb1488058e60d4af97a46240133
-  path: licenses/ofl-1.0.md
+  path: licenses/spdx-ofl-1.0.md
   tags:
   - license
   - full-text
@@ -778,7 +778,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/OFL-1.1.html
   checksum: sha256:68f333601910d13b5db5079179fcecd36c4af18c5807657b89c2b4507d499470
-  path: licenses/ofl-1.1.md
+  path: licenses/spdx-ofl-1.1.md
   tags:
   - license
   - full-text
@@ -793,7 +793,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/OSL-1.0.html
   checksum: sha256:74d800cc718b1eafc0be165647e4fcb8e9bb409b1d5837628a966c28a6ab95cb
-  path: licenses/osl-1.0.md
+  path: licenses/spdx-osl-1.0.md
   tags:
   - license
   - full-text
@@ -806,7 +806,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/OSL-1.1.html
   checksum: sha256:02fac44a0a362094abf5549121c0ff967e05d87686dbedbd50c78ebcef8c8d8c
-  path: licenses/osl-1.1.md
+  path: licenses/spdx-osl-1.1.md
   tags:
   - license
   - full-text
@@ -819,7 +819,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/OSL-2.0.html
   checksum: sha256:4a4ebc660aa7306233dc42590031d369c11d1339298c5237fd4844d18b16d498
-  path: licenses/osl-2.0.md
+  path: licenses/spdx-osl-2.0.md
   tags:
   - license
   - full-text
@@ -832,7 +832,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/OSL-2.1.html
   checksum: sha256:884d0371d22287122e5a3b533f01755b34a39fe7ebcf12abc6e9e310e70589fd
-  path: licenses/osl-2.1.md
+  path: licenses/spdx-osl-2.1.md
   tags:
   - license
   - full-text
@@ -845,7 +845,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/OSL-3.0.html
   checksum: sha256:021a451915c249e64cc3a84ed61bdc6a7369015c24791153731e300f0ff0b8f9
-  path: licenses/osl-3.0.md
+  path: licenses/spdx-osl-3.0.md
   tags:
   - license
   - full-text
@@ -858,7 +858,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/PolyForm-Noncommercial-1.0.0.html
   checksum: sha256:62ddd877f7054ee944d361122710f189b1f03e7cfaf879bcb925fa98411d581f
-  path: licenses/polyform-noncommercial-1.0.0.md
+  path: licenses/spdx-polyform-noncommercial-1.0.0.md
   tags:
   - license
   - full-text
@@ -871,7 +871,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/PolyForm-Small-Business-1.0.0.html
   checksum: sha256:d83d4810b6063677cf830d1e19b06fa37761de19aab0902095557d796e7459d3
-  path: licenses/polyform-small-business-1.0.0.md
+  path: licenses/spdx-polyform-small-business-1.0.0.md
   tags:
   - license
   - full-text
@@ -884,7 +884,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/QPL-1.0.html
   checksum: sha256:f26bd80f24001824eac8c41ab297716d7474f3192219097dfcc5c5d65e2843f6
-  path: licenses/qpl-1.0.md
+  path: licenses/spdx-qpl-1.0.md
   tags:
   - license
   - full-text
@@ -897,7 +897,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/RPL-1.1.html
   checksum: sha256:b789a8c6302b4be32e3f80f2f34822de668ea47eeb8cdd898074e17a5a1e2628
-  path: licenses/rpl-1.1.md
+  path: licenses/spdx-rpl-1.1.md
   tags:
   - license
   - full-text
@@ -910,7 +910,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/RPL-1.5.html
   checksum: sha256:54384f39ee9d031d06b4e0894a5a8e68ff8662ba7b53c26a0c423ae5904e2607
-  path: licenses/rpl-1.5.md
+  path: licenses/spdx-rpl-1.5.md
   tags:
   - license
   - full-text
@@ -923,7 +923,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/SGI-B-1.1.html
   checksum: sha256:4ae64871091c205ec648778d8dec52c8e796217c0dd56e24f45ae0377fe115a9
-  path: licenses/sgi-b-1.1.md
+  path: licenses/spdx-sgi-b-1.1.md
   tags:
   - license
   - full-text
@@ -936,7 +936,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/SISSL.html
   checksum: sha256:301850b3e7cb7751e532861568ad639b6e8bd8bc17a5f863a47e5a8ee7639cb9
-  path: licenses/sissl.md
+  path: licenses/spdx-sissl.md
   tags:
   - license
   - full-text
@@ -949,7 +949,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/SSPL-1.0.html
   checksum: sha256:95cb58f40959a7d9c2984d998e1f2d6e50e8650fa863c4fe77de052245cf28a3
-  path: licenses/sspl-1.0.md
+  path: licenses/spdx-sspl-1.0.md
   tags:
   - license
   - full-text
@@ -962,7 +962,7 @@ sources:
   source_type: OSS_LICENSE_TEXT
   canonical_reference: https://spdx.org/licenses/Sleepycat.html
   checksum: sha256:01b564de173349568d7d0768ce1ef0bd74626bccede75951f48f2127a4f4a77e
-  path: licenses/sleepycat.md
+  path: licenses/spdx-sleepycat.md
   tags:
   - license
   - full-text
