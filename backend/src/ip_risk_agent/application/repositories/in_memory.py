@@ -521,12 +521,18 @@ class InMemoryAnalysisJobRepository(_Repository):
             raise UniqueConstraintViolation(
                 "analysis job requested types may only be narrowed"
             )
-        is_failed_requeue = (
-            previous.status is AnalysisJobStatus.FAILED
+        # 새 attempt 는 이전 상태가 무엇이든 열 수 있어야 한다. 예전에는
+        # FAILED 만 허용해서, 미결(INCONCLUSIVE)이나 성공을 다시 검사하려는
+        # 재큐잉이 여기서 409 로 막혔다 — 미결 되살리기 버튼이 실제로 그렇게
+        # 죽었고, integration-v3 도 같은 벽을 만나 같은 결론에 도달했다.
+        # 이 불변조건이 막으려는 것은 **한 attempt 안에서** 판정이 조용히
+        # 바뀌는 것이지, 새 attempt 를 여는 것이 아니다.
+        is_new_attempt = (
+            previous.status is not AnalysisJobStatus.QUEUED
             and job.status is AnalysisJobStatus.QUEUED
             and not job.analysis_outcomes
         )
-        if not is_failed_requeue and any(
+        if not is_new_attempt and any(
             job.analysis_outcomes.get(analysis_type) != outcome
             for analysis_type, outcome in previous.analysis_outcomes.items()
         ):

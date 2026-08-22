@@ -356,3 +356,34 @@ def test_inconclusive_without_relay_counts_as_expired() -> None:
     assert enqueuer.enqueued == []
     # 원본을 못 구하면 상태도 건드리지 않는다.
     assert uow._events["evt-old"].status.value == "DONE"
+
+
+@pytest.mark.asyncio
+async def test_requeueing_an_inconclusive_job_passes_the_store_invariant() -> None:
+    """저장소의 append-only 불변조건이 새 attempt 를 막으면 안 된다.
+
+    미결 작업을 재큐잉하면 outcomes 가 비워지는데, 이전에는 FAILED 출신만
+    예외로 인정해 INCONCLUSIVE 재큐잉이 409 로 죽었다 — 되살리기 버튼이
+    운영에서 그렇게 실패했다.
+    """
+    from ip_risk_agent.application.analysis_jobs.models import AnalysisJobStatus
+    from ip_risk_agent.application.analysis_jobs.transitions import (
+        requeue_analysis_job,
+    )
+    from ip_risk_agent.application.repositories import InMemoryControlStore
+
+    store = InMemoryControlStore()
+    job = _real_job("evt-1", AnalysisJobStatus.INCONCLUSIVE)
+    async with store() as uow:
+        await uow.analysis_jobs.add(job)
+        await uow.commit()
+
+    async with store() as uow:
+        await uow.analysis_jobs.save(
+            requeue_analysis_job(job, allow_inconclusive=True)
+        )
+        await uow.commit()
+
+    async with store() as uow:
+        jobs = await uow.analysis_jobs.list_for_change("evt-1")
+    assert jobs[0].status is AnalysisJobStatus.QUEUED
