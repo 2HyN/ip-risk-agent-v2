@@ -11,5 +11,18 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["main/**/*.ts", "preload/**/*.ts", "preload/**/*.mts", "watcher/**/*.ts", "local-registry/**/*.ts", "security/**/*.ts", "core/**/*.ts"]
+  "include": [
+    "main/**/*.ts",
+    "preload/**/*.ts",
+    "preload/**/*.mts",
+    // preload.cts 는 아무도 import 하지 않는다 — main 이 경로 문자열로만 가리키는
+    // 진입점이라, 이 목록에 없으면 통째로 빌드에서 빠진다. 그러면
+    // window.desktopApi 가 만들어지지 않아 화면이 desktop 을 web 으로 보고
+    // Local Folder 를 잠근다. channels.cts 는 api.ts 가 import 해서 딸려 왔을 뿐이다.
+    "preload/**/*.cts",
+    "watcher/**/*.ts",
+    "local-registry/**/*.ts",
+    "security/**/*.ts",
+    "core/**/*.ts"
+  ]
 }
