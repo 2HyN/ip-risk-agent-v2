@@ -43,8 +43,15 @@ PROVIDER = "RAG_ENGINE"
 SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 #: 동시에 보내는 수. 올리는 것은 드문 작업이라 크게 잡지 않는다 — 할당량을 밀어내는
-#: 것보다 조금 느린 편이 낫다.
-_CONCURRENCY = 6
+#: 것보다 조금 느린 편이 낫다. 6 으로 두었더니 700 편을 올리는 중에 429 를 맞았다.
+_CONCURRENCY = 3
+
+#: 429 와 5xx 를 만났을 때 다시 보내는 횟수. corpus 를 통째로 올리면 수백 번 호출하므로
+#: 한 번의 일시적 거절로 전체가 멈추면 안 된다.
+_MAX_ATTEMPTS = 6
+
+#: 재시도 간격의 밑값(초). 실제로는 2 의 거듭제곱으로 늘린다.
+_BACKOFF_BASE = 2.0
 
 
 def _corpus_resource(project_id: str, region: str, corpus_id: str) -> str:
@@ -119,6 +126,39 @@ class VertexRagCorpusUploader:
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token()}"}
 
+    # ------------------------------------------------------------------ 재시도
+
+    async def _send(
+        self, client: httpx.AsyncClient, method: str, url: str, **kwargs
+    ) -> httpx.Response:
+        """429 와 5xx 는 다시 보낸다.
+
+        corpus 를 통째로 올리면 700 번 가까이 호출한다. 그 사이 한 번의 일시적 거절로
+        전체가 멈추면 **부분 적재된 corpus** 가 남고, 그때 ``corpus_version`` 은 내용을
+        설명하지 못한다 — 실제로 그렇게 한 번 죽었다(``spdx-eupl-1.0`` 에서 429).
+
+        서버가 ``Retry-After`` 를 주면 그 값을 따르고, 없으면 2 의 거듭제곱으로 늘린다.
+        재시도해도 소용없는 4xx(권한·형식)는 그대로 올린다.
+        """
+        delay = _BACKOFF_BASE
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            response = await client.request(
+                method, url, headers=self._headers(), **kwargs
+            )
+            if response.status_code < 400:
+                return response
+            retriable = response.status_code == 429 or response.status_code >= 500
+            if not retriable or attempt == _MAX_ATTEMPTS:
+                return response
+            hinted = response.headers.get("Retry-After")
+            try:
+                wait = float(hinted) if hinted else delay
+            except ValueError:
+                wait = delay
+            await asyncio.sleep(min(wait, 60.0))
+            delay *= 2
+        return response  # pragma: no cover - 위 루프가 언제나 돌려준다
+
     # ------------------------------------------------------------------ 동작
 
     async def list_files(self, client: httpx.AsyncClient) -> list[dict]:
@@ -129,10 +169,11 @@ class VertexRagCorpusUploader:
             params = {"pageSize": "100"}
             if page:
                 params["pageToken"] = page
-            response = await client.get(
+            response = await self._send(
+                client,
+                "GET",
                 f"{self._base}/{self.corpus_resource}/ragFiles",
                 params=params,
-                headers=self._headers(),
             )
             self._raise_for_status(response, "list")
             payload = response.json()
@@ -142,9 +183,7 @@ class VertexRagCorpusUploader:
                 return files
 
     async def _delete(self, client: httpx.AsyncClient, name: str) -> None:
-        response = await client.delete(
-            f"{self._base}/{name}", headers=self._headers()
-        )
+        response = await self._send(client, "DELETE", f"{self._base}/{name}")
         if response.status_code == 404:
             return
         self._raise_for_status(response, "delete")
@@ -181,9 +220,10 @@ class VertexRagCorpusUploader:
                 ),
             }
         }
-        response = await client.post(
+        response = await self._send(
+            client,
+            "POST",
             f"{self._upload_base}/{self.corpus_resource}/ragFiles:upload",
-            headers=self._headers(),
             files={
                 "metadata": (
                     None,
@@ -210,11 +250,32 @@ class VertexRagCorpusUploader:
         """
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             existing = await self.list_files(client)
-            wanted = {display_key(document.source_id) for document in documents}
+
+            # 이미 같은 판본·같은 지문으로 올라가 있는 것은 건너뛴다. 700 편을 올리다
+            # 끊기면 처음부터 다시 하는 대신 남은 것만 이어서 올릴 수 있어야 한다.
+            done: dict[str, int] = {}
+            for item in existing:
+                key = display_key(item.get("displayName", ""))
+                try:
+                    stamped = json.loads(item.get("description") or "{}")
+                except json.JSONDecodeError:
+                    stamped = {}
+                if stamped.get("corpus_version") == corpus_version:
+                    done[key] = done.get(key, 0) + 1
+
+            pending = [
+                document
+                for document in documents
+                if done.get(display_key(document.source_id), 0) != 1
+            ]
+
+            # 다시 올릴 것과 같은 이름인 옛 파일만 지운다. 판본이 맞아 건너뛰는 것은
+            # 그대로 둔다 — 지웠다 다시 올리면 이어 올리는 뜻이 없다.
+            retry_keys = {display_key(document.source_id) for document in pending}
             stale = [
                 item["name"]
                 for item in existing
-                if display_key(item.get("displayName", "")) in wanted
+                if display_key(item.get("displayName", "")) in retry_keys
                 and item.get("name")
             ]
             for name in stale:
@@ -226,8 +287,8 @@ class VertexRagCorpusUploader:
                 async with semaphore:
                     await self._upload_one(client, document, corpus_version)
 
-            await asyncio.gather(*(send(document) for document in documents))
-        return len(documents)
+            await asyncio.gather(*(send(document) for document in pending))
+        return len(pending)
 
     # ------------------------------------------------------------------ 확인
 
