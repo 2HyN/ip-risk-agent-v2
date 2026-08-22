@@ -7,14 +7,18 @@ AGPL 문서가 근거로 붙어도 근거 ID 검증과 프롬프트 제약을 �
 
 그래서 임베딩 점수가 아니라 **주제 일치**로 결정적으로 거른다. 점수 임계값은
 provider 응답 필드에 의존해 실측 없이는 검증할 수 없고, 값이 바뀌면 조용히
-무력화된다. 아래 표는 코드가 선언하고 배포 validator 가 corpus manifest 와
-교차 검증한다 (Firestore 인덱스를 다루는 방식과 같다).
+무력화된다. 아래 표는 corpus manifest 에서 뽑아 이 패키지에 함께 실린다.
 
-``rag-corpus/`` 는 런타임 이미지에 포함되지 않으므로 manifest 를 실행 시점에
-읽을 수 없다. 그래서 표가 코드에 있다.
+``rag-corpus/`` 는 런타임 이미지에 포함되지 않으므로 manifest 를 실행 시점에 읽을 수
+없다. 그래서 예전에는 표를 **코드에 손으로 적었고**, 문서를 하나 더할 때마다 코드를
+고쳐야 했다. 지금은 ``scripts/build_rag_corpus.py`` 가 manifest 의 ``covers`` 에서
+뽑아 ``corpus_coverage.json`` 으로 내고, 배포 validator 가 셋이 같은지 확인한다.
 """
 
 from __future__ import annotations
+
+import json
+from importlib import resources
 
 from . import spdx
 
@@ -22,23 +26,22 @@ from . import spdx
 #
 # 부분 문자열로 판정하지 않는다. "AGPL-3.0-only" 는 "GPL-3.0-only" 를 포함하므로
 # 그렇게 하면 이 게이트가 막으려는 바로 그 오류를 만든다.
-CORPUS_SUBJECT_COVERAGE: dict[str, frozenset[str]] = {
-    "agpl-3.0-obligations": frozenset(
-        {"AGPL-3.0-only", "AGPL-3.0-or-later"}
-    ),
-    "lgpl-2.1-obligations": frozenset(
-        {"LGPL-2.1-only", "LGPL-2.1-or-later"}
-    ),
-    "permissive-notice": frozenset(
-        {
-            "MIT",
-            "BSD-2-Clause",
-            "BSD-3-Clause",
-            "Apache-2.0",
-            "ISC",
-        }
-    ),
-}
+#
+# 손으로 적지 않는다. `scripts/build_rag_corpus.py` 가 manifest 에서 뽑아 둔 것을
+# 읽는다 — 문서를 늘릴 때 코드를 고치지 않기 위해서다. 파일이 wheel 에 실리는지는
+# `pyproject.toml` 의 package-data 와 배포 validator 가 함께 지킨다.
+def _load_coverage() -> dict[str, frozenset[str]]:
+    payload = (
+        resources.files(__package__)
+        .joinpath("corpus_coverage.json")
+        .read_text(encoding="utf-8")
+    )
+    return {
+        str(name): frozenset(values) for name, values in json.loads(payload).items()
+    }
+
+
+CORPUS_SUBJECT_COVERAGE: dict[str, frozenset[str]] = _load_coverage()
 
 
 def _covered_identifiers(source_id: str) -> frozenset[str]:

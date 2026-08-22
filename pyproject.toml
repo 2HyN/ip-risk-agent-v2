@@ -44,6 +44,9 @@ include = ["iprisk_contracts*", "ip_risk_agent*"]
 # Dockerfile 이 `pip install .` 로 설치하는 배포에서만 특허·라이선스 분석이
 # FileNotFoundError 로 죽는다.
 "ip_risk_agent.intelligence.gemini.prompts" = ["*.md"]
+# RAG 커버리지 색인도 같은 이유로 실어야 한다. `rag-corpus/` 는 이미지에 없으므로
+# 게이트가 볼 수 있는 표는 이 파일뿐이다. 빠지면 배포에서만 표가 사라진다.
+"ip_risk_agent.intelligence.license" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = [

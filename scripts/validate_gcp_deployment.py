@@ -708,11 +708,15 @@ def _validate_rag_corpus_manifest(root: Path, errors: list[str]) -> None:
 
 
 def _validate_rag_subject_coverage(root: Path, errors: list[str]) -> None:
-    """RAG 참조 게이트의 주제 표가 corpus manifest 와 일치하는지 확인한다.
+    """corpus 가 다루는 라이선스와 게이트가 아는 라이선스가 같은지 확인한다.
 
-    ``rag-corpus/`` 는 런타임 이미지에 없으므로 커버리지 표는 코드가 들고 있다.
-    표와 manifest 가 어긋나면 게이트가 조용히 잘못 판정한다 — 관련 문서를
-    버리거나, 더 나쁘게는 관련 없는 문서를 통과시킨다.
+    어긋나면 게이트가 조용히 잘못 판정한다 — 관련 문서를 버리거나, 더 나쁘게는 관련
+    없는 문서를 통과시킨다.
+
+    표가 있는 자리가 옮겨 가는 중이다. 원래는 ``reference_gate`` 안에 손으로 적혀
+    있었다 — ``rag-corpus/`` 가 런타임 이미지에 없기 때문이었다. 지금은
+    ``scripts/build_rag_corpus.py`` 가 매니페스트의 ``covers`` 에서 뽑아 wheel 에 실리는
+    ``corpus_coverage.json`` 으로 낸다. 옮기는 동안 **셋이 모두 같아야 한다.**
     """
     manifest_path = root / "rag-corpus" / "manifest.yaml"
     if not manifest_path.is_file():
@@ -723,16 +727,46 @@ def _validate_rag_subject_coverage(root: Path, errors: list[str]) -> None:
         for source in document.get("sources", ())
         if source.get("approved_for_rag")
     }
-    if declared != CORPUS_SUBJECT_COVERAGE:
-        errors.append(
-            "RAG subject coverage mismatch between manifest and "
-            "intelligence.license.reference_gate.CORPUS_SUBJECT_COVERAGE"
-        )
+
     empty = sorted(name for name, covers in declared.items() if not covers)
     if empty:
         errors.append(
             "approved RAG sources must declare the licenses they cover: "
             + ", ".join(empty)
+        )
+
+    index_path = (
+        root
+        / "backend"
+        / "src"
+        / "ip_risk_agent"
+        / "intelligence"
+        / "license"
+        / "corpus_coverage.json"
+    )
+    if not index_path.is_file():
+        errors.append(
+            "corpus_coverage.json is missing; run scripts/build_rag_corpus.py"
+        )
+        return
+    index = {
+        name: frozenset(values)
+        for name, values in json.loads(index_path.read_text("utf-8")).items()
+    }
+    if index != declared:
+        errors.append(
+            "corpus_coverage.json is stale against rag-corpus/manifest.yaml; "
+            "run scripts/build_rag_corpus.py"
+        )
+
+    if CORPUS_SUBJECT_COVERAGE != index:
+        only_code = sorted(set(CORPUS_SUBJECT_COVERAGE) - set(index))
+        only_index = sorted(set(index) - set(CORPUS_SUBJECT_COVERAGE))
+        errors.append(
+            "RAG subject coverage mismatch: "
+            "intelligence.license.reference_gate.CORPUS_SUBJECT_COVERAGE does not match "
+            "corpus_coverage.json. The gate would ignore documents the corpus contains. "
+            f"only in code: {only_code or '-'}; only in index: {only_index or '-'}"
         )
 
 

@@ -177,16 +177,31 @@ def _inject_namespace_violation(root: Path, violation: str) -> None:
 
 
 def test_rag_ingestion_dry_run_is_manifest_bounded_and_write_free() -> None:
+    """dry-run 이 **매니페스트가 승인한 것만** 읽고 밖으로 쓰지 않는다.
+
+    문서 목록을 리터럴로 고정하지 않는다. 그렇게 두면 corpus 에 문서를 하나 더할
+    때마다 이 시험이 깨지는데, 정작 이 시험이 지키려는 것 — 승인 경계와 쓰기 금지 —
+    은 문서 수와 무관하다. 목록을 박아 두는 것이 배포 validator 를 막고 있던 것과
+    같은 종류의 경직이다.
+    """
+    manifest = yaml.safe_load(
+        (ROOT / "rag-corpus" / "manifest.yaml").read_text("utf-8")
+    )
+    approved = sorted(
+        str(source["source_id"])
+        for source in manifest["sources"]
+        if source.get("approved_for_rag")
+    )
+
     report = asyncio.run(prepare(ROOT / "rag-corpus" / "manifest.yaml"))
-    assert report == {
-        "corpus_version": "2026-08-14.1",
-        "document_count": 3,
-        "uploaded": 3,
-        "source_ids": [
-            "agpl-3.0-obligations",
-            "lgpl-2.1-obligations",
-            "permissive-notice",
-        ],
-        "checksums_verified": True,
-        "external_write_performed": False,
-    }
+
+    # 순서는 보지 않는다 — 매니페스트가 어떤 차례로 적혀 있든 **승인된 것과 정확히
+    # 같은 집합**을 읽었는지가 이 시험이 지키려는 것이다.
+    assert sorted(report["source_ids"]) == approved, (
+        "승인되지 않은 자료를 읽었거나 빠뜨렸다"
+    )
+    assert report["document_count"] == len(approved)
+    assert report["uploaded"] == len(approved)
+    assert report["corpus_version"] == manifest["corpus_version"]
+    assert report["checksums_verified"] is True
+    assert report["external_write_performed"] is False
