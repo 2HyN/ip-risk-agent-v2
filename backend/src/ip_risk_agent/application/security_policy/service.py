@@ -123,15 +123,30 @@ class WorkspaceSecurityService:
         if self._reanalysis_requester is None:
             raise DomainInvariantError("reanalysis is not configured")
         async with self._unit_of_work_factory() as uow:
-            await _authorize_and_workspace(
-                uow,
-                risk_workspace_id=risk_workspace_id,
-                actor_user_id=actor_user_id,
-                action=VwsAction.MOUNT_SOURCE_OPERATION,
-            )
             event = await uow.change_events.get(change_event_id)
             if event is None or event.risk_workspace_id != risk_workspace_id:
                 raise RecordNotFoundError("change event was not found in this workspace")
+            # MOUNT_SOURCE_OPERATION 은 mount 단위 권한이다. mount 를 넘기지 않으면
+            # 소유자여도 MOUNT_REQUIRED 로 거부된다. 재분석은 provider 를 다시
+            # 호출하므로 mount 소유 검사가 올바른 경계다.
+            mount = await uow.mounts.get(event.mount_id)
+            if mount is None:
+                raise RecordNotFoundError("mount was not found for this change event")
+            workspace = await uow.workspaces.get(risk_workspace_id)
+            if workspace is None:
+                raise RecordNotFoundError(
+                    f"workspace was not found: {risk_workspace_id!r}"
+                )
+            membership = await uow.memberships.get(risk_workspace_id, actor_user_id)
+            require_authorized(
+                authorize_vws_action(
+                    actor_user_id=actor_user_id,
+                    risk_workspace_id=risk_workspace_id,
+                    membership=membership,
+                    action=VwsAction.MOUNT_SOURCE_OPERATION,
+                    mount=mount,
+                )
+            )
         await self._reanalysis_requester(change_event_id)
 
     async def get_settings(

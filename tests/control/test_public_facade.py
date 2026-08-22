@@ -726,3 +726,160 @@ def test_reanalysis_refuses_an_in_flight_analysis() -> None:
             await facade.request_reanalysis(receipt.change_event_id)
 
     run(scenario())
+
+
+def test_reanalysis_authorization_requires_the_mount() -> None:
+    """`MOUNT_SOURCE_OPERATION` 은 mount 단위 권한이다.
+
+    mount 를 넘기지 않으면 workspace 소유자여도 `MOUNT_REQUIRED` 로 거부된다.
+    운영에서 "다시 검사" 가 Permission denied 로 막힌 원인이 이것이었다.
+    """
+    from ip_risk_agent.core.memberships import (
+        AuthorizationReason,
+        VwsAction,
+        authorize_vws_action,
+    )
+
+    membership = Membership(
+        membership_id_for("vws-1", "owner-1"),
+        "vws-1",
+        "owner-1",
+        MembershipRole.OWNER,
+        MembershipStatus.ACTIVE,
+        "owner-1",
+        NOW,
+        NOW,
+    )
+    without_mount = authorize_vws_action(
+        actor_user_id="owner-1",
+        risk_workspace_id="vws-1",
+        membership=membership,
+        action=VwsAction.MOUNT_SOURCE_OPERATION,
+    )
+    assert not without_mount.allowed
+    assert without_mount.reason is AuthorizationReason.MOUNT_REQUIRED
+
+
+def test_reanalysis_is_authorized_for_the_mount_custodian() -> None:
+    """재분석은 provider 를 다시 호출하므로 mount 소유 검사가 올바른 경계다."""
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+
+        async with store() as uow:
+            mount = await uow.mounts.get(source.mount_id)
+
+        from ip_risk_agent.core.memberships import VwsAction, authorize_vws_action
+
+        async with store() as uow:
+            membership = await uow.memberships.get("vws-1", "owner-1")
+        decision = authorize_vws_action(
+            actor_user_id="owner-1",
+            risk_workspace_id="vws-1",
+            membership=membership,
+            action=VwsAction.MOUNT_SOURCE_OPERATION,
+            mount=mount,
+        )
+        assert decision.allowed
+        assert decision.provider_authority_required
+
+    run(scenario())
+
+
+def test_security_service_reanalysis_passes_authorization_end_to_end() -> None:
+    """라우트가 실제로 쓰는 경로를 통과시킨다.
+
+    앞선 구현은 mount 를 넘기지 않아 배포에서 Permission denied 로 막혔고, 단위
+    테스트만으로는 그것을 잡지 못했다.
+    """
+
+    async def scenario() -> None:
+        from ip_risk_agent.application.security_policy.service import (
+            WorkspaceSecurityService,
+        )
+
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        receipt = await facade.register_source_change(make_change(source))
+        claim = await facade.claim_analysis(receipt.change_event_id)
+        assert claim is not None
+        await facade.fail_analysis(
+            receipt.change_event_id, failure_safe="CONTRACT:X", attempt=claim.attempt
+        )
+
+        security = WorkspaceSecurityService(
+            unit_of_work_factory=store,
+            clock=clock,
+            id_factory=SequentialIds(),
+            reanalysis_requester=facade.request_reanalysis,
+        )
+        before = len(queue.attempts)
+        await security.request_reanalysis(
+            risk_workspace_id="vws-1",
+            actor_user_id="owner-1",
+            change_event_id=receipt.change_event_id,
+        )
+        assert len(queue.attempts) == before + 1
+
+    run(scenario())
+
+
+def test_security_service_reanalysis_rejects_another_workspace() -> None:
+    """id 만 알면 남의 workspace 를 돌릴 수 있으면 안 된다."""
+
+    async def scenario() -> None:
+        from ip_risk_agent.application.repositories import RecordNotFoundError
+        from ip_risk_agent.application.security_policy.service import (
+            WorkspaceSecurityService,
+        )
+
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        async with store() as uow:
+            await uow.workspaces.add(
+                RiskWorkspace(
+                    "vws-2", "Other", "owner-1", "security-v1", "retention-v1", NOW, NOW
+                )
+            )
+            await uow.memberships.add(
+                Membership(
+                    membership_id_for("vws-2", "owner-1"),
+                    "vws-2",
+                    "owner-1",
+                    MembershipRole.OWNER,
+                    MembershipStatus.ACTIVE,
+                    "owner-1",
+                    NOW,
+                    NOW,
+                )
+            )
+            await uow.commit()
+        facade = make_facade(store, queue, clock)
+        source = await facade.register_source_metadata(source_command())
+        receipt = await facade.register_source_change(make_change(source))
+
+        security = WorkspaceSecurityService(
+            unit_of_work_factory=store,
+            clock=clock,
+            id_factory=SequentialIds(),
+            reanalysis_requester=facade.request_reanalysis,
+        )
+        with pytest.raises(RecordNotFoundError):
+            await security.request_reanalysis(
+                risk_workspace_id="vws-2",
+                actor_user_id="owner-1",
+                change_event_id=receipt.change_event_id,
+            )
+
+    run(scenario())
