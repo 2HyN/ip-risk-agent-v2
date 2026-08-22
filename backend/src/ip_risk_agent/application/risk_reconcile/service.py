@@ -565,11 +565,32 @@ def _aggregate_job(
     )
 
 
+def _is_risk_worthy(priority: ReviewPriority) -> bool:
+    """이 후보를 Risk 로 다룰지. 상·중만 Risk 다.
+
+    검토 우선도는 "확실히 risk" 에서 "전혀 risk 아님" 까지의 눈금이고, **하 등급은
+    그 눈금의 아래쪽 전부**를 뜻한다. 즉 하는 "낮은 위험" 이 아니라 "우리가 관리할
+    위험이 아니다" 는 판정이다. 그래서 Risk 를 만들지 않는다.
+
+    이 규칙 하나로 lifecycle 이 자연스럽게 따라온다. 하 등급 후보는 투영에서 빠지고,
+    이미 있던 Risk 라면 ``candidate_present=False`` 경로를 타 ``RESOLVED`` 가 된다.
+    사용자는 그렇게 닫힌 Risk 를 확인하고 받아들이면 된다.
+
+    주의 — 이것은 "모른다" 와 다르다. 분석이 권위적이지 않으면(``INCONCLUSIVE``,
+    ``PARTIAL``) 애초에 이 경로가 Risk 를 바꾸지 못한다. 하 등급은 **알아보고 나서**
+    관리 대상이 아니라고 판정한 것이다.
+    """
+    return priority is not ReviewPriority.LOW
+
+
 def _candidate_projections(
     result: AnalysisResult,
     retention: EvidenceRetentionPolicy,
 ) -> dict[str, _CandidateProjection]:
     projections: dict[str, _CandidateProjection] = {}
+    # 중복 검사는 하 등급 후보까지 포함해서 한다. 투영에서 빠지는 것과 같은 후보가
+    # 두 번 오는 것은 다른 문제다. 후자는 결과가 잘못된 것이므로 넘기면 안 된다.
+    seen_keys: set[str] = set()
     for candidate in result.candidates:
         if isinstance(candidate, PatentCandidate):
             application_number = _normalized_token(
@@ -615,8 +636,11 @@ def _candidate_projections(
             )
         else:  # pragma: no cover - frozen contract validation guards this
             raise AnalysisResultIntakeError("unsupported candidate type")
-        if risk_key in projections:
+        if risk_key in seen_keys:
             raise AnalysisResultIntakeError("duplicate stable candidate identity")
+        seen_keys.add(risk_key)
+        if not _is_risk_worthy(priority):
+            continue
         projections[risk_key] = _CandidateProjection(
             risk_key=risk_key,
             priority=priority,

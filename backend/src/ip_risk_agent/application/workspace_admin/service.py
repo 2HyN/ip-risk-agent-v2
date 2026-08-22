@@ -11,7 +11,12 @@ from ip_risk_agent.application.repositories import (
     ControlUnitOfWorkFactory,
     RecordNotFoundError,
 )
+from ip_risk_agent.application.observability import CorrelationIds, StructuredLogger
 from ip_risk_agent.application.risk_exclusion import exclude_mount_risks
+from ip_risk_agent.application.workspace_purge import (
+    WorkspaceDataEraser,
+    merge_counts,
+)
 from ip_risk_agent.core.audit import AuditEvent, AuditEventType
 from ip_risk_agent.core.common import ActorType, DomainInvariantError, normalize_utc
 from ip_risk_agent.core.memberships import (
@@ -65,10 +70,14 @@ class WorkspaceAdministrationService:
         unit_of_work_factory: ControlUnitOfWorkFactory,
         clock: Clock,
         id_factory: IdFactory,
+        workspace_erasers: tuple[WorkspaceDataEraser, ...] = (),
+        observer: StructuredLogger | None = None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
         self._id_factory = id_factory
+        self._workspace_erasers = workspace_erasers
+        self._observer = observer or StructuredLogger()
 
     async def create_workspace(
         self,
@@ -273,6 +282,20 @@ class WorkspaceAdministrationService:
         risk_workspace_id: str,
         actor_user_id: str,
     ) -> WorkspaceDeletionPlan:
+        """workspace 를 지운다. 상태만 바꾸는 것이 아니라 **데이터를 없앤다.**
+
+        두 걸음이다. 먼저 ``DELETING`` 으로 표시하고 감사 기록을 남긴 뒤, 등록된
+        eraser 로 실제 데이터를 지운다. 나눈 이유는 되돌릴 수 없는 일이기 때문이다.
+        지우다 실패하면 workspace 는 ``DELETING`` 으로 남고 다시 부르면 이어서
+        마무리된다. eraser 는 같은 workspace 로 두 번 불려도 안전해야 한다.
+
+        operational 을 먼저 지운다. canonical 을 먼저 지우면 실패했을 때 남은
+        operational 기록이 가리킬 곳을 잃는다. 반대 순서라면 workspace 는 아직
+        ``DELETING`` 으로 있어 다시 시도할 수 있다.
+
+        감사 기록도 workspace 범위라 함께 사라진다. 전체 말소를 택한 결과이고,
+        export 기능이 생기기 전까지는 그것이 정책이다.
+        """
         async with self._unit_of_work_factory() as uow:
             actor = await _require_membership(uow, risk_workspace_id, actor_user_id)
             workspace = await _require_workspace(uow, risk_workspace_id)
@@ -286,6 +309,19 @@ class WorkspaceAdministrationService:
             await uow.workspaces.save(plan.workspace)
             await uow.audit.append(plan.audit_event)
             await uow.commit()
+
+        reports = []
+        for eraser in self._workspace_erasers:
+            reports.append(await eraser.erase(risk_workspace_id))
+        if reports:
+            # 되돌릴 수 없는 일이므로 얼마나 지웠는지는 남긴다. 컬렉션 이름별
+            # 개수를 임의 필드로 밀어 넣지는 않는다 — 구조화 로그는 안전을 위해
+            # 필드를 고정해 두었고, 그 경계를 깨면서까지 남길 값은 아니다.
+            self._observer.event(
+                "workspace_data_erased",
+                correlation=CorrelationIds(risk_workspace_id=risk_workspace_id),
+                erased_document_count=sum(merge_counts(reports).values()),
+            )
         return plan
 
     async def update_workspace(

@@ -41,6 +41,9 @@ from ip_risk_agent.application.public_facade import (
     ControlPlaneFacadeConfig,
 )
 from ip_risk_agent.application.repositories import InMemoryControlStore
+from ip_risk_agent.application.repositories.in_memory import (
+    InMemoryWorkspaceEraser,
+)
 from ip_risk_agent.application.risk_review import RiskReviewService
 from ip_risk_agent.application.security_policy import WorkspaceSecurityService
 from ip_risk_agent.application.workspace_admin import WorkspaceAdministrationService
@@ -78,6 +81,7 @@ class ContainerOverrides:
     close_callbacks: tuple[Any, ...] = ()
     device_auth_service: DesktopDeviceAuthService | None = None
     device_auth_store: Any | None = None
+    workspace_erasers: tuple[Any, ...] = ()
     runtime_composer: (
         Callable[["RuntimeCompositionContext"], "RuntimeComposition"] | None
     ) = None
@@ -99,6 +103,9 @@ class RuntimeComposition:
     intelligence: Any | None = None
     task_authenticator: TaskAuthenticator | None = None
     close_callbacks: tuple[Any, ...] = ()
+    # workspace 삭제는 전체 말소다. canonical 과 operational 은 지우는 주체가 다르고
+    # operational 이 먼저 와야 한다 (canonical 참조를 살아 있을 때 읽는다).
+    workspace_erasers: tuple[Any, ...] = ()
 
 
 @dataclass(slots=True)
@@ -261,6 +268,7 @@ def build_container(
             observer=observer,
             oidc_config=oidc_config,
             oidc_client=oidc_client,
+            workspace_erasers=_workspace_erasers(store, overrides, composed),
         )
         original_router = create_original_source_router(
             service=OriginalSourceService(control_facade=facade, adapters=adapters),
@@ -370,6 +378,22 @@ class _WorkerTaskEnqueuer:
         raise RuntimeError("analysis task enqueue is unavailable in the worker role")
 
 
+def _workspace_erasers(store, overrides, composed) -> tuple[Any, ...]:
+    """workspace 삭제가 실제로 데이터를 지우도록 eraser 를 고른다.
+
+    프로덕션은 composer 가 canonical·operational eraser 를 함께 준다. 개발용
+    in-memory 저장소에는 그것이 없으므로 여기서 붙인다. 붙이지 않으면 개발에서는
+    삭제가 상태만 바꾸고 프로덕션에서는 지워져, 가장 위험한 동작이 환경마다
+    달라진다.
+    """
+    configured = overrides.workspace_erasers or composed.workspace_erasers
+    if configured:
+        return configured
+    if isinstance(store, InMemoryControlStore):
+        return (InMemoryWorkspaceEraser(store),)
+    return ()
+
+
 def _control_api(
     *,
     settings: Settings,
@@ -379,11 +403,14 @@ def _control_api(
     observer,
     oidc_config,
     oidc_client,
+    workspace_erasers: tuple[Any, ...] = (),
 ) -> ControlApiBundle:
     administration = WorkspaceAdministrationService(
         unit_of_work_factory=store,
         clock=utc_now,
         id_factory=opaque_id,
+        workspace_erasers=workspace_erasers,
+        observer=observer,
     )
     review = RiskReviewService(unit_of_work_factory=store, clock=utc_now)
     history = HistoryQueryService(unit_of_work_factory=store, clock=utc_now)

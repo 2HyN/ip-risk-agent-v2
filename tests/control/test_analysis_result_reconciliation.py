@@ -853,3 +853,112 @@ def test_excluding_twice_does_not_pile_up_history() -> None:
             assert len(disposition_events) == 1
 
     run(scenario())
+
+
+def test_a_low_grade_candidate_never_becomes_a_risk() -> None:
+    """검토 우선도 '하' 는 낮은 위험이 아니라 관리 대상이 아니라는 판정이다.
+
+    눈금의 아래쪽 전부가 '하' 이고 그 끝은 "전혀 risk 아님" 이다. 그런 후보로 Risk 를
+    만들면 목록이 관리할 필요 없는 것으로 채워진다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+        job, started = await add_running_job(store, suffix="low-1", revision="revision-1")
+        receipt = await service.accept_analysis_result(
+            patent_result(job, "revision-1", started, priority=ReviewPriority.LOW)
+        )
+        assert receipt.affected_risk_ids == ()
+        async with store() as uow:
+            assert await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT) == ()
+
+    run(scenario())
+
+
+def test_a_risk_resolves_when_it_falls_to_the_low_grade() -> None:
+    """상·중을 유지하면 EXISTING, '하' 로 내려가면 비로소 RESOLVED 다.
+
+    사용자는 그렇게 닫힌 Risk 를 확인하고 받아들이게 된다. 이것이 유사도 임계값을
+    두 개 두려는 이유다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(store, suffix="fall-1", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(job1, "revision-1", started1, priority=ReviewPriority.HIGH)
+        )
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            assert risk.lifecycle_state is RiskLifecycleState.NEW
+
+        # 상 -> 중 은 여전히 Risk 다. 존재가 이어진다.
+        job2, started2 = await add_running_job(
+            store, suffix="fall-2", revision="revision-2", offset_seconds=10
+        )
+        await service.accept_analysis_result(
+            patent_result(job2, "revision-2", started2, priority=ReviewPriority.MEDIUM)
+        )
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            assert risk.lifecycle_state is RiskLifecycleState.EXISTING
+            assert risk.review_priority is ReviewPriority.MEDIUM
+
+        # 중 -> 하 에서 닫힌다.
+        job3, started3 = await add_running_job(
+            store, suffix="fall-3", revision="revision-3", offset_seconds=20
+        )
+        resolved = await service.accept_analysis_result(
+            patent_result(job3, "revision-3", started3, priority=ReviewPriority.LOW)
+        )
+        assert len(resolved.resolved_risk_ids) == 1
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            assert risk.lifecycle_state is RiskLifecycleState.RESOLVED
+            # 지우지 않는다. 사용자가 확인하고 받아들일 대상으로 남는다.
+            assert risk.review_disposition is ReviewDisposition.UNREVIEWED
+
+    run(scenario())
+
+
+def test_a_non_authoritative_low_result_does_not_close_a_risk() -> None:
+    """'하' 는 알아보고 내린 판정이고, 'INCONCLUSIVE' 는 알아보지 못한 것이다.
+
+    둘을 섞으면 provider 조회가 실패했을 뿐인데 Risk 가 해결된 것처럼 닫힌다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+        job1, started1 = await add_running_job(store, suffix="unk-1", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(job1, "revision-1", started1, priority=ReviewPriority.HIGH)
+        )
+        job2, started2 = await add_running_job(
+            store, suffix="unk-2", revision="revision-2", offset_seconds=10
+        )
+        await service.accept_analysis_result(
+            patent_result(
+                job2,
+                "revision-2",
+                started2,
+                priority=ReviewPriority.LOW,
+                coverage=AnalysisCoverage.PARTIAL,
+            )
+        )
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            assert risk.lifecycle_state is RiskLifecycleState.NEW
+
+    run(scenario())

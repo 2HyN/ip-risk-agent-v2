@@ -43,6 +43,10 @@ from ip_risk_agent.connectors.local.routes import (
 )
 from ip_risk_agent.core.common import stable_key
 from ip_risk_agent.gcp.identity import GoogleOidcTaskAuthenticator
+from ip_risk_agent.gcp.operational_eraser import FirestoreOperationalEraser
+from ip_risk_agent.persistence.core_firestore.eraser import (
+    FirestoreWorkspaceEraser,
+)
 from ip_risk_agent.gcp.operational_firestore import (
     FirestoreMaintenanceStore,
     FirestoreOAuthStateStore,
@@ -413,6 +417,12 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             service_account_email=TASKS_SERVICE_ACCOUNT,
         ),
         close_callbacks=tuple(close_callbacks),
+        # operational 이 먼저다. canonical 참조(mount·connection)를 살아 있을 때
+        # 읽어야 어떤 operational 기록이 이 workspace 것인지 알 수 있다.
+        workspace_erasers=(
+            FirestoreOperationalEraser(foundation.clients.firestore),
+            FirestoreWorkspaceEraser(foundation.clients.firestore),
+        ),
     )
 
 

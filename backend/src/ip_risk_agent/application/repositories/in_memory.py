@@ -829,7 +829,136 @@ class InMemoryControlStore:
         return self._revision
 
 
+class InMemoryWorkspaceEraser:
+    """workspace 하나에 속한 canonical 데이터를 모두 지운다.
+
+    Firestore 구현과 **같은 순서**로 지운다. 순서가 갈리면 시험이 통과해도 프로덕션이
+    다르게 동작한다. workspace 문서는 언제나 마지막이다 — 그것이 남아 있어야 도중에
+    실패했을 때 다시 시도할 수 있다.
+    """
+
+    def __init__(self, store: InMemoryControlStore) -> None:
+        self._store = store
+
+    async def erase(self, risk_workspace_id: str) -> dict[str, int]:
+        state = self._store._state  # noqa: SLF001 - 같은 패키지의 저장소 내부다
+        counts: dict[str, int] = {}
+
+        mount_ids = {
+            key
+            for key, mount in state.mounts.items()
+            if mount.risk_workspace_id == risk_workspace_id
+        }
+        artifact_ids = {
+            key
+            for key, artifact in state.artifacts.items()
+            if artifact.risk_workspace_id == risk_workspace_id
+        }
+        change_ids = {
+            key
+            for key, event in state.change_events.items()
+            if event.risk_workspace_id == risk_workspace_id
+        }
+        risk_ids = {
+            key
+            for key, risk in state.risks.items()
+            if risk.risk_workspace_id == risk_workspace_id
+        }
+        source_workspace_ids = {
+            mount.source_workspace_id
+            for mount in state.mounts.values()
+            if mount.risk_workspace_id == risk_workspace_id
+        }
+
+        def drop(name: str, mapping: dict, keys) -> None:
+            removed = 0
+            for key in list(keys):
+                if mapping.pop(key, None) is not None:
+                    removed += 1
+            if removed:
+                counts[name] = counts.get(name, 0) + removed
+
+        drop("risk_evidence", state.risk_evidence, [
+            key for key, value in state.risk_evidence.items() if value.risk_id in risk_ids
+        ])
+        drop("risk_events", state.risk_events, [
+            key for key, value in state.risk_events.items() if value.risk_id in risk_ids
+        ])
+        drop("analysis_jobs", state.analysis_jobs, [
+            key
+            for key, value in state.analysis_jobs.items()
+            if value.change_event_id in change_ids or value.artifact_id in artifact_ids
+        ])
+        drop("artifact_states", state.artifact_states, artifact_ids)
+
+        # 고유키 색인은 소유 문서가 사라지면 함께 지운다. 남기면 같은 alias 나
+        # risk key 를 다시 쓸 수 없다.
+        drop("risks_by_key", state.risks_by_key, [
+            key for key, owner in state.risks_by_key.items() if owner in risk_ids
+        ])
+        drop("artifacts_by_source_identity", state.artifacts_by_source_identity, [
+            key
+            for key, owner in state.artifacts_by_source_identity.items()
+            if owner in artifact_ids
+        ])
+        drop("mounts_by_alias", state.mounts_by_alias, [
+            key for key, owner in state.mounts_by_alias.items() if owner in mount_ids
+        ])
+        drop("mounts_by_source_workspace", state.mounts_by_source_workspace, [
+            key
+            for key, owner in state.mounts_by_source_workspace.items()
+            if owner in mount_ids
+        ])
+        drop("change_events_by_fingerprint", state.change_events_by_fingerprint, [
+            key
+            for key, owner in state.change_events_by_fingerprint.items()
+            if owner in change_ids
+        ])
+
+        drop("risks", state.risks, risk_ids)
+        drop("change_events", state.change_events, change_ids)
+        drop("artifacts", state.artifacts, artifact_ids)
+        drop("workspace_mounts", state.mounts, mount_ids)
+        drop("memberships", state.memberships, [
+            key
+            for key, value in state.memberships.items()
+            if value.risk_workspace_id == risk_workspace_id
+        ])
+        drop("audit_events", state.audit_events, [
+            key
+            for key, value in state.audit_events.items()
+            if value.risk_workspace_id == risk_workspace_id
+        ])
+        drop("source_access_events", state.source_access_events, [
+            key
+            for key, value in state.source_access_events.items()
+            if value.risk_workspace_id == risk_workspace_id
+        ])
+        drop("notifications", state.notifications, [
+            key
+            for key, value in state.notifications.items()
+            if value.risk_workspace_id == risk_workspace_id
+        ])
+
+        # 다른 workspace 의 mount 가 아직 참조하면 남긴다. source workspace 는
+        # workspace 소유가 아니라 공유될 수 있는 것이다.
+        orphaned = {
+            source_workspace_id
+            for source_workspace_id in source_workspace_ids
+            if not any(
+                mount.source_workspace_id == source_workspace_id
+                for mount in state.mounts.values()
+            )
+        }
+        drop("source_workspaces", state.source_workspaces, orphaned)
+
+        # 마지막에 workspace 자신.
+        drop("risk_workspaces", state.workspaces, [risk_workspace_id])
+        return counts
+
+
 __all__ = [
     "InMemoryControlStore",
     "InMemoryControlUnitOfWork",
+    "InMemoryWorkspaceEraser",
 ]

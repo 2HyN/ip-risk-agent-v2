@@ -120,6 +120,9 @@ class StructuredLogger:
         provider_status_category: str | None = None,
         latency_ms: int | None = None,
         candidate_count: int | None = None,
+        # 되돌릴 수 없는 삭제가 얼마나 많은 문서를 없앴는지. 값이 아니라
+        # 개수만 남기므로 로그 정책을 지킨다.
+        erased_document_count: int | None = None,
         coverage: str | None = None,
         model_version: str | None = None,
         prompt_version: str | None = None,
@@ -158,6 +161,7 @@ class StructuredLogger:
         for field_name, value in {
             "latency_ms": latency_ms,
             "candidate_count": candidate_count,
+            "erased_document_count": erased_document_count,
             "status_code": status_code,
         }.items():
             if value is not None:

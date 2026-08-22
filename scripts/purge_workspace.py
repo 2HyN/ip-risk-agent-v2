@@ -1,12 +1,11 @@
 """테스트용 Risk Workspace 완전 삭제.
 
-제품의 삭제 정책은 아직 정해지지 않았다. 제품 경로의 `DELETE /workspaces/{id}` 는
-상태를 `DELETING` 으로 바꾸는 soft delete 이고 데이터를 지우지 않는다. 이 도구는
-**반복 테스트를 위해** 한 workspace 의 흔적을 canonical/operational 양쪽에서
-지운다.
+제품 경로(`DELETE /workspaces/{id}`)도 2026-08-22 부터 **전체 말소**다. 이 도구는
+그것과 **같은 eraser** 를 부른다. 예전에는 여기에 따로 구현한 삭제 로직이 있었는데,
+고유키 색인을 남겨 두는 결함이 있었다. 같은 코드를 두 번 쓰면 한쪽만 고쳐진다.
 
-배포된 앱에 삭제 표면을 만들지 않으려고 API 가 아니라 스크립트로 둔다. 실행에는
-Firestore 접근 권한이 필요하다 (`gcloud auth application-default login`).
+그럼에도 이 도구가 따로 있는 이유는, 로그인·소유자 확인 없이 반복 테스트에서
+빠르게 지우기 위해서다. 제품 경로는 소유자만 부를 수 있고 세션이 필요하다.
 
     python scripts/purge_workspace.py --workspace-id workspace-XXXX          # dry-run
     python scripts/purge_workspace.py --workspace-id workspace-XXXX --confirm
@@ -14,7 +13,7 @@ Firestore 접근 권한이 필요하다 (`gcloud auth application-default login`
 지우지 않는 것:
 
 * `users` — 계정은 workspace 소유가 아니다
-* Secret Manager 의 동적 provider credential — 다른 workspace 가 같은 provider
+* Secret Manager 의 provider credential — 다른 workspace 가 같은 provider
   연결을 쓸 수 있다. 필요하면 `gcloud secrets delete` 로 따로 지운다
 * Drive/GitHub 쪽 실제 파일 — 이 도구는 우리 저장소만 건드린다
 """
@@ -25,35 +24,9 @@ import argparse
 import asyncio
 import sys
 
+from ip_risk_agent.gcp.operational_eraser import FirestoreOperationalEraser
 from ip_risk_agent.gcp_contract import FIRESTORE_DATABASE, PROJECT_ID
-
-# canonical: 최상위 risk_workspace_id 로 바로 찾을 수 있는 것
-WORKSPACE_SCOPED = (
-    "memberships",
-    "workspace_mounts",
-    "artifacts",
-    "change_events",
-    "risks",
-    "audit_events",
-    "source_access_events",
-    "notifications",
-)
-
-# operational: record.* 아래 값으로 걸러야 하는 것
-OPERATIONAL = (
-    "source_operational_mount_bindings",
-    "source_operational_pending_connections",
-    "source_operational_drive_runtime",
-    "source_operational_drive_tracking",
-    "source_operational_github_runtime",
-    "source_operational_github_tracking",
-    "source_operational_local_runtime",
-    "source_operational_device_mounts",
-    "source_operational_devices",
-    "source_operational_device_challenges",
-    "source_operational_device_credentials",
-    "source_operational_oauth_states",
-)
+from ip_risk_agent.persistence.core_firestore.eraser import FirestoreWorkspaceEraser
 
 
 def _client(database: str):
@@ -62,143 +35,71 @@ def _client(database: str):
     return firestore.AsyncClient(project=PROJECT_ID, database=database)
 
 
-async def _ids_where(client, collection: str, field: str, value: str) -> list[str]:
-    stream = client.collection(collection).where(field, "==", value).stream()
-    return [document.id async for document in stream]
+async def count_only(client, workspace_id: str) -> dict[str, int]:
+    """무엇을 지울지 세기만 한다. 아무것도 바꾸지 않는다."""
+    counts: dict[str, int] = {}
+    recorded: list[tuple[str, str]] = []
 
+    class _Recorder:
+        def __init__(self, inner) -> None:
+            self._inner = inner
 
-async def _scan(client, collection: str, predicate) -> list[str]:
-    """작은 컬렉션은 훑어서 고른다. 테스트 규모에서만 쓴다."""
-    matched: list[str] = []
-    async for document in client.collection(collection).stream():
-        data = document.to_dict() or {}
-        record = data.get("record")
-        if predicate(data, record if isinstance(record, dict) else {}):
-            matched.append(document.id)
-    return matched
+        def collection(self, name: str):
+            return _CollectionProxy(self._inner.collection(name), name)
 
+    class _CollectionProxy:
+        def __init__(self, inner, name: str) -> None:
+            self._inner = inner
+            self._name = name
 
-async def _delete(client, collection: str, ids: list[str], *, confirm: bool) -> int:
-    if not ids:
-        return 0
-    if confirm:
-        for document_id in ids:
-            await client.collection(collection).document(document_id).delete()
-    return len(ids)
+        def document(self, document_id: str):
+            return _DocumentProxy(self._inner.document(document_id), self._name)
+
+        def where(self, **kwargs):
+            return self._inner.where(**kwargs)
+
+        def stream(self):
+            return self._inner.stream()
+
+    class _DocumentProxy:
+        def __init__(self, inner, collection: str) -> None:
+            self._inner = inner
+            self._collection = collection
+
+        async def get(self):
+            return await self._inner.get()
+
+        async def delete(self) -> None:
+            recorded.append((self._collection, self._inner.id))
+
+    recorder = _Recorder(client)
+    for eraser in (
+        FirestoreOperationalEraser(recorder),
+        FirestoreWorkspaceEraser(recorder),
+    ):
+        await eraser.erase(workspace_id)
+    for collection, _document_id in recorded:
+        counts[collection] = counts.get(collection, 0) + 1
+    return counts
 
 
 async def purge(workspace_id: str, *, database: str, confirm: bool) -> dict[str, int]:
     client = _client(database)
-    counts: dict[str, int] = {}
     try:
-        # 1. 파생 대상을 지우기 전에 참조를 먼저 모은다.
-        mount_ids = await _ids_where(
-            client, "workspace_mounts", "risk_workspace_id", workspace_id
-        )
-        artifact_ids = await _ids_where(
-            client, "artifacts", "risk_workspace_id", workspace_id
-        )
-        change_ids = await _ids_where(
-            client, "change_events", "risk_workspace_id", workspace_id
-        )
-        risk_ids = await _ids_where(client, "risks", "risk_workspace_id", workspace_id)
-
-        source_workspace_ids: set[str] = set()
-        connection_ids: set[str] = set()
-        for mount_id in mount_ids:
-            snapshot = await client.collection("workspace_mounts").document(mount_id).get()
-            data = snapshot.to_dict() or {}
-            if value := data.get("source_workspace_id"):
-                source_workspace_ids.add(str(value))
-            if value := data.get("source_connection_id"):
-                connection_ids.add(str(value))
-
-        # 2. 참조로만 찾을 수 있는 자식 레코드.
-        counts["artifact_states"] = await _delete(
-            client, "artifact_states", artifact_ids, confirm=confirm
-        )
-        counts["analysis_jobs"] = await _delete(
-            client,
-            "analysis_jobs",
-            await _scan(
-                client,
-                "analysis_jobs",
-                lambda data, _r: str(data.get("change_event_id", "")) in set(change_ids)
-                or str(data.get("artifact_id", "")) in set(artifact_ids),
-            ),
-            confirm=confirm,
-        )
-        for child in ("risk_evidence", "risk_events"):
-            counts[child] = await _delete(
-                client,
-                child,
-                await _scan(
-                    client,
-                    child,
-                    lambda data, _r: str(data.get("risk_id", "")) in set(risk_ids),
-                ),
-                confirm=confirm,
-            )
-
-        # 3. workspace 범위 canonical.
-        for collection in WORKSPACE_SCOPED:
-            counts[collection] = await _delete(
-                client,
-                collection,
-                await _ids_where(client, collection, "risk_workspace_id", workspace_id),
-                confirm=confirm,
-            )
-        counts["invitations"] = await _delete(
-            client,
-            "invitations",
-            await _ids_where(client, "invitations", "risk_workspace_id", workspace_id),
-            confirm=confirm,
-        )
-
-        # 4. 이 workspace 의 mount 만 참조하던 source workspace.
-        orphaned: list[str] = []
-        for source_workspace_id in sorted(source_workspace_ids):
-            others = await _scan(
-                client,
-                "workspace_mounts",
-                lambda data, _r, target=source_workspace_id: (
-                    str(data.get("source_workspace_id", "")) == target
-                ),
-            )
-            if not others:  # 위에서 이미 지웠으면 남은 참조가 없다.
-                orphaned.append(source_workspace_id)
-        counts["source_workspaces"] = await _delete(
-            client, "source_workspaces", orphaned, confirm=confirm
-        )
-
-        # 5. operational. mount/workspace/connection 중 하나라도 걸리면 지운다.
-        mount_set, connection_set = set(mount_ids), set(connection_ids)
-        for collection in OPERATIONAL:
-            counts[collection] = await _delete(
-                client,
-                collection,
-                await _scan(
-                    client,
-                    collection,
-                    lambda data, record: (
-                        record.get("risk_workspace_id") == workspace_id
-                        or data.get("risk_workspace_id") == workspace_id
-                        or str(record.get("mount_id", "")) in mount_set
-                        or str(data.get("mount_id", "")) in mount_set
-                        or str(record.get("connection_id", "")) in connection_set
-                        or str(data.get("canonical_connection_id", "")) in connection_set
-                    ),
-                ),
-                confirm=confirm,
-            )
-
-        # 6. 마지막으로 workspace 자체.
-        counts["risk_workspaces"] = await _delete(
-            client, "risk_workspaces", [workspace_id], confirm=confirm
-        )
+        if not confirm:
+            return await count_only(client, workspace_id)
+        # 제품 경로와 같은 순서다 — operational 이 먼저여야 canonical 참조를
+        # 살아 있을 때 읽을 수 있다.
+        merged: dict[str, int] = {}
+        for eraser in (
+            FirestoreOperationalEraser(client),
+            FirestoreWorkspaceEraser(client),
+        ):
+            for name, count in (await eraser.erase(workspace_id)).items():
+                merged[name] = merged.get(name, 0) + count
+        return merged
     finally:
         client.close()
-    return counts
 
 
 def validate_target(workspace_id: str, database: str) -> str | None:
