@@ -1083,3 +1083,73 @@ td small {
 .watched-files__mount summary {
   cursor: pointer;
 }
+
+
+/* ------------------------------------------------ analysis progress */
+.analysis-progress {
+  margin: 0.75rem 0;
+  max-width: 480px;
+}
+.analysis-progress__label {
+  margin: 0 0 0.35rem;
+  color: #334155;
+  font-size: 0.9rem;
+}
+.analysis-progress__bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.analysis-progress__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #2563eb;
+  transition: width 0.6s ease;
+}
+
+
+/* ------------------------------------------------ evidence compare view
+ * v1 의 좌우 대조 감각: 왼쪽 우리 문서, 오른쪽 특허문/라이선스 근거.
+ */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .compare-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.compare-col {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  min-width: 0;
+}
+.compare-col__title {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+.compare-item {
+  margin-bottom: 1rem;
+}
+.compare-item blockquote {
+  margin: 0.4rem 0;
+  padding: 0.5rem 0.75rem;
+  background: #ffffff;
+  border-left: 3px solid #cbd5e1;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.compare-item__ref {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+  word-break: break-all;
+}

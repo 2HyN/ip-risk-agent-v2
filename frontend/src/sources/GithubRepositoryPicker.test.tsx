@@ -32,6 +32,10 @@ function api(overrides: Partial<SourcesApi> = {}): SourcesApi {
       files: [],
     })),
     retryFailedAnalyses: vi.fn(async () => ({ requeued: 0, expired: 0 })),
+    getAnalysisProgress: vi.fn(async () => ({
+      pending: 0, processing: 0, done: 0, failed: 0, total: 0,
+    })),
+    listSourceConnections: vi.fn(async () => []),
     ...overrides,
   };
 }

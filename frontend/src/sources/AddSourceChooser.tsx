@@ -20,6 +20,9 @@ export interface AddSourceChooserProps {
   isDesktop: boolean;
   riskWorkspaceId: string;
   connectionApiClient: ConnectionApiClient;
+  /** 이미 살아 있는 Drive 연결. 있으면 OAuth 를 다시 타지 않고 폴더
+   * 선택으로 바로 간다 — 매번 구글 동의 화면을 오가는 이중 수고가 없다. */
+  onReuseDriveConnection?: (() => void) | undefined;
 }
 
 export function AddSourceChooser({
@@ -27,12 +30,18 @@ export function AddSourceChooser({
   isDesktop,
   riskWorkspaceId,
   connectionApiClient,
+  onReuseDriveConnection,
 }: AddSourceChooserProps) {
   const [error, setError] = useState<string | null>(null);
 
   const handleDriveClick = async (): Promise<void> => {
     onSelect("GOOGLE_DRIVE");
     setError(null);
+    if (onReuseDriveConnection) {
+      // 연결은 이미 있다. 폴더 선택으로 바로 간다.
+      onReuseDriveConnection();
+      return;
+    }
     try {
       const { authorizeUrl } = await connectionApiClient.startDriveConnection(riskWorkspaceId);
       window.location.href = authorizeUrl;

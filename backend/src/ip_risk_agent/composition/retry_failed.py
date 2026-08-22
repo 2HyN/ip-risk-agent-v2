@@ -28,6 +28,20 @@ from ip_risk_agent.application.process_change.transitions import requeue_change_
 logger = logging.getLogger(__name__)
 
 
+class AnalysisProgressResponse(BaseModel):
+    """화면의 "검토 중" 표시와 진행 바가 쓰는 집계.
+
+    이것이 없으면 사용자는 분석이 돌고 있는지 끝났는지 알 방법이 없다 —
+    특허 한 건이 수십 초라, 침묵은 "고장"으로 읽힌다.
+    """
+
+    pending: int
+    processing: int
+    done: int
+    failed: int
+    total: int
+
+
 class RetryFailedResponse(BaseModel):
     requeued: int
     # relay 보존(7일)이 지난 실패. 이 버튼으로는 못 살리므로 숨기지 않고
@@ -51,6 +65,27 @@ def create_retry_failed_router(
     task_enqueuer=None,
 ) -> APIRouter:
     router = APIRouter()
+
+    @router.get(
+        "/api/v1/workspaces/{vws_id}/analyses/progress",
+        response_model=AnalysisProgressResponse,
+    )
+    async def analysis_progress(
+        vws_id: str, request: Request
+    ) -> AnalysisProgressResponse:
+        await authz_dependency(request, vws_id)
+        async with unit_of_work_factory() as uow:
+            events = await uow.change_events.list_for_workspace(vws_id)
+        counts = {"PENDING": 0, "PROCESSING": 0, "DONE": 0, "FAILED": 0}
+        for event in events:
+            counts[event.status.value] = counts.get(event.status.value, 0) + 1
+        return AnalysisProgressResponse(
+            pending=counts["PENDING"],
+            processing=counts["PROCESSING"],
+            done=counts["DONE"],
+            failed=counts["FAILED"],
+            total=len(events),
+        )
 
     @router.post(
         "/api/v1/workspaces/{vws_id}/analyses/retry-failed",
@@ -177,4 +212,8 @@ def create_retry_failed_router(
     return router
 
 
-__all__ = ["RetryFailedResponse", "create_retry_failed_router"]
+__all__ = [
+    "AnalysisProgressResponse",
+    "RetryFailedResponse",
+    "create_retry_failed_router",
+]

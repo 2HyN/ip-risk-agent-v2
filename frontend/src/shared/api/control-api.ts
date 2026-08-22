@@ -70,6 +70,11 @@ export class ControlApi {
     this.client.request<Page<Mount>>(
       `/api/v1/workspaces/${id}/mounts${queryString({ cursor })}`,
     );
+  renameMount = (id: string, mountId: string, alias: string) =>
+    this.client.request<Mount>(
+      `/api/v1/workspaces/${id}/mounts/${mountId}/alias`,
+      { method: "PATCH", body: JSON.stringify({ alias }) },
+    );
   removeMount = (id: string, mountId: string) =>
     this.client.request<void>(`/api/v1/workspaces/${id}/mounts/${mountId}`, {
       method: "DELETE",

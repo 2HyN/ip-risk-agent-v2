@@ -26,6 +26,8 @@ export type ConnectedSourceListProps = {
   error: string | null;
   /** 없으면 제거 열을 그리지 않는다. 권한 판단은 backend 가 한다. */
   onRemove?: (mount: Mount) => void;
+  /** 표시 이름 변경. 실제 폴더/저장소 이름은 건드리지 않는다. */
+  onRename?: (mount: Mount) => void;
   /** 없으면 파일 펼침을 그리지 않는다. */
   loadFiles?: (mount: Mount) => Promise<TrackedFiles>;
 };
@@ -56,6 +58,7 @@ export function ConnectedSourceList({
   loading,
   error,
   onRemove,
+  onRename,
   loadFiles,
 }: ConnectedSourceListProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -124,6 +127,15 @@ export function ConnectedSourceList({
               )}
               {onRemove && (
                 <td>
+                  {onRename && (
+                    <button
+                      type="button"
+                      onClick={() => onRename(mount)}
+                      title="표시 이름 변경 (실제 폴더 이름은 그대로)"
+                    >
+                      이름 변경
+                    </button>
+                  )}{" "}
                   <button type="button" onClick={() => onRemove(mount)}>
                     감시 중단
                   </button>

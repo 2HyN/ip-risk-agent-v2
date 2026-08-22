@@ -284,6 +284,10 @@ def _mount_source_routers(
             github_scope_store=(
                 container.github.tracking_scope_store if container.github else None
             ),
+            connection_bindings=container.bindings,
+            workspace_authz=authz.workspace_scoped(
+                facade.authorize_vws_action, PublicVwsAction.SOURCE_MOUNT
+            ),
         )
     )
 

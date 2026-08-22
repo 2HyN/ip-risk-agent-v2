@@ -25,6 +25,15 @@ class TrackedFile(BaseModel):
     path: str
 
 
+class SourceConnectionSummary(BaseModel):
+    connection_id: str
+    source_type: str
+
+
+class SourceConnectionsResponse(BaseModel):
+    connections: list[SourceConnectionSummary] = []
+
+
 class TrackedFilesResponse(BaseModel):
     mount_id: str
     source_type: str
@@ -40,8 +49,36 @@ def create_tracked_files_router(
     authz_dependency,
     drive_scope_store=None,
     github_scope_store=None,
+    connection_bindings=None,
+    workspace_authz=None,
 ) -> APIRouter:
     router = APIRouter()
+
+    @router.get(
+        "/api/v1/workspaces/{vws_id}/source-connections",
+        response_model=SourceConnectionsResponse,
+    )
+    async def list_connections(vws_id: str, request: Request) -> SourceConnectionsResponse:
+        """이 워크스페이스가 이미 연 provider 연결들.
+
+        Drive 는 연결이 살아 있으면 OAuth 를 다시 탈 필요가 없다. 이 목록이
+        있어야 화면이 "연결 다시 하기"와 "폴더만 다시 고르기"를 구분한다.
+        """
+        if workspace_authz is not None:
+            await workspace_authz(request, vws_id)
+        if connection_bindings is None:
+            return SourceConnectionsResponse()
+        records = await connection_bindings.connections_for_workspace(vws_id)
+        return SourceConnectionsResponse(
+            connections=[
+                SourceConnectionSummary(
+                    connection_id=str(record.get("connection_id")),
+                    source_type=str(record.get("source_type")),
+                )
+                for record in records
+                if record.get("connection_id") and record.get("source_type")
+            ]
+        )
 
     @router.get(
         "/api/v1/source-connections/mounts/{mount_id}/tracked-files",
@@ -96,4 +133,10 @@ def create_tracked_files_router(
     return router
 
 
-__all__ = ["TrackedFile", "TrackedFilesResponse", "create_tracked_files_router"]
+__all__ = [
+    "SourceConnectionSummary",
+    "SourceConnectionsResponse",
+    "TrackedFile",
+    "TrackedFilesResponse",
+    "create_tracked_files_router",
+]

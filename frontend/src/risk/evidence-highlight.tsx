@@ -12,6 +12,22 @@
 
 const GENERIC_TOKENS = new Set(["pypi", "npm", "license", "the", "and"]);
 
+// 특허 제목에 흔한 기능어. 이런 단어까지 칠하면 아무것도 강조되지 않는다.
+const PATENT_STOPWORDS = new Set([
+  "method",
+  "system",
+  "apparatus",
+  "device",
+  "thereof",
+  "using",
+  "based",
+  "particularly",
+  "enabling",
+  "providing",
+  "which",
+  "wherein",
+]);
+
 /** "pypi:pyqt5@5.15.11 — GPL-3.0-ONLY" 류의 요약에서 표시할 토큰을 뽑는다. */
 export function highlightTokens(summary: string): string[] {
   const tokens = new Set<string>();
@@ -26,6 +42,16 @@ export function highlightTokens(summary: string): string[] {
   // SPDX 식별자 모양 (GPL-3.0-ONLY, AGPL-3.0-only, LGPL-2.1 …).
   for (const match of summary.matchAll(/\b[A-Z]+[A-Za-z]*-[\d][\w.-]*\b/g)) {
     tokens.add(match[0]);
+  }
+
+  // 특허 제목류 요약: 의미 있는 영단어를 뽑아 초록에서 표시한다.
+  // 정밀한 문장 대응은 대조 근거에 인용 위치가 실려야 가능하므로(후속),
+  // 지금은 "어떤 구성 요소가 겹치는지"를 단어 수준으로 안내한다.
+  if (!coordinate) {
+    for (const match of summary.matchAll(/\b[A-Za-z][A-Za-z-]{4,}\b/g)) {
+      const word = match[0];
+      if (!PATENT_STOPWORDS.has(word.toLowerCase())) tokens.add(word);
+    }
   }
 
   return [...tokens].filter(

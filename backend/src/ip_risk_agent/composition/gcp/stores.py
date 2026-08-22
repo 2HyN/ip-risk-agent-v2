@@ -194,6 +194,13 @@ class FirestoreMountBindingStore:
     async def connection(self, connection_id: str) -> dict | None:
         return await self._connections.read(connection_id)
 
+    async def connections_for_workspace(self, risk_workspace_id: str) -> list[dict]:
+        """이 워크스페이스가 연 provider 연결들.
+
+        "Drive 를 다시 누르지 않고 폴더만 다시 고르기"가 이 목록에서 시작한다.
+        """
+        return await self._connections.query("risk_workspace_id", risk_workspace_id)
+
     async def mount(self, mount_id: str) -> dict | None:
         return await self._mounts.read(mount_id)
 

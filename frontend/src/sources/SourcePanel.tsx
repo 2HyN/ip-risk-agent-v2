@@ -24,7 +24,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { HttpConnectionApiClient } from "./api/connectionClient.js";
-import { HttpSourcesApi, type Mount } from "./api/sourcesClient.js";
+import {
+  HttpSourcesApi,
+  type AnalysisProgress,
+  type Mount,
+} from "./api/sourcesClient.js";
 import { AddSourceChooser, type SourceProviderType } from "./AddSourceChooser.js";
 import { ConnectedSourceList } from "./ConnectedSourceList.js";
 import { ConnectLocalSource } from "./ConnectLocalSource.js";
@@ -104,6 +108,8 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
   const [retryBusy, setRetryBusy] = useState(false);
+  const [driveConnectionId, setDriveConnectionId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<AnalysisProgress | null>(null);
 
   const refresh = useCallback(async () => {
     setListError(null);
@@ -121,6 +127,48 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
     setLoading(true);
     void refresh();
   }, [refresh]);
+
+  // 살아 있는 Drive 연결이 있으면 OAuth 를 다시 타지 않고 폴더 선택으로
+  // 바로 간다. 매번 구글 동의 화면을 오가는 이중 수고를 없앤다.
+  useEffect(() => {
+    let cancelled = false;
+    sourcesApi
+      .listSourceConnections(workspace.id)
+      .then((connections) => {
+        if (cancelled) return;
+        const drive = connections.find((c) => c.sourceType === "GOOGLE_DRIVE");
+        setDriveConnectionId(drive ? drive.connectionId : null);
+      })
+      .catch((cause) => console.error(cause));
+    return () => {
+      cancelled = true;
+    };
+  }, [sourcesApi, workspace.id]);
+
+  // 분석 진행 현황. 검토가 남아 있는 동안엔 5초마다 갱신한다 — 특허 한
+  // 건이 수십 초라, 침묵은 "고장"으로 읽힌다.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const next = await sourcesApi.getAnalysisProgress(workspace.id);
+        if (cancelled) return;
+        setProgress(next);
+        if (next.pending + next.processing > 0) {
+          timer = setTimeout(() => void poll(), 5_000);
+        }
+      } catch (cause) {
+        console.error(cause);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [sourcesApi, workspace.id, retryMessage]);
 
   // 워크스페이스를 오가면 그 워크스페이스의 진행 상태를 다시 읽는다.
   useEffect(() => {
@@ -179,6 +227,28 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
     }
   }, [sourcesApi, workspace.id]);
 
+  const renameMount = useCallback(
+    async (mount: Mount) => {
+      // 표시 이름만 바꾼다. 실제 폴더/저장소 이름은 건드리지 않는다.
+      const next = window.prompt(
+        "새 표시 이름을 입력하세요.\n(실제 폴더/저장소 이름은 바뀌지 않습니다)",
+        mount.alias,
+      );
+      if (!next || next.trim() === "" || next.trim() === mount.alias) return;
+      setRemoveError(null);
+      try {
+        await controlApi.renameMount(workspace.id, mount.id, next.trim());
+        await refresh();
+      } catch (cause) {
+        console.error(cause);
+        setRemoveError(
+          "이름을 바꾸지 못했습니다. 같은 이름이 이미 있거나 권한이 없습니다.",
+        );
+      }
+    },
+    [controlApi, refresh, workspace.id],
+  );
+
   const removeMount = useCallback(
     async (mount: Mount) => {
       // 원본은 건드리지 않는다 — 감시만 중단된다. 그래도 목록에서 사라지는
@@ -228,9 +298,40 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
         loading={loading}
         error={listError}
         onRemove={removeMount}
+        onRename={renameMount}
         loadFiles={(mount) => sourcesApi.listTrackedFiles(mount.id)}
       />
       {removeError && <p style={{ color: "red" }}>{removeError}</p>}
+
+      {progress && progress.total > 0 && (
+        <div className="analysis-progress">
+          {progress.pending + progress.processing > 0 ? (
+            <p className="analysis-progress__label">
+              검토 중… {progress.done + progress.failed}/{progress.total} 완료
+              {progress.processing > 0 && ` (지금 ${progress.processing}건 분석 중)`}
+            </p>
+          ) : (
+            <p className="analysis-progress__label">
+              검토 완료 — {progress.done}건
+              {progress.failed > 0 && `, 실패 ${progress.failed}건`}
+            </p>
+          )}
+          <div
+            className="analysis-progress__bar"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={progress.total}
+            aria-valuenow={progress.done + progress.failed}
+          >
+            <div
+              className="analysis-progress__fill"
+              style={{
+                width: `${Math.round(((progress.done + progress.failed) / progress.total) * 100)}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       <p>
         <button type="button" onClick={() => void retryFailed()} disabled={retryBusy}>
@@ -260,6 +361,18 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
             isDesktop={platform.platform === "desktop"}
             riskWorkspaceId={workspace.id}
             connectionApiClient={connectionApiClient}
+            onReuseDriveConnection={
+              driveConnectionId
+                ? () => {
+                    const next = {
+                      connectionId: driveConnectionId,
+                      provider: "google_drive",
+                    };
+                    writePending(workspace.id, next);
+                    setPending(next);
+                  }
+                : undefined
+            }
           />
 
           {selected === "LOCAL" && <ConnectLocalSource platform={platform} />}

@@ -136,24 +136,57 @@ export function RiskDetailPage() {
                 description="The risk remains canonical, but no safe evidence excerpt is available."
               />
             ) : (
-              <div className="evidence-list">
-                {detail.evidence.map((evidence) => (
-                  <article key={evidence.id}>
+              (() => {
+                // 왼쪽엔 우리 문서, 오른쪽엔 대조 상대(특허문/라이선스 근거).
+                // 한 줄로 섞어 나열하면 "무엇과 무엇을 비교한 것인지"를
+                // 독자가 재구성해야 한다 — 그 수고를 화면이 진다.
+                const ours = detail.evidence.filter(
+                  (item) => item.evidence_type === "SOURCE_EXCERPT",
+                );
+                const theirs = detail.evidence.filter(
+                  (item) => item.evidence_type !== "SOURCE_EXCERPT",
+                );
+                const tokens = highlightTokens(risk.summary);
+                const renderItem = (evidence: (typeof detail.evidence)[number]) => (
+                  <article key={evidence.id} className="compare-item">
                     <div className="card-row">
                       <Badge tone="info">{evidence.evidence_type}</Badge>
                       <small>Revision {evidence.source_revision}</small>
                     </div>
                     <HighlightedExcerpt
                       text={evidence.excerpt}
-                      tokens={highlightTokens(risk.summary)}
+                      tokens={tokens}
                       priority={risk.review_priority}
                     />
-                    <p>
+                    <p className="compare-item__ref">
                       <strong>Reference:</strong> {evidence.reference}
                     </p>
                   </article>
-                ))}
-              </div>
+                );
+                if (ours.length === 0 || theirs.length === 0) {
+                  return (
+                    <div className="evidence-list">
+                      {detail.evidence.map(renderItem)}
+                    </div>
+                  );
+                }
+                return (
+                  <div className="compare-grid">
+                    <section className="compare-col">
+                      <h3 className="compare-col__title">검사 문서</h3>
+                      {ours.map(renderItem)}
+                    </section>
+                    <section className="compare-col">
+                      <h3 className="compare-col__title">
+                        {risk.analysis_type === "PATENT"
+                          ? "선행 특허"
+                          : "라이선스 근거"}
+                      </h3>
+                      {theirs.map(renderItem)}
+                    </section>
+                  </div>
+                );
+              })()
             )}
             <div className="source-assurance">
               <strong>No raw source preview</strong>

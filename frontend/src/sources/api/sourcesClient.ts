@@ -71,6 +71,19 @@ export type TrackedFiles = {
   files: Array<{ id: string; path: string }>;
 };
 
+export type AnalysisProgress = {
+  pending: number;
+  processing: number;
+  done: number;
+  failed: number;
+  total: number;
+};
+
+export type SourceConnection = {
+  connectionId: string;
+  sourceType: string;
+};
+
 export type DrivePickerSession = {
   accessToken: string;
   /** 없으면 이 배포에서 Picker 를 열 수 없다. 화면이 그 사실을 말해야 한다. */
@@ -92,6 +105,8 @@ export interface SourcesApi {
   retryFailedAnalyses(
     riskWorkspaceId: string,
   ): Promise<{ requeued: number; expired: number }>;
+  getAnalysisProgress(riskWorkspaceId: string): Promise<AnalysisProgress>;
+  listSourceConnections(riskWorkspaceId: string): Promise<SourceConnection[]>;
   createDriveMount(input: {
     connectionId: string;
     riskWorkspaceId: string;
@@ -155,6 +170,26 @@ export class HttpSourcesApi implements SourcesApi {
       }
     );
     return { mountId: data.server_mount_id };
+  }
+
+  async getAnalysisProgress(riskWorkspaceId: string): Promise<AnalysisProgress> {
+    return this.request<AnalysisProgress>(
+      `/api/v1/workspaces/${encodeURIComponent(riskWorkspaceId)}/analyses/progress`
+    );
+  }
+
+  async listSourceConnections(
+    riskWorkspaceId: string,
+  ): Promise<SourceConnection[]> {
+    const data = await this.request<{
+      connections: Array<{ connection_id: string; source_type: string }>;
+    }>(
+      `/api/v1/workspaces/${encodeURIComponent(riskWorkspaceId)}/source-connections`
+    );
+    return data.connections.map((c) => ({
+      connectionId: c.connection_id,
+      sourceType: c.source_type,
+    }));
   }
 
   async retryFailedAnalyses(
