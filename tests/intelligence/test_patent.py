@@ -893,3 +893,61 @@ def test_the_cache_wrapper_still_closes_the_provider():
     provider = CachingPatentSearchProvider(inner, InMemoryPatentResponseCache())
     asyncio.run(provider.aclose())
     assert inner.closed
+
+
+CORPUS_PATH = (
+    __import__("pathlib").Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "kipris"
+    / "corpus.json"
+)
+
+
+def test_the_offline_corpus_goes_through_the_real_parsing_path():
+    """대역으로 갈아끼우면 파싱이 검증되지 않는다.
+
+    이 프로젝트에서 가장 오래 걸린 결함 둘이 파싱과 응답 해석에 있었다 — 오류
+    본문을 "결과 0 건" 으로 넘긴 것과 서비스 경로가 달라 인증되지 않은 것.
+    코퍼스는 실제 응답과 같은 XML 로 만들어 KiprisClient 에 물린다.
+    """
+    from ip_risk_agent.intelligence.patent.offline_corpus import (
+        load_corpus,
+        offline_kipris_client,
+    )
+
+    corpus = load_corpus(CORPUS_PATH)
+    client = offline_kipris_client(corpus)
+
+    async def scenario():
+        hits = await client.search("보이스피싱 탐지", rows=5)
+        assert hits, "코퍼스가 적중을 내야 한다"
+        assert all(h.application_number.isdigit() for h in hits)
+        assert all(h.title for h in hits)
+
+        # 넣은 단어를 모두 포함해야 적중이다. 검색어가 길수록 줄어든다.
+        narrow = await client.search("보이스피싱 탐지 열폭주", rows=5)
+        assert narrow == []
+
+        document = await client.fetch_detail(hits[0].application_number)
+        assert document.title
+        assert document.claims, "청구항이 파싱되어야 한다"
+        assert document.abstract
+        assert document.has_content
+        # 실측과 같이 청구항은 근거 상한에 걸리지 않는다.
+        assert all(len(claim) <= 600 for claim in document.claims)
+
+        missing = await client.fetch_detail("9999999999999")
+        assert not missing.has_content
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_the_offline_corpus_is_never_wired_into_production():
+    """합성 특허 본문이 실제 판단에 쓰이면 안 된다."""
+    from pathlib import Path
+
+    import ip_risk_agent.composition.production as production
+
+    source = Path(production.__file__).read_text(encoding="utf-8")
+    assert "offline_corpus" not in source
