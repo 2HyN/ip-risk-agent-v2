@@ -48,10 +48,19 @@ class InvalidPipelineTaskError(ValueError):
 
 
 class AnalysisPipeline:
-    def __init__(self, *, control_facade, adapters: SourceAdapterRegistry, intelligence) -> None:
+    def __init__(
+        self,
+        *,
+        control_facade,
+        adapters: SourceAdapterRegistry,
+        intelligence,
+        explanations=None,
+    ) -> None:
         self._control = control_facade
         self._adapters = adapters
         self._intelligence = intelligence
+        # 설명은 판정이 아니므로 없어도 파이프라인은 동작한다.
+        self._explanations = explanations
 
     async def execute(
         self,
@@ -126,9 +135,14 @@ class AnalysisPipeline:
             assert artifact is not None
             results = await self._intelligence.analyze(artifact)
             final_status: str | None = None
+            explained: list[str] = []
             for result in results:
                 receipt = await self._control.accept_analysis_result(result)
                 final_status = receipt.job_status
+                explained.extend(receipt.affected_risk_ids)
+            # 설명은 판정이 아니다. 실패해도 분석 결과는 그대로 두고 넘어간다.
+            if explained and self._explanations is not None:
+                await self._explanations.explain_risks(tuple(explained))
             if final_status not in {"SUCCEEDED", "INCONCLUSIVE", "FAILED"}:
                 raise AnalyzerCompletenessError(
                     "complete result set did not terminate the canonical analysis job"

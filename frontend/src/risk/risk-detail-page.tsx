@@ -123,6 +123,28 @@ export function RiskDetailPage() {
               <Status label="Last seen" value={formatDate(risk.last_seen_at)} />
             </div>
           </Card>
+          {risk.explanation_safe === null && risk.recommendation_safe === null ? null : (
+            /* UI 대개편에서 자리를 다시 잡는다. 지금은 값이 보이는 것이 목표다. */
+            <Card>
+              <p className="eyebrow">설명 · 권고</p>
+              {risk.explanation_safe === null ? null : (
+                <>
+                  <h2>왜 검토가 필요한가</h2>
+                  <p>{risk.explanation_safe}</p>
+                </>
+              )}
+              {risk.recommendation_safe === null ? null : (
+                <>
+                  <h2>무엇을 하면 되는가</h2>
+                  <p>{risk.recommendation_safe}</p>
+                </>
+              )}
+              <p className="fine-print">
+                모델이 근거를 읽고 쓴 설명입니다. 판정을 바꾸지 않으며 법적 결론이
+                아닙니다. 실제 판단은 사람과 전문가의 검토가 필요합니다.
+              </p>
+            </Card>
+          )}
           <Card>
             <p className="eyebrow">Why this risk</p>
             <h2>Minimal retained evidence</h2>

@@ -73,8 +73,11 @@ class IntelligenceConfig:
 class IntelligenceFacade:
     """Integration 이 호출하는 단일 진입점."""
 
-    def __init__(self, registry: AnalyzerRegistry) -> None:
+    def __init__(self, registry: AnalyzerRegistry, *, risk_explainer=None) -> None:
         self._registry = registry
+        # Risk 설명기는 분석기가 아니다. 이미 판정이 끝난 Risk 에 설명을 붙이는
+        # 것이므로 registry 밖에 둔다. Integration 이 여기서 꺼내 쓴다.
+        self.risk_explainer = risk_explainer
 
     async def analyze(self, artifact: AnalysisArtifact) -> list[AnalysisResult]:
         """요청된 Analyzer 를 모두 실행한다.

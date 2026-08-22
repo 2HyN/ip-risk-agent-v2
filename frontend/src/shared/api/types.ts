@@ -83,6 +83,8 @@ export type Risk = {
   review_version: number;
   latest_analysis_job_id: string;
   latest_evidence_revision: string | null;
+  explanation_safe: string | null;
+  recommendation_safe: string | null;
   artifact_display_name: string | null;
   artifact_logical_path: string | null;
   mount_id: string | null;

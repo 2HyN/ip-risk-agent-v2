@@ -45,6 +45,7 @@ from ip_risk_agent.application.repositories.in_memory import (
     InMemoryWorkspaceEraser,
 )
 from ip_risk_agent.application.risk_review import RiskReviewService
+from ip_risk_agent.application.risk_explanation import RiskExplanationService
 from ip_risk_agent.application.security_policy import WorkspaceSecurityService
 from ip_risk_agent.application.workspace_admin import WorkspaceAdministrationService
 
@@ -253,6 +254,12 @@ def build_container(
             control_facade=facade,
             adapters=adapters,
             intelligence=intelligence,
+            # 새 분석이 끝나면 설명이 자동으로 붙는다. 이미 만들어진 Risk 는
+            # `scripts/backfill_risk_explanations.py` 로 붙인다.
+            explanations=RiskExplanationService(
+                unit_of_work_factory=store,
+                explainer=getattr(intelligence, "risk_explainer", None),
+            ),
         )
 
     control_api = None

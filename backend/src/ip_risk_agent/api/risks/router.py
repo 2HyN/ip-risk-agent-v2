@@ -50,6 +50,10 @@ class RiskResponse(StrictApiModel):
     review_version: int
     latest_analysis_job_id: str
     latest_evidence_revision: str | None
+    #: 왜 검토가 필요한지. 모델이 쓴 설명이며 판정이 아니다.
+    explanation_safe: str | None = None
+    #: 앞으로 무엇을 할지. 권고 수준이고 법적 결론이 아니다.
+    recommendation_safe: str | None = None
     artifact_display_name: str | None = None
     artifact_logical_path: str | None = None
     mount_id: str | None = None

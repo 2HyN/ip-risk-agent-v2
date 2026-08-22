@@ -70,6 +70,21 @@ class PatentComparison(_Output):
     )
 
 
+class RiskExplanationOutput(_Output):
+    """이미 만들어진 Risk 에 붙일 설명과 권고.
+
+    **판정을 바꾸지 못한다.** 등급도 Risk 의 존재도 규칙 엔진이 정한 그대로다.
+    여기서는 이미 검증된 근거를 사람이 읽을 말로 옮기기만 한다.
+    """
+
+    summary: str = Field(description="왜 검토가 필요한지. 근거를 짚어 두세 문장")
+    recommendation: str = Field(description="앞으로 무엇을 할지. 행동 수준의 권고")
+    reference_evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="설명이 근거로 삼은 evidence ID. 제시된 목록에 있는 것만",
+    )
+
+
 class LicenseExplanationOutput(_Output):
     """정책 결과에 붙일 설명. 판정을 바꾸지 못한다."""
 
