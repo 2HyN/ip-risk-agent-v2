@@ -155,17 +155,34 @@ async def run(args: argparse.Namespace) -> int:
         credentials=credentials,
     )
 
+    # 준비는 언제나 거친다 — 지문 대조가 여기서 일어나고, 감사에도 그 값이 필요하다.
+    report = await ingest(manifest_path, InMemoryCorpusUploader(), strict=True)
+    prepared = report.prepared
+
+    if args.only:
+        wanted = set(args.only)
+        prepared = [item for item in prepared if item.source_id in wanted]
+        unknown = wanted - {item.source_id for item in prepared}
+        if unknown:
+            print(
+                f"매니페스트에 없는 source_id: {', '.join(sorted(unknown))}",
+                file=sys.stderr,
+            )
+            return 2
+        print(f"--only 로 {len(prepared)} 편만 다룬다")
+
     if args.confirm:
-        report = await ingest(manifest_path, uploader, strict=True)
-        prepared = report.prepared
+        uploaded = await uploader.upload(prepared, report.corpus_version)
         print()
-        print(f"올렸다 — {report.uploaded} 편")
-    else:
-        # 올리지 않고 확인만 한다. 준비 단계는 그대로 거쳐야 지문을 계산한다.
-        report = await ingest(manifest_path, InMemoryCorpusUploader(), strict=True)
-        prepared = report.prepared
+        print(f"올렸다 — {uploaded} 편")
 
     audit = await uploader.audit(prepared, report.corpus_version)
+    if args.only:
+        # 부분만 올렸으므로 나머지가 "매니페스트 밖" 으로 보이는 것은 당연하다.
+        audit["unexpected"] = []
+        audit["clean"] = not (
+            audit["missing"] or audit["duplicated"] or audit["mismatched"]
+        )
     print()
     print(json.dumps(audit, ensure_ascii=False, indent=2))
 
@@ -234,6 +251,12 @@ def main() -> int:
         "--prune",
         action="store_true",
         help="매니페스트 밖 문서를 지운다. --verify 나 --confirm 과 함께 쓴다",
+    )
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        metavar="SOURCE_ID",
+        help="이 문서들만 다룬다. 전체를 올리기 전에 한 편으로 시험할 때 쓴다",
     )
     parser.add_argument(
         "--probe",
