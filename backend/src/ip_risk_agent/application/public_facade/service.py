@@ -38,7 +38,8 @@ from ip_risk_agent.application.security_gate import (
     SecurityGateService,
     SourceScopeDecision,
 )
-from ip_risk_agent.core.artifacts import Artifact
+from ip_risk_agent.application.risk_exclusion import exclude_artifact_risks
+from ip_risk_agent.core.artifacts import Artifact, ArtifactStatus
 from ip_risk_agent.core.audit import AuditEvent, AuditEventType, SourceAccessEvent
 from ip_risk_agent.core.auth import UserStatus
 from ip_risk_agent.core.common import (
@@ -78,6 +79,7 @@ from .models import (
     SourceMetadataRegistrationCommand,
     SourceScopeInput,
     SourceWorkspaceContext,
+    UntrackedArtifact,
 )
 
 Clock = Callable[[], datetime]
@@ -269,6 +271,62 @@ class ControlPlaneFacade:
         self._observer.event(
             "analysis_reanalysis_requested",
             correlation=CorrelationIds(event_id=change_event_id),
+        )
+
+    async def untrack_artifact(
+        self,
+        *,
+        risk_workspace_id: str,
+        artifact_id: str,
+    ) -> UntrackedArtifact:
+        """파일 하나를 추적 대상에서 뺀다. 지우지 않는다.
+
+        artifact 를 ``ARCHIVED`` 로 닫고 그 Risk 를 ``EXCLUDED`` 로 옮긴다. 근거와
+        이력은 남으므로 나중에도 왜 그 판단을 했는지 되짚을 수 있다. 사용자가 스스로
+        내린 처분이 아니라 추적이 끊겨 관리가 끝난 것이므로 ``ACCEPTED_RISK`` 가 아니라
+        ``EXCLUDED`` 다.
+
+        provider 쪽 감시를 실제로 끊는 것은 호출자(connector) 몫이다. 추적 범위의
+        모양은 source 종류마다 다르고 canonical 상태가 아니다. 그래서 여기서는
+        ``source_artifact_id`` 를 돌려준다.
+
+        인가는 호출 경로가 이미 mount 범위로 확인한다
+        (``SessionSourceAuthorizer`` 의 ``MOUNT_SOURCE_OPERATION``).
+        """
+        occurred_at = self._clock()
+        async with self._unit_of_work_factory() as uow:
+            artifact = await uow.artifacts.get(artifact_id)
+            if artifact is None or artifact.risk_workspace_id != risk_workspace_id:
+                raise RecordNotFoundError("artifact was not found in this workspace")
+            already_archived = artifact.status is ArtifactStatus.ARCHIVED
+            if not already_archived:
+                # last_seen_at 은 건드리지 않는다. 보관은 파일을 다시 본 것이 아니다.
+                await uow.artifacts.save(
+                    replace(artifact, status=ArtifactStatus.ARCHIVED)
+                )
+            excluded_risk_ids = await exclude_artifact_risks(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                artifact_id=artifact_id,
+                occurred_at=occurred_at,
+                reason_safe="artifact tracking was stopped",
+                id_factory=self._id_factory,
+            )
+            await uow.commit()
+        self._observer.event(
+            "artifact_untracked",
+            correlation=CorrelationIds(
+                risk_workspace_id=risk_workspace_id,
+                artifact_id=artifact_id,
+                mount_id=artifact.mount_id,
+            ),
+        )
+        return UntrackedArtifact(
+            artifact_id=artifact_id,
+            mount_id=artifact.mount_id,
+            source_artifact_id=artifact.source_artifact_id,
+            excluded_risk_ids=tuple(excluded_risk_ids),
+            already_archived=already_archived,
         )
 
     async def register_source_access(

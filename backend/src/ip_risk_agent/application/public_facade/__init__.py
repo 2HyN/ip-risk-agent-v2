@@ -26,6 +26,7 @@ from .models import (
     SourceMetadataRegistrationCommand,
     SourceScopeInput,
     SourceWorkspaceContext,
+    UntrackedArtifact,
 )
 from .ports import SourceAuthorizationCallback, SourceMetadataRegistrationCallback
 from .service import ControlPlaneFacade
@@ -54,6 +55,7 @@ __all__ = [
     "SourceMetadataRegistrationCallback",
     "SourceScopeInput",
     "SourceWorkspaceContext",
+    "UntrackedArtifact",
     "StructuredEventSink",
     "StructuredLogger",
 ]

@@ -486,4 +486,63 @@ describe("SourcePanel product integration", () => {
     await waitFor(() => expect(reanalyzed).toHaveLength(1));
     expect(reanalyzed[0]).toEqual({ change_event_id: "change-artifact-drive-1" });
   });
+
+  it("stops tracking one file without touching the others", async () => {
+    // mount 를 통째로 끄는 것과 다르다. 파일 하나만 감시에서 빼고, 그 Risk 는
+    // 지워지지 않고 '제외됨' 으로 닫힌다.
+    window.location.hash = "#/w/vws-1/sources";
+    const untracked: unknown[] = [];
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/drive/untrack")) {
+        untracked.push({ path, body: JSON.parse(String(init?.body)) });
+        return response({
+          artifact_id: "artifact-drive-1",
+          excluded_risk_ids: ["risk-1", "risk-2"],
+          remaining_file_count: 3,
+        });
+      }
+      if (path.endsWith("/security/data-access-summary")) {
+        return response({
+          ...connectedDriveSummary,
+          tracked_artifacts: [
+            {
+              artifact_id: "artifact-drive-1",
+              change_event_id: "change-artifact-drive-1",
+              mount_id: "mount-drive-1",
+              source_type: "GOOGLE_DRIVE",
+              source_context: "Google Drive a1b2c3d4",
+              display_name: "Claims.txt",
+              logical_path: "Claims.txt",
+              availability: "AVAILABLE",
+              latest_revision: "rev-2",
+              change_status: "DONE",
+              analysis_status: "SUCCEEDED",
+              risk_count: 2,
+              active_risk_count: 2,
+              first_risk_id: "risk-1",
+              highest_risk_priority: "HIGH",
+              updated_at: "2026-08-21T00:00:00Z",
+            },
+          ],
+        });
+      }
+      const base = baseResponse(path);
+      if (base !== null) return base;
+      return response({ code: "NOT_FOUND" }, 404);
+    }));
+    const picker: DrivePickerAdapter = { available: true, pick: vi.fn(async () => []) };
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+
+    const [button] = await screen.findAllByRole("button", { name: "추적 해제" });
+    expect(button).toBeDefined();
+    await userEvent.click(button as HTMLElement);
+
+    await waitFor(() => expect(untracked).toHaveLength(1));
+    expect(untracked[0]).toEqual({
+      path: expect.stringContaining("/source-mounts/mount-drive-1/drive/untrack"),
+      body: { risk_workspace_id: "vws-1", artifact_id: "artifact-drive-1" },
+    });
+  });
 });

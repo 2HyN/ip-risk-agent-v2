@@ -14,7 +14,8 @@ from ip_risk_agent.connectors.common.credential_vault import (
     CredentialScope,
     InMemoryCredentialVault,
 )
-from ip_risk_agent.connectors.common.authz import allow_all_authz
+from ip_risk_agent.connectors.common.authz import allow_all_authz, deny_all_authz
+from ip_risk_agent.connectors.google_drive.tracking_scope import DriveTrackingScope
 from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
 from ip_risk_agent.connectors.google_drive.connection_lookup import (
     DriveConnectionContext,
@@ -98,6 +99,7 @@ async def _setup(
     mount_authz=allow_all_authz,
     workspace_authz=allow_all_authz,
     initial_change_sync=None,
+    untrack_callback=None,
 ):
     vault = InMemoryCredentialVault()
     cred_scope = CredentialScope(provider=SourceType.GOOGLE_DRIVE, connection_id="conn-1", secret_name="tok")
@@ -127,6 +129,7 @@ async def _setup(
         mount_connection_lookup=mount_lookup,
         tracking_scope_store=tracking_scope_store,
         mount_creation_callback=callback,
+        untrack_callback=untrack_callback,
         initial_change_sync=initial_change_sync,
         connection_authz_dependency=allow_all_authz,
         mount_authz_dependency=mount_authz,
@@ -311,6 +314,105 @@ def test_active_mount_rejects_an_unauthorized_workspace_before_credential_use():
         )
 
         assert response.status_code == 403
+        assert callback.calls == []
+
+    asyncio.run(scenario())
+
+
+class FakeUntrackCallback:
+    """canonical 쪽 처리를 대신한다. 실제 구현은 artifact 를 보관하고 Risk 를 제외한다."""
+
+    def __init__(self, *, mount_id: str, source_artifact_id: str) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self._mount_id = mount_id
+        self._source_artifact_id = source_artifact_id
+
+    async def untrack_artifact(self, request, *, risk_workspace_id, artifact_id):
+        del request
+        self.calls.append((risk_workspace_id, artifact_id))
+
+        class _Outcome:
+            mount_id = self._mount_id
+            source_artifact_id = self._source_artifact_id
+            excluded_risk_ids = ("risk-1",)
+
+        return _Outcome()
+
+
+def test_untracking_removes_only_that_file_from_the_watched_scope():
+    """추적 해제는 그 파일만 감시에서 뺀다. 나머지는 계속 감시해야 한다.
+
+    범위를 통째로 덮어쓰면 다른 파일의 변경 감지가 조용히 끊긴다. 그 사고는 mount
+    추가 경로에서 이미 한 번 겪었다.
+    """
+
+    async def scenario():
+        callback = FakeUntrackCallback(mount_id="mount-1", source_artifact_id="file-b")
+        client, _vault, tracking, _create, _ref = await _setup(untrack_callback=callback)
+        await tracking.save(
+            "mount-1",
+            DriveTrackingScope(
+                mount_id="mount-1",
+                selected_file_ids=["file-a", "file-b", "file-c"],
+                display_metadata_by_file={
+                    "file-a": {"name": "a.md"},
+                    "file-b": {"name": "b.md"},
+                    "file-c": {"name": "c.md"},
+                },
+            ),
+        )
+
+        response = client.post(
+            "/api/v1/source-mounts/mount-1/drive/untrack",
+            json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-b"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["excluded_risk_ids"] == ["risk-1"]
+        assert body["remaining_file_count"] == 2
+        assert callback.calls == [("vws-1", "artifact-b")]
+
+        stored = await tracking.load("mount-1")
+        assert stored.selected_file_ids == ["file-a", "file-c"]
+        assert set(stored.display_metadata_by_file) == {"file-a", "file-c"}
+
+    asyncio.run(scenario())
+
+
+def test_untracking_the_same_file_twice_is_harmless():
+    async def scenario():
+        callback = FakeUntrackCallback(mount_id="mount-1", source_artifact_id="file-b")
+        client, _vault, tracking, _create, _ref = await _setup(untrack_callback=callback)
+        await tracking.save(
+            "mount-1",
+            DriveTrackingScope(
+                mount_id="mount-1",
+                selected_file_ids=["file-a", "file-b"],
+            ),
+        )
+        for _ in range(2):
+            response = client.post(
+                "/api/v1/source-mounts/mount-1/drive/untrack",
+                json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-b"},
+            )
+            assert response.status_code == 200, response.text
+        stored = await tracking.load("mount-1")
+        assert stored.selected_file_ids == ["file-a"]
+
+    asyncio.run(scenario())
+
+
+def test_untracking_requires_mount_authorization():
+    async def scenario():
+        callback = FakeUntrackCallback(mount_id="mount-1", source_artifact_id="file-b")
+        client, _vault, _tracking, _create, _ref = await _setup(
+            mount_authz=deny_all_authz, untrack_callback=callback
+        )
+        response = client.post(
+            "/api/v1/source-mounts/mount-1/drive/untrack",
+            json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-b"},
+        )
+        assert response.status_code in (401, 403)
         assert callback.calls == []
 
     asyncio.run(scenario())

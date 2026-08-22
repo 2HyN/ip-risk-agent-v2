@@ -129,6 +129,24 @@ export class SourceApiClient {
     return mapMount(response);
   }
 
+  async untrackDriveArtifact(
+    mountId: string,
+    riskWorkspaceId: string,
+    artifactId: string,
+  ): Promise<{ excluded_risk_ids: string[]; remaining_file_count: number }> {
+    return this.client.request<{
+      artifact_id: string;
+      excluded_risk_ids: string[];
+      remaining_file_count: number;
+    }>(`/api/v1/source-mounts/${encodeURIComponent(mountId)}/drive/untrack`, {
+      method: "POST",
+      body: JSON.stringify({
+        risk_workspace_id: riskWorkspaceId,
+        artifact_id: artifactId,
+      }),
+    });
+  }
+
   async githubRepositories(connectionId: string): Promise<GitHubRepository[]> {
     const response = await this.client.request<GitHubRepositoriesApiResponse>(
       `/api/v1/source-connections/${encodeURIComponent(connectionId)}/github/repositories`,

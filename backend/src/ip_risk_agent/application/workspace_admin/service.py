@@ -11,6 +11,7 @@ from ip_risk_agent.application.repositories import (
     ControlUnitOfWorkFactory,
     RecordNotFoundError,
 )
+from ip_risk_agent.application.risk_exclusion import exclude_mount_risks
 from ip_risk_agent.core.audit import AuditEvent, AuditEventType
 from ip_risk_agent.core.common import ActorType, DomainInvariantError, normalize_utc
 from ip_risk_agent.core.memberships import (
@@ -381,15 +382,28 @@ class WorkspaceAdministrationService:
             actor, mount = await _membership_and_mount(
                 uow, risk_workspace_id, actor_user_id, mount_id
             )
+            occurred_at = self._clock()
             plan = plan_mount_disable(
                 actor_user_id=actor_user_id,
                 actor_membership=actor,
                 mount=mount,
-                occurred_at=self._clock(),
+                occurred_at=occurred_at,
                 audit_event_id=self._id_factory("audit"),
             )
             await uow.mounts.save(plan.mount)
             await uow.audit.append(plan.audit_event)
+            # 일시중지하면 이 mount 의 파일은 더 이상 감시되지 않는다. 그 상태에서
+            # Risk 를 활성 목록에 남겨 두면 아직 추적 중인 것처럼 읽힌다. 사용자의
+            # 판단이 아니라 외적 요인으로 관리가 끝난 것이므로 EXCLUDED 로 닫는다.
+            # 다시 mount 되면 `should_revive` 가 되살린다.
+            await exclude_mount_risks(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                mount_id=mount_id,
+                occurred_at=occurred_at,
+                reason_safe="mount was disabled",
+                id_factory=self._id_factory,
+            )
             await uow.commit()
         return plan
 

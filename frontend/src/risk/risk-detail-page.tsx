@@ -178,7 +178,21 @@ export function RiskDetailPage() {
           </Card>
         </div>
         <aside>
-          {canReview ? (
+          {risk.review_disposition === "EXCLUDED" ? (
+            <Card>
+              <p className="eyebrow">Excluded</p>
+              <h2>추적이 끝난 Risk</h2>
+              <p>
+                이 Risk 가 나온 파일은 더 이상 추적되지 않습니다. 파일 추적을 끊었거나
+                소스 연결을 일시중지했을 때 이렇게 됩니다. 근거와 이력은 그대로 남아
+                있어 언제든 다시 볼 수 있습니다.
+              </p>
+              <p className="fine-print">
+                다시 검토하려면 그 파일을 다시 추적하세요. 그러면 이 Risk 가 미검토
+                상태로 되살아납니다.
+              </p>
+            </Card>
+          ) : canReview ? (
             <Card className="review-card">
               <p className="eyebrow">Reviewer decision</p>
               <h2>Record disposition</h2>
@@ -196,10 +210,14 @@ export function RiskDetailPage() {
                       )
                     }
                   >
+                    {/*
+                      Excluded 는 여기에 없다. 그것은 파일 추적 중단이나 mount
+                      일시중지처럼 사용자 판단 밖의 요인으로 관리가 끝났다는 뜻이라
+                      시스템만 붙인다. 스스로 감시를 그만두는 것은 Accepted risk 다.
+                    */}
                     <option value="UNREVIEWED">Unreviewed</option>
                     <option value="MONITORING">Monitoring</option>
                     <option value="ACCEPTED_RISK">Accepted risk</option>
-                    <option value="EXCLUDED">Excluded</option>
                   </Select>
                 </Field>
                 <Field

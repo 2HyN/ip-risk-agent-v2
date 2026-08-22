@@ -48,6 +48,7 @@ from ip_risk_agent.core.notifications import (
     NotificationType,
 )
 from ip_risk_agent.core.risk import (
+    LifecycleDecision,
     ReviewDisposition,
     Risk,
     RiskEvent,
@@ -56,6 +57,7 @@ from ip_risk_agent.core.risk import (
     RiskLifecycleState,
     analysis_is_authoritative,
     decide_lifecycle,
+    should_revive,
     license_risk_key,
     patent_risk_key,
     risk_evidence_id_for,
@@ -282,15 +284,36 @@ class AnalysisResultIntakeService:
                     risk.updated_at,
                     risk.resolved_at or occurred_at,
                 )
-                decision = decide_lifecycle(
-                    previous_state,
-                    candidate_present=True,
-                    status=result.status,
-                    coverage=result.coverage,
-                )
+                revived = should_revive(risk.review_disposition)
+                if revived:
+                    # 추적이 끊겨 제외됐던 파일이 다시 대상이 됐다. 이력을 잇기 위해
+                    # 새 Risk 를 만들지 않고 이것을 되살리되, 제외되어 있던 동안의
+                    # 판단은 유효하지 않으므로 처음 본 것처럼 되돌린다.
+                    decision = LifecycleDecision(
+                        previous_state,
+                        RiskLifecycleState.NEW,
+                        RiskEventType.DETECTED,
+                        True,
+                    )
+                else:
+                    decision = decide_lifecycle(
+                        previous_state,
+                        candidate_present=True,
+                        status=result.status,
+                        coverage=result.coverage,
+                    )
                 risk = replace(
                     risk,
                     lifecycle_state=decision.next_state,
+                    review_disposition=(
+                        ReviewDisposition.UNREVIEWED
+                        if revived
+                        else risk.review_disposition
+                    ),
+                    # 처분이 바뀌면 저장소가 review_version 을 하나 올릴 것을 요구한다.
+                    review_version=(
+                        risk.review_version + 1 if revived else risk.review_version
+                    ),
                     review_priority=projection.priority,
                     summary=projection.summary,
                     last_seen_at=risk_time,

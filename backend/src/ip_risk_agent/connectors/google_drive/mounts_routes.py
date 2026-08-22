@@ -58,6 +58,39 @@ class DriveInitialChangeSync(Protocol):
     ) -> None: ...
 
 
+class DriveUntrackRequest(BaseModel):
+    risk_workspace_id: str
+    artifact_id: str
+
+
+class DriveUntrackResponse(BaseModel):
+    artifact_id: str
+    excluded_risk_ids: list[str] = Field(default_factory=list)
+    remaining_file_count: int
+
+
+class DriveUntrackCallback(Protocol):
+    """Control 쪽 canonical 처리. artifact 를 보관하고 Risk 를 제외한다.
+
+    Drive 의 추적 범위(file id 목록)는 canonical 상태가 아니라 이 connector 의 것이다.
+    그래서 canonical 처리는 callback 에 맡기고, 감시를 실제로 끊는 일만 여기서 한다.
+    """
+
+    async def untrack_artifact(
+        self,
+        request: Request,
+        *,
+        risk_workspace_id: str,
+        artifact_id: str,
+    ) -> "DriveUntrackOutcome": ...
+
+
+class DriveUntrackOutcome(Protocol):
+    mount_id: str
+    source_artifact_id: str
+    excluded_risk_ids: tuple[str, ...]
+
+
 def create_drive_mounts_router(
     *,
     provider_factory: DriveProviderFactory,
@@ -66,6 +99,7 @@ def create_drive_mounts_router(
     mount_connection_lookup: DriveConnectionLookup | None = None,
     tracking_scope_store,
     mount_creation_callback: DriveMountCreationCallback,
+    untrack_callback: DriveUntrackCallback | None = None,
     initial_change_sync: DriveInitialChangeSync | None = None,
     connection_authz_dependency: AuthzDependency = deny_all_authz,
     mount_authz_dependency: AuthzDependency = deny_all_authz,
@@ -208,7 +242,69 @@ def create_drive_mounts_router(
         )
         return result
 
+    @router.post(
+        "/api/v1/source-mounts/{mount_id}/drive/untrack",
+        response_model=DriveUntrackResponse,
+    )
+    async def untrack_drive_artifact(
+        mount_id: str, request: Request, body: DriveUntrackRequest
+    ) -> DriveUntrackResponse:
+        await mount_authz_dependency(request, mount_id)
+        await workspace_authz_dependency(request, body.risk_workspace_id)
+        if untrack_callback is None:
+            raise HTTPException(status_code=404, detail="untracking is not configured")
+        outcome = await untrack_callback.untrack_artifact(
+            request,
+            risk_workspace_id=body.risk_workspace_id,
+            artifact_id=body.artifact_id,
+        )
+        # canonical 처리가 끝난 뒤에 감시를 끊는다. 순서를 뒤집으면 canonical 처리가
+        # 실패했을 때 감시만 끊긴 채로 Risk 가 활성으로 남는다. 이 순서라면 반대로
+        # 감시가 남아 다음 변경에 Risk 가 되살아나므로 사용자가 다시 시도할 수 있다.
+        remaining = await _remove_from_tracking_scope(
+            tracking_scope_store,
+            mount_id=outcome.mount_id,
+            file_id=outcome.source_artifact_id,
+        )
+        return DriveUntrackResponse(
+            artifact_id=body.artifact_id,
+            excluded_risk_ids=list(outcome.excluded_risk_ids),
+            remaining_file_count=remaining,
+        )
+
     return router
+
+
+async def _remove_from_tracking_scope(
+    tracking_scope_store,
+    *,
+    mount_id: str,
+    file_id: str,
+) -> int:
+    """추적 범위에서 file id 하나를 뺀다. 남은 개수를 돌려준다.
+
+    범위에 없으면 아무것도 바꾸지 않는다. 같은 파일을 두 번 해제해도 안전하다.
+    """
+    existing: DriveTrackingScope | None = await tracking_scope_store.load(mount_id)
+    if existing is None:
+        return 0
+    if file_id not in existing.selected_file_ids:
+        return len(existing.selected_file_ids)
+    file_ids = [item for item in existing.selected_file_ids if item != file_id]
+    metadata = {
+        key: value
+        for key, value in existing.display_metadata_by_file.items()
+        if key != file_id
+    }
+    await tracking_scope_store.save(
+        mount_id,
+        DriveTrackingScope(
+            mount_id=mount_id,
+            selected_file_ids=file_ids,
+            display_metadata_by_file=metadata,
+        ),
+    )
+    return len(file_ids)
 
 
 async def _merge_tracking_scope(

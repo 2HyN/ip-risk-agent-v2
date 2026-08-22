@@ -22,8 +22,12 @@ from .transitions import (
     LifecycleDecision,
     ReviewDecision,
     analysis_is_authoritative,
+    ExclusionDecision,
+    decide_exclusion,
     decide_lifecycle,
     decide_review,
+    decide_user_review,
+    should_revive,
 )
 
 __all__ = [
@@ -38,8 +42,12 @@ __all__ = [
     "RiskEvidence",
     "RiskLifecycleState",
     "analysis_is_authoritative",
+    "ExclusionDecision",
+    "decide_exclusion",
     "decide_lifecycle",
     "decide_review",
+    "decide_user_review",
+    "should_revive",
     "license_risk_key",
     "patent_risk_key",
     "risk_evidence_id_for",

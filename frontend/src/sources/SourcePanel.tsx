@@ -50,6 +50,7 @@ export function SourcePanel({
   const completion = search.get("status") === "connected" && provider !== null && connectionId !== null;
 
   const [reanalyzing, setReanalyzing] = useState<string | null>(null);
+  const [untracking, setUntracking] = useState<string | null>(null);
 
   async function reanalyze(artifact: TrackedArtifact): Promise<void> {
     if (artifact.change_event_id === null) return;
@@ -66,6 +67,38 @@ export function SourcePanel({
       );
     } finally {
       setReanalyzing(null);
+    }
+  }
+
+  async function untrack(artifact: TrackedArtifact): Promise<void> {
+    // 지우는 것이 아니라 추적만 끊는다. Risk 와 근거는 남고 '제외됨' 으로 닫힌다.
+    // 같은 파일을 다시 고르면 그 Risk 가 미검토 상태로 되살아난다.
+    const confirmed = window.confirm(
+      `${artifact.display_name} 을(를) 더 이상 추적하지 않습니다.\n\n` +
+        "지금까지의 Risk 와 근거는 지워지지 않고 '제외됨' 으로 닫힙니다. " +
+        "나중에 같은 파일을 다시 고르면 미검토 상태로 되살아납니다.",
+    );
+    if (!confirmed) return;
+    setUntracking(artifact.artifact_id);
+    setNotice(null);
+    setMutationError(null);
+    try {
+      const result = await sourceApi.untrackDriveArtifact(
+        artifact.mount_id,
+        workspace.id,
+        artifact.artifact_id,
+      );
+      setNotice(
+        `${artifact.display_name} 추적을 끊었습니다. ` +
+          `Risk ${result.excluded_risk_ids.length}건이 제외됨으로 닫혔습니다.`,
+      );
+      sources.reload();
+    } catch (reason) {
+      setMutationError(
+        reason instanceof Error ? reason : new Error("추적을 끊지 못했습니다."),
+      );
+    } finally {
+      setUntracking(null);
     }
   }
 
@@ -220,6 +253,18 @@ export function SourcePanel({
                       {reanalyzing === artifact.artifact_id ? "재검사 요청 중…" : "다시 검사"}
                     </Button>
                   )}
+                  {artifact.source_type === "GOOGLE_DRIVE" ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void untrack(artifact)}
+                      disabled={untracking !== null}
+                    >
+                      {untracking === artifact.artifact_id
+                        ? "추적 해제 중…"
+                        : "추적 해제"}
+                    </Button>
+                  ) : null}
                 </div>
               </Card>
             ))}

@@ -26,7 +26,7 @@ from ip_risk_agent.core.risk import (
     Risk,
     RiskEvent,
     RiskEventType,
-    decide_review,
+    decide_user_review,
     risk_review_event_id_for,
 )
 
@@ -106,7 +106,7 @@ class RiskReviewService:
                     expected_version=expected_review_version,
                     current_version=risk.review_version,
                 )
-            decision = decide_review(risk.review_disposition, new_disposition)
+            decision = decide_user_review(risk.review_disposition, new_disposition)
             if not decision.changed:
                 return RiskReviewResult(
                     disposition=RiskReviewDisposition.UNCHANGED,

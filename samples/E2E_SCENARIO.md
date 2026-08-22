@@ -110,6 +110,20 @@ mount 직후 초기 스캔이 두 파일에 대해 SourceChange 를 만들고 Cl
 
 deps.dev/PyPI 실시간 응답이므로 값이 다르면 그 자체가 관찰 결과다.
 
+### Patent Risk 기대 (`voice-phishing-detection-design.md`)
+
+특허 경로는 2026-08-22 에 처음으로 프로덕션을 통과했다. 실측 기준은 이렇다.
+
+| 확인 | 기대 |
+|---|---|
+| `patent_search_diagnostic` | `query_count` 2~5, `hit_total` 수십, `search_failures` 0 |
+| Analysis | **SUCCEEDED / COMPLETE** |
+| Risk | 후보당 1건. 근거에 `PATENT_CLAIM` 과 `SOURCE_EXCERPT` 가 **함께** 붙는다 |
+| 우선도 | 현재 규칙에서는 대부분 MEDIUM 으로 나온다 (docs/PATENT_PRIORITY_DESIGN_NOTE.md 부록) |
+
+`CONTRACT:CANONICAL_INTAKE_REJECTED` 가 다시 보이면 `jsonPayload.failure_reason` 을
+반드시 함께 읽는다. 그 필드가 없으면 원인을 특정할 수 없다.
+
 **Analysis 가 INCONCLUSIVE 로 끝나면** provider 조회가 하나라도 실패했다는 뜻이다.
 `coverage=PARTIAL` 이면 Risk 는 하나도 만들어지지 않는다 — 후보 단위가 아니라 **파일 전체**가
 비권위적으로 취급된다. Worker 에서 deps.dev 로 나가는 egress 를 먼저 의심한다.
@@ -123,7 +137,10 @@ gcloud logging read 'resource.labels.service_name="ip-risk-agent-v2-worker"' \
 
 ## S4. HITL — 검토·추적·감사
 
-**이 프로젝트에서 한 번도 검증된 적 없는 영역이다.**
+**화면 조작이 한 번도 검증된 적 없는 영역이다.** 다만 백엔드 쪽은 좁혀져 있다 —
+프로덕션의 실제 Risk 57건과 근거 117건을 전부 API 응답 모델에 통과시켜 두었으므로,
+목록·상세·타임라인이 **직렬화 때문에 깨지지는 않는다.** 여기서 볼 것은 처분 적용과
+그 뒤의 상태 전이다.
 
 1. Risk 목록에서 `pymupdf` POLICY_CONFLICT 항목 열기
 2. 근거(Evidence) 가 붙어 있는지 확인
@@ -214,13 +231,113 @@ gcloud scheduler jobs run ip-risk-agent-v2-drive-reconciliation --location=asia-
 
 ---
 
-## 9. 판정
+## S9. GitHub Repository 연결
+
+**사전 조건은 2026-08-22 에 실측으로 확인했다. 아래는 이미 갖춰져 있다.**
+
+| 항목 | 확인된 값 |
+|---|---|
+| GitHub App | `ip-risk-agent-v2-staging` (App ID `4666758`) — `GET /app` 200 |
+| 권한 | `contents:read`, `metadata:read` |
+| 구독 이벤트 | `push` |
+| Webhook URL | `.../webhooks/github`, secret 설정됨, 최근 `installation` 배달 **200 OK** |
+| 설치 | installation `155365447` on `2HyN`, `repository_selection=selected` |
+| 접근 가능 저장소 | `2HyN/ip-risk-agent` (default branch `main`) |
+
+즉 **연결 자체는 준비되어 있고, 아직 한 번도 mount 된 적이 없다**
+(`source_operational_github_*` 0건).
+
+1. Add Source → **GitHub Repository** → 설치 동의 화면
+2. 저장소 목록에서 `ip-risk-agent` 선택
+3. mount 생성
+
+| 성공 기준 |
+|---|
+| `POST /api/v1/source-connections/{id}/github/repositories` → 200, 목록 1건 |
+| `POST /api/v1/source-connections/{id}/github/mounts` → **200** |
+| `source_operational_github_runtime` 1건 생성 |
+| 초기 스캔이 manifest 를 잡아 License Risk 생성 |
+
+이 저장소에는 `requirements.txt` 와 `package.json` 이 있으므로 Drive 와 같은 종류의
+License Risk 가 나와야 한다. **Drive 결과와 겹치더라도 Risk 는 artifact 단위로 따로
+생성되는 것이 정상**이다 (risk_key 에 artifact_id 가 들어간다).
+
+### S9-b. push 로 변경 감지
+
+저장소에 커밋을 하나 올린다.
+
+| 성공 기준 |
+|---|
+| GitHub App → Recent Deliveries 에 `push` 배달이 **200** 으로 남는다 |
+| 새 ChangeEvent 발생 → Worker 호출 |
+
+배달이 4xx 면 서명 검증 문제다. `iprisk-v2-github-webhook-secret` 과 App 설정의
+secret 이 같은 값인지 본다. 배달 자체가 없으면 App 이 그 저장소에 설치되어 있지
+않은 것이다.
+
+---
+
+## S10. Local Directory (Desktop)
+
+**사전 조건도 실측으로 확인했다.**
+
+| 항목 | 확인 |
+|---|---|
+| `apps/desktop` 빌드 | typecheck 통과, 단위 시험 70/72 통과 (2 skipped) |
+| `/desktop/devices/enroll` | 배포본에서 **422** (라우트 존재) |
+| `/api/v1/desktop/enrollment-challenges` | **401** (라우트 존재, 세션 필요) |
+| `/desktop/devices/register` · `/desktop/mounts/register` · `/desktop/events` · `/desktop/staging` | 전부 **422** (존재) |
+| 렌더러 `/app` | **200** |
+
+기기가 아직 하나도 등록되어 있지 않다 (`source_operational_devices` 0건).
+
+**주의 — 등록 경로에는 `/api/v1` 접두사가 없다.** 백엔드가
+`/desktop/devices/enroll` 로 등록하고 데스크톱도 그대로 부른다. `IPRISK_SERVER_BASE_URL`
+에 `/api/v1` 까지 넣으면 404 가 난다.
+
+```bash
+# 저장소 루트에서
+pnpm -r --filter @iprisk/desktop build
+cd apps/desktop
+IPRISK_SERVER_BASE_URL=https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app \
+  pnpm start
+```
+
+HTTPS 이므로 `APP_ENV` 는 설정하지 않아도 된다 (loopback 일 때만 프로파일이 관여한다).
+
+1. 데스크톱 창에서 로그인 → 기기 등록
+2. 로컬 폴더 선택 (`samples/license` 를 그대로 쓰면 결과를 Drive 와 대조할 수 있다)
+
+| 성공 기준 |
+|---|
+| `source_operational_devices` 1건, `device_credentials` 1건 |
+| `POST /desktop/mounts/register` → 200 |
+| 폴더 안 manifest 가 초기 스캔에 잡힘 |
+| 파일을 저장하면 watcher 가 변경을 올려 재분석 |
+
+`.ipriskignore` 가 적용되는지도 함께 본다 — watcher 시험이 이미 그 동작을 고정하고 있다.
+
+---
+
+## 11. 판정
+
+한 줄 정의를 축별로 나눠 본다.
+
+| 축 | 단계 | 현재 상태 (2026-08-22) |
+|---|---|---|
+| Google Drive 연결 | S2·S5·S6 | **프로덕션 검증됨** |
+| GitHub 연결 | S9 | 연결 기반 실측 확인, **mount 미검증** |
+| Local 연결 | S10 | 실행 기반 실측 확인, **기기 등록 미검증** |
+| 변경 지속 감지 | S7·S9-b·S10 | Drive watch 살아 있고 UPDATE 이벤트 1건 관측. GitHub·Local 미검증 |
+| 근거 기반 분석 | S3 | **Patent·License 양쪽 프로덕션 검증됨** |
+| HITL 검토·추적 | S4 | 응답 모델은 실제 Risk 57건으로 검증. **화면 조작 미검증** |
+| 감사 | S4 | 후순위 (사용자 결정) |
 
 | | 조건 |
 |---|---|
-| **Go** | S1~S6 전부 성공 + S8 negative 전부 기대대로 |
-| **조건부 Go** | S7 미검증(대기시간) 외 전부 성공 |
-| **No-Go** | S3 에서 Risk 가 생기지 않음, 또는 S6 이 여전히 409 |
+| **Go** | S1~S6 성공 + S9·S10 각각 mount 200 + S8 negative 전부 기대대로 |
+| **조건부 Go** | S7·S9-b 미검증(대기시간) 외 전부 성공 |
+| **No-Go** | S3 에서 Risk 가 생기지 않음, S6 이 여전히 409, 또는 S9/S10 mount 가 실패 |
 
 각 단계 결과는 timestamp·HTTP status·revision·`diagnostic_code` 로 기록한다.
 **토큰, Picker callback 원문, Drive 응답 본문, 로컬 절대경로는 기록하지 않는다.**

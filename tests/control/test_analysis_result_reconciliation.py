@@ -33,6 +33,7 @@ from ip_risk_agent.application.risk_reconcile import (
     AnalysisResultIntakeService,
     EvidenceRetentionPolicy,
 )
+from ip_risk_agent.application.risk_exclusion import exclude_artifact_risks
 from ip_risk_agent.application.security_gate import REDACTION_PLACEHOLDER
 from ip_risk_agent.core.artifacts import (
     Artifact,
@@ -383,7 +384,7 @@ def test_authoritative_lifecycle_existing_resolved_and_reopened_preserves_review
             await uow.risks.save(
                 replace(
                     risk,
-                    review_disposition=ReviewDisposition.EXCLUDED,
+                    review_disposition=ReviewDisposition.ACCEPTED_RISK,
                     review_version=risk.review_version + 1,
                 )
             )
@@ -400,7 +401,7 @@ def test_authoritative_lifecycle_existing_resolved_and_reopened_preserves_review
                 await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
             )[0]
             assert risk.lifecycle_state is RiskLifecycleState.EXISTING
-            assert risk.review_disposition is ReviewDisposition.EXCLUDED
+            assert risk.review_disposition is ReviewDisposition.ACCEPTED_RISK
             assert RiskEventType.PRIORITY_CHANGED in {
                 event.event_type for event in await uow.risks.list_events(risk.id)
             }
@@ -422,7 +423,7 @@ def test_authoritative_lifecycle_existing_resolved_and_reopened_preserves_review
                 await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
             )[0]
             assert risk.lifecycle_state is RiskLifecycleState.RESOLVED
-            assert risk.review_disposition is ReviewDisposition.EXCLUDED
+            assert risk.review_disposition is ReviewDisposition.ACCEPTED_RISK
 
         job4, started4 = await add_running_job(
             store, suffix="life-4", revision="revision-4", offset_seconds=30
@@ -435,7 +436,7 @@ def test_authoritative_lifecycle_existing_resolved_and_reopened_preserves_review
                 await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
             )[0]
             assert risk.lifecycle_state is RiskLifecycleState.EXISTING
-            assert risk.review_disposition is ReviewDisposition.EXCLUDED
+            assert risk.review_disposition is ReviewDisposition.ACCEPTED_RISK
             events = await uow.risks.list_events(risk.id)
             assert RiskEventType.RESOLVED in {event.event_type for event in events}
             assert RiskEventType.REOPENED in {event.event_type for event in events}
@@ -674,5 +675,181 @@ def test_inconsistent_change_event_revision_is_rejected_before_result_intake() -
             assert await uow.risks.list_for_artifact(
                 "artifact-1", AnalysisType.PATENT
             ) == ()
+
+    run(scenario())
+
+
+def test_an_excluded_risk_is_revived_as_new_and_unreviewed() -> None:
+    """추적이 끊겨 제외됐던 파일이 다시 대상이 되면 이전 Risk 를 되살린다.
+
+    새로 만들지 않는 이유는 그 파일의 이력이 한 줄로 이어져야 하기 때문이다. 다만
+    제외되어 있던 동안의 판단은 더 이상 유효하지 않으므로 NEW / UNREVIEWED 에서
+    다시 시작한다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(store, suffix="revive-1", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(job1, "revision-1", started1, priority=ReviewPriority.MEDIUM)
+        )
+
+        # 추적을 끊었을 때와 같은 상태를 만든다.
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            await uow.risks.save(
+                replace(
+                    risk,
+                    lifecycle_state=RiskLifecycleState.RESOLVED,
+                    review_disposition=ReviewDisposition.EXCLUDED,
+                    review_version=risk.review_version + 1,
+                    resolved_at=risk.last_seen_at,
+                )
+            )
+            await uow.commit()
+            excluded_id = risk.id
+
+        job2, started2 = await add_running_job(
+            store, suffix="revive-2", revision="revision-2", offset_seconds=10
+        )
+        await service.accept_analysis_result(
+            patent_result(job2, "revision-2", started2, priority=ReviewPriority.HIGH)
+        )
+
+        async with store() as uow:
+            risks = await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            assert len(risks) == 1, "되살릴 때 Risk 를 새로 만들면 이력이 끊긴다"
+            revived = risks[0]
+            assert revived.id == excluded_id
+            assert revived.lifecycle_state is RiskLifecycleState.NEW
+            assert revived.review_disposition is ReviewDisposition.UNREVIEWED
+            assert revived.resolved_at is None
+
+    run(scenario())
+
+
+def test_an_accepted_risk_is_not_reset_when_analysis_runs_again() -> None:
+    """사람이 내린 처분은 재분석이 덮지 않는다. 되살리기는 EXCLUDED 에만 적용된다."""
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(store, suffix="keep-1", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(job1, "revision-1", started1, priority=ReviewPriority.MEDIUM)
+        )
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            await uow.risks.save(
+                replace(
+                    risk,
+                    review_disposition=ReviewDisposition.ACCEPTED_RISK,
+                    review_version=risk.review_version + 1,
+                )
+            )
+            await uow.commit()
+
+        job2, started2 = await add_running_job(
+            store, suffix="keep-2", revision="revision-2", offset_seconds=10
+        )
+        await service.accept_analysis_result(
+            patent_result(job2, "revision-2", started2, priority=ReviewPriority.HIGH)
+        )
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            assert risk.review_disposition is ReviewDisposition.ACCEPTED_RISK
+            assert risk.lifecycle_state is RiskLifecycleState.EXISTING
+
+    run(scenario())
+
+
+def test_untracking_archives_the_artifact_and_excludes_its_risks() -> None:
+    """추적 해제는 지우지 않는다. 닫고 남긴다.
+
+    사용자가 스스로 내린 처분이 아니라 추적이 끊겨 관리가 끝난 것이므로
+    ACCEPTED_RISK 가 아니라 EXCLUDED 다. 근거와 이력은 그대로 남아야 감사가 된다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+        job, started = await add_running_job(store, suffix="untrack-1", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(job, "revision-1", started, priority=ReviewPriority.MEDIUM)
+        )
+        async with store() as uow:
+            before = await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            evidence_before = await uow.risks.list_evidence(before[0].id)
+        assert before and evidence_before
+
+        async with store() as uow:
+            excluded = await exclude_artifact_risks(
+                uow,
+                risk_workspace_id="vws-1",
+                artifact_id="artifact-1",
+                occurred_at=NOW + timedelta(minutes=5),
+                reason_safe="artifact tracking was stopped",
+                id_factory=lambda prefix: f"{prefix}-untrack-1",
+            )
+            await uow.commit()
+        assert excluded == [before[0].id]
+
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            assert risk.lifecycle_state is RiskLifecycleState.RESOLVED
+            assert risk.review_disposition is ReviewDisposition.EXCLUDED
+            assert risk.review_version == before[0].review_version + 1
+            # 지우지 않는다.
+            assert len(await uow.risks.list_evidence(risk.id)) == len(evidence_before)
+            assert any(
+                event.event_type is RiskEventType.REVIEW_DISPOSITION_CHANGED
+                for event in await uow.risks.list_events(risk.id)
+            )
+
+    run(scenario())
+
+
+def test_excluding_twice_does_not_pile_up_history() -> None:
+    """같은 mount 를 두 번 일시중지해도 이력이 부풀지 않는다."""
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+        job, started = await add_running_job(store, suffix="twice-1", revision="revision-1")
+        await service.accept_analysis_result(
+            patent_result(job, "revision-1", started, priority=ReviewPriority.MEDIUM)
+        )
+        for attempt in range(2):
+            async with store() as uow:
+                await exclude_artifact_risks(
+                    uow,
+                    risk_workspace_id="vws-1",
+                    artifact_id="artifact-1",
+                    occurred_at=NOW + timedelta(minutes=5 + attempt),
+                    reason_safe="artifact tracking was stopped",
+                    id_factory=lambda prefix, n=attempt: f"{prefix}-twice-{n}",
+                )
+                await uow.commit()
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            disposition_events = [
+                event
+                for event in await uow.risks.list_events(risk.id)
+                if event.event_type is RiskEventType.REVIEW_DISPOSITION_CHANGED
+            ]
+            assert len(disposition_events) == 1
 
     run(scenario())

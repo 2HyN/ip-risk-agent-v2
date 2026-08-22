@@ -190,7 +190,7 @@ def test_review_update_is_versioned_authorized_and_append_only() -> None:
             actor_user_id="reviewer-1",
             risk_id="risk-1",
             expected_review_version=0,
-            new_disposition=ReviewDisposition.EXCLUDED,
+            new_disposition=ReviewDisposition.ACCEPTED_RISK,
             comment="API_KEY=top-secret\ninspect C:\\Users\\alice\\source.py",
         )
         assert applied.disposition is RiskReviewDisposition.APPLIED
@@ -208,7 +208,7 @@ def test_review_update_is_versioned_authorized_and_append_only() -> None:
             actor_user_id="reviewer-1",
             risk_id="risk-1",
             expected_review_version=1,
-            new_disposition=ReviewDisposition.EXCLUDED,
+            new_disposition=ReviewDisposition.ACCEPTED_RISK,
             comment="does not create a second event",
         )
         assert unchanged.disposition is RiskReviewDisposition.UNCHANGED

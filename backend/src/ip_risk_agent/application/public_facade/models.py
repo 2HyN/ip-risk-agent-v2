@@ -355,3 +355,19 @@ __all__ = [
     "SourceScopeInput",
     "SourceWorkspaceContext",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class UntrackedArtifact:
+    """추적을 끊은 결과.
+
+    ``source_artifact_id`` 는 호출자(connector)가 provider 쪽 감시를 마저 끊는 데
+    쓴다. ``already_archived`` 가 참이면 이미 해제된 것을 다시 부른 것이므로 화면이
+    오류를 낼 이유가 없다.
+    """
+
+    artifact_id: str
+    mount_id: str
+    source_artifact_id: str
+    excluded_risk_ids: tuple[str, ...]
+    already_archived: bool

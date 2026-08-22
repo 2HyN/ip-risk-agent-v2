@@ -107,3 +107,52 @@ def test_review_disposition_does_not_take_or_change_lifecycle_state() -> None:
     assert decision.changed
     assert decision.event_type is RiskEventType.REVIEW_DISPOSITION_CHANGED
     assert not hasattr(decision, "lifecycle_state")
+
+
+def test_a_reviewer_cannot_choose_the_excluded_disposition() -> None:
+    """EXCLUDED 는 외적 요인으로 관리가 끝났다는 뜻이라 사람이 고를 수 없다.
+
+    추적이 이미 끊긴 Risk 를 두고 계속 지켜볼지 사람이 판단하는 것은 뜻이 통하지
+    않는다. 사람이 스스로 감시를 그만두는 것은 ACCEPTED_RISK 다.
+    """
+    from ip_risk_agent.core.common import DomainInvariantError
+    from ip_risk_agent.core.risk import decide_user_review
+
+    for allowed in (
+        ReviewDisposition.UNREVIEWED,
+        ReviewDisposition.MONITORING,
+        ReviewDisposition.ACCEPTED_RISK,
+    ):
+        decision = decide_user_review(ReviewDisposition.UNREVIEWED, allowed)
+        assert decision.next_disposition is allowed
+
+    with pytest.raises(DomainInvariantError):
+        decide_user_review(ReviewDisposition.MONITORING, ReviewDisposition.EXCLUDED)
+
+    # 반대 방향도 막는다. 추적이 끊긴 Risk 를 사람이 되살리는 길은 없다.
+    with pytest.raises(DomainInvariantError):
+        decide_user_review(ReviewDisposition.EXCLUDED, ReviewDisposition.MONITORING)
+
+
+def test_exclusion_closes_the_risk_without_erasing_it() -> None:
+    from ip_risk_agent.core.risk import decide_exclusion
+
+    decision = decide_exclusion(
+        RiskLifecycleState.EXISTING, ReviewDisposition.MONITORING
+    )
+    assert decision.next_state is RiskLifecycleState.RESOLVED
+    assert decision.next_disposition is ReviewDisposition.EXCLUDED
+    assert decision.changed
+
+
+def test_only_an_excluded_risk_is_revived_when_tracking_resumes() -> None:
+    """다시 추적하게 되면 이전 Risk 를 되살린다. 사람 처분은 되살리지 않는다."""
+    from ip_risk_agent.core.risk import should_revive
+
+    assert should_revive(ReviewDisposition.EXCLUDED)
+    for kept in (
+        ReviewDisposition.UNREVIEWED,
+        ReviewDisposition.MONITORING,
+        ReviewDisposition.ACCEPTED_RISK,
+    ):
+        assert not should_revive(kept)

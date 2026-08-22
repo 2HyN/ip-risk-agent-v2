@@ -267,6 +267,7 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
         mount_connection_lookup=DriveMountConnectionLookup(source.pending),
         tracking_scope_store=source.drive_tracking,
         mount_creation_callback=registration,
+        untrack_callback=_DriveUntrackBridge(context.control_facade),
         initial_change_sync=DriveInitialChangePublisher(
             control_facade=context.control_facade,
             adapter=source.drive_adapter,
@@ -413,6 +414,31 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
         ),
         close_callbacks=tuple(close_callbacks),
     )
+
+
+class _DriveUntrackBridge:
+    """Drive 추적 해제의 canonical 부분을 control plane 에 넘긴다.
+
+    인가는 라우터의 mount 범위 의존성이 이미 끝냈다
+    (``SessionSourceAuthorizer`` 가 ``MOUNT_SOURCE_OPERATION`` 을 확인한다).
+    여기서는 그 결과만 전달한다.
+    """
+
+    def __init__(self, control_facade) -> None:
+        self._control = control_facade
+
+    async def untrack_artifact(
+        self,
+        request,
+        *,
+        risk_workspace_id: str,
+        artifact_id: str,
+    ):
+        del request
+        return await self._control.untrack_artifact(
+            risk_workspace_id=risk_workspace_id,
+            artifact_id=artifact_id,
+        )
 
 
 class _DriveChannelResolver:
