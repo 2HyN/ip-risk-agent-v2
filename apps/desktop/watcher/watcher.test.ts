@@ -340,3 +340,44 @@ test("하위 폴더 파일의 상대 경로는 슬래시로 온다", async () =>
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("폴더 밖을 가리키던 링크가 지워져도 그 파일의 삭제를 보고하지 않는다", async () => {
+  // 경로 가드는 링크가 살아 있을 때만 탈출을 알아본다. 링크가 지워지면 그 경로는
+  // "폴더 안의 없는 경로" 와 구별되지 않아 가드를 그냥 통과한다. 실제로 폴더 밖
+  // 파일 두 개가 그렇게 삭제 이벤트로 서버까지 갔다.
+  const base = mkdtempSync(join(tmpdir(), "iprisk-escape-"));
+  const root = join(base, "inside");
+  const outside = join(base, "outside");
+  mkdirSync(root);
+  mkdirSync(outside);
+  writeFileSync(join(outside, "secret.md"), "# 폴더 밖\n");
+
+  const linkPath = join(root, "escape");
+  try {
+    symlinkSync(outside, linkPath, "junction");
+  } catch {
+    return; // 링크를 만들 수 없는 환경이면 확인할 것이 없다
+  }
+
+  const events: LocalChangeEvent[] = [];
+  const handle = await startLocalWatcher(root, (e) => events.push(e), {
+    debounceMs: TEST_DEBOUNCE_MS,
+    moveCorrelationWindowMs: TEST_MOVE_WINDOW_MS,
+    emitExisting: true,
+  });
+
+  try {
+    await delay(TEST_DEBOUNCE_MS + 300);
+    // 링크가 살아 있는 동안에도 폴더 밖 파일은 보고되지 않는다.
+    assert.deepEqual(events, []);
+
+    rmSync(linkPath, { recursive: true, force: true });
+    await delay(TEST_DEBOUNCE_MS + 400);
+
+    // 링크가 사라진 뒤에도 마찬가지다. 보고한 적 없으면 지운 것도 알리지 않는다.
+    assert.equal(events.length, 0, JSON.stringify(events));
+  } finally {
+    await handle.close();
+    rmSync(base, { recursive: true, force: true });
+  }
+});

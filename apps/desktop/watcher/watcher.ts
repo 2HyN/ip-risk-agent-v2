@@ -171,7 +171,16 @@ export async function startLocalWatcher(
       contentHashCache.delete(relativePath);
 
       if (!hash) {
-        emitDelete(relativePath, entry.absolutePath);
+        // 우리가 **보고한 적 없는** 파일이다. 지운 것도 보고하지 않는다.
+        //
+        // 경로 가드는 링크가 살아 있을 때만 탈출을 알아볼 수 있다. 폴더 밖을
+        // 가리키던 링크가 지워지면 그 경로는 "폴더 안의 없는 경로" 와 구별되지
+        // 않아 가드를 그냥 통과한다. 실제로 폴더 밖 파일 두 개가 그렇게 삭제
+        // 이벤트로 서버까지 갔다 — 내용은 아니고 경로 이름이었지만, 애초에
+        // 우리 것이 아닌 이름이다.
+        //
+        // 내용 해시는 우리가 보고할 때만 남는다. 그것이 없다는 것은 이 파일이
+        // 한 번도 감시 대상이 아니었다는 뜻이므로, 지웠다고 알릴 것도 없다.
         return;
       }
 
