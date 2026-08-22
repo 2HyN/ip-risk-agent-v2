@@ -127,6 +127,10 @@ export function SourcePanel({
   if (sources.loading) return <LoadingState label="Loading connected sources" />;
   if (sources.error !== null) return <ErrorState error={sources.error} retry={sources.reload} />;
   const connected = sources.data?.connected_sources ?? [];
+  // 살아 있는 GitHub 연결. 있으면 "Add Source" 가 설치 화면으로 나가지 않는다.
+  const activeGithub = connected.find(
+    (item) => item.source_type === "GITHUB" && item.status === "ACTIVE",
+  );
   const trackedArtifacts = sources.data?.tracked_artifacts ?? [];
   const artifactId = sourcePath.startsWith("artifacts/")
     ? sourcePath.slice("artifacts/".length)
@@ -301,6 +305,15 @@ export function SourcePanel({
           <Card>
             <AddSourceChooser
               onSelect={setSelected}
+              onUseExistingGithub={
+                activeGithub === undefined
+                  ? null
+                  : () => {
+                      setManagedGithub(activeGithub);
+                      setManagedDrive(null);
+                      setMutationError(null);
+                    }
+              }
               isDesktop={platform.platform === "desktop"}
               riskWorkspaceId={workspace.id}
               connectionApiClient={sourceApi}

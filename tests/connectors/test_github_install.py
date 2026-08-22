@@ -104,6 +104,11 @@ def test_callback_with_invalid_state_returns_400():
 
     assert response.status_code == 400
     assert callback.calls == []
+    # 무엇을 다시 해야 하는지 말해 주지 않으면 사용자가 같은 실패를 반복한다.
+    # 승인 화면을 오래 붙들거나 뒤로가기로 옛 URL 을 다시 열면 여기로 온다.
+    detail = response.json()["detail"]
+    assert detail["code"] == "OAUTH_STATE_EXPIRED"
+    assert "다시 시작" in detail["message"]
 
 
 def test_callback_state_cannot_be_reused():

@@ -152,7 +152,13 @@ class GitHubAdapter:
             source_artifact_id=change.artifact.source_artifact_id,
             resolved_revision=change.revision or file_content.sha,
             retrieved_at=datetime.now(timezone.utc),
-            display_name=identity.path,
+            # 등록 때 적힌 것을 그대로 되돌려준다. 게이트는 스냅샷의 표시 이름이
+            # canonical artifact 의 것과 같아야 한다고 본다. 여기서 전체 경로를
+            # 쓰면 **하위 폴더에 있는 파일만** 어긋난다 — 루트 파일은 이름과 경로가
+            # 같아 우연히 통과하므로 저장소 하나를 붙여 보고도 모른 채 지나간다.
+            #
+            # 경로는 ``logical_path_hint`` 가 들고 있고, 그쪽은 등록과 같은 값이다.
+            display_name=change.artifact.display_name,
             logical_path_hint=identity.path,
             mime_type=None,
             artifact_kind=self._infer_artifact_kind(identity.path),

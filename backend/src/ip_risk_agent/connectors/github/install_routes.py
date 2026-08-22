@@ -66,7 +66,20 @@ def create_github_install_router(
     async def callback(request: Request, installation_id: str, state: str) -> Response:
         context = await state_store.consume(state)
         if context is None:
-            raise HTTPException(status_code=400, detail="invalid or expired oauth state")
+        # state 는 일회용이고 수명이 짧다. 승인 화면을 오래 붙들거나 **뒤로가기로
+        # 옛 URL 을 다시 열면** 여기로 온다. 무엇을 다시 해야 하는지 말해 주지
+        # 않으면 사용자는 같은 실패를 반복한다 — 이번 GitHub 연결에서 소비되지 않은
+        # state 가 4 개 쌓였다.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "OAUTH_STATE_EXPIRED",
+                    "message": (
+                        "연결 요청이 만료되었거나 이미 사용되었습니다. "
+                        "앱의 Sources 화면에서 연결을 다시 시작해 주세요."
+                    ),
+                },
+            )
 
         connection_id = await connection_creation_callback.create_github_connection(
             request,

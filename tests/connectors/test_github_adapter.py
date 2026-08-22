@@ -251,3 +251,58 @@ def test_fetch_snapshot_proceeds_when_no_ipriskignore_present():
         assert snapshot.content_scope.value == "FULL_TEXT"
 
     asyncio.run(scenario())
+
+
+def test_the_snapshot_repeats_the_name_the_change_was_registered_with():
+    """게이트는 스냅샷의 표시 이름이 canonical artifact 의 것과 같아야 한다고 본다.
+
+    등록은 파일 이름을 쓰고 스냅샷은 전체 경로를 써서, **하위 폴더에 있는 파일만**
+    어긋났다. 루트 파일은 이름과 경로가 같아 우연히 통과하므로 저장소를 하나 붙여
+    보고도 모른 채 지나간다. 실제로 파일 열둘 중 하나만
+    ``SECURITY_GATE:CANONICAL_CONTEXT_MISMATCH`` 로 죽었다.
+
+    그래서 등록이 만든 변경을 그대로 스냅샷에 태워 두 이름을 맞대 본다.
+    """
+
+    async def scenario():
+        provider = FakeGitHubProvider(
+            files={
+                "docs/design.md": GitHubFileContent(
+                    path="docs/design.md", sha="blob-a", text="설계 문서\n" * 20, size=120
+                )
+            },
+            tree=[GitHubTreeFile(path="docs/design.md", sha="blob-a")],
+        )
+        adapter = await _build_adapter(provider)
+
+        (change,) = await adapter.initial_changes(_mount())
+        snapshot = await adapter.fetch_snapshot(change)
+
+        assert change.artifact.display_name == "design.md"
+        assert snapshot.display_name == change.artifact.display_name
+        # 경로는 힌트가 들고 있다. 그쪽은 폴더를 포함해야 한다.
+        assert snapshot.logical_path_hint == "docs/design.md"
+
+    asyncio.run(scenario())
+
+
+def test_a_file_at_the_repository_root_agrees_too():
+    """루트 파일에서도 같아야 한다 — 우연이 아니라 규칙이어야 한다."""
+
+    async def scenario():
+        provider = FakeGitHubProvider(
+            files={
+                "requirements.txt": GitHubFileContent(
+                    path="requirements.txt", sha="blob-b", text="requests==2.32.3\n", size=18
+                )
+            },
+            tree=[GitHubTreeFile(path="requirements.txt", sha="blob-b")],
+        )
+        adapter = await _build_adapter(provider)
+
+        (change,) = await adapter.initial_changes(_mount())
+        snapshot = await adapter.fetch_snapshot(change)
+
+        assert snapshot.display_name == change.artifact.display_name == "requirements.txt"
+
+    asyncio.run(scenario())

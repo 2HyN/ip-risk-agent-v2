@@ -22,6 +22,15 @@ export interface AddSourceChooserProps {
   riskWorkspaceId: string;
   connectionApiClient: SourceApiClient;
   navigateExternal?: (url: string) => void;
+  /**
+   * 이미 살아 있는 GitHub 연결이 있으면 그것을 쓴다.
+   *
+   * 저장소를 더 붙이려는 사람이 가장 먼저 누르는 것은 "Add Source" 다. 그런데
+   * 거기서 설치 화면으로 보내면 GitHub 은 **저장소 선택이 바뀔 때만** 돌려보내
+   * 므로, 새로 고를 것이 없는 사람은 돌아오지 못한다. 이미 붙어 있는 연결이
+   * 있으면 나갈 이유가 없다 — 저장소 목록은 앱에서 바로 볼 수 있다.
+   */
+  onUseExistingGithub?: (() => void) | null;
 }
 
 export function AddSourceChooser({
@@ -30,6 +39,7 @@ export function AddSourceChooser({
   riskWorkspaceId,
   connectionApiClient,
   navigateExternal = (url) => window.location.assign(url),
+  onUseExistingGithub = null,
 }: AddSourceChooserProps) {
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +57,10 @@ export function AddSourceChooser({
   const handleGithubClick = async (): Promise<void> => {
     onSelect("GITHUB");
     setError(null);
+    if (onUseExistingGithub !== null) {
+      onUseExistingGithub();
+      return;
+    }
     try {
       const { authorizeUrl } = await connectionApiClient.startGithubConnection(riskWorkspaceId);
       navigateExternal(authorizeUrl);
@@ -64,6 +78,11 @@ export function AddSourceChooser({
       <Button type="button" variant="secondary" onClick={() => void handleGithubClick()}>
         GitHub Repository
       </Button>
+      {onUseExistingGithub === null ? null : (
+        <p className="source-hint">
+          이미 연결된 GitHub 설치가 있습니다. 접근 가능한 저장소를 바로 고를 수 있습니다.
+        </p>
+      )}
       <Button type="button" variant="secondary" onClick={() => onSelect("LOCAL")} disabled={!isDesktop}>
         Local Folder{isDesktop ? "" : " (Desktop only)"}
       </Button>
