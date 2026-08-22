@@ -13,6 +13,7 @@ export type AnalysisFailureNotice = {
 };
 
 const QUOTA_EXHAUSTED = "PROVIDER:QUOTA_EXHAUSTED";
+const INCOMPLETE_COVERAGE = "ANALYSIS:INCOMPLETE_COVERAGE";
 
 export function analysisFailureNotice(
   code: string | null | undefined,
@@ -26,6 +27,18 @@ export function analysisFailureNotice(
         "KIPRIS 호출 한도가 소진되어 이 문서를 검사하지 못했습니다. " +
         "문서나 설정 문제가 아니므로 다시 검사해도 같은 결과입니다. " +
         "한도가 초기화된 뒤(매월 1일) 또는 키 등급을 올린 뒤에 다시 검사하세요.",
+    };
+  }
+  if (code === INCOMPLETE_COVERAGE) {
+    // 미판정은 실패가 아니다. 본 것은 그대로 두고, 보지 못한 것이 있다는 뜻이다.
+    // 실패로 보여 주면 이미 확인된 Risk 까지 믿을 수 없는 것처럼 읽힌다.
+    return {
+      tone: "warning",
+      title: "일부 후보를 판정하지 못했습니다",
+      detail:
+        "검사는 끝났지만 후보 중 일부를 끝까지 대조하지 못했습니다. " +
+        "확인된 Risk 는 그대로 유효하며, 판정하지 못한 부분 때문에 " +
+        "기존 Risk 를 해소하지는 않습니다. 다시 검사하면 완결될 수 있습니다.",
     };
   }
   if (code.startsWith("SOURCE:REVISION_SUPERSEDED")) {

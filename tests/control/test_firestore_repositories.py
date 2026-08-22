@@ -79,6 +79,7 @@ from ip_risk_agent.persistence.core_firestore.backend import (
 from ip_risk_agent.persistence.core_firestore.repositories import (
     FirestoreControlUnitOfWorkFactory,
 )
+from ip_risk_agent.persistence.core_firestore.session import FirestoreDocumentSession
 from ip_risk_agent.persistence.core_firestore.schema import (
     AUDIT_EVENTS,
     CANONICAL_COLLECTIONS,
@@ -952,3 +953,44 @@ def test_firestore_session_and_security_policy_versions_are_monotonic() -> None:
             assert await uow.workspaces.get(workspace.id) == updated_workspace
 
     run(scenario())
+
+
+def test_deleting_and_recreating_the_same_document_in_one_transaction_overwrites() -> None:
+    """지웠다가 같은 ID 로 다시 만드는 것은 덮어쓰기다.
+
+    쓰기를 ``create`` 로 남기면 저장소에 아직 있는 문서를 만들려 들고 Firestore 는
+    AlreadyExists 로 거부한다. 배포에서 재검사가 자기 근거를 걷어내고 다시 쓸 때
+    정확히 이것으로 죽었다 — 세션 안에서는 지워진 것으로 보여 검사를 통과했다.
+    """
+
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        session = FirestoreDocumentSession(backend)
+        await session.create("things", "thing-1", {"value": "first"})
+        await session.commit()
+
+        session = FirestoreDocumentSession(backend)
+        await session.delete("things", "thing-1")
+        await session.create("things", "thing-1", {"value": "second"})
+        await session.commit()
+
+        stored = await backend.get(DocumentKey("things", "thing-1"))
+        assert stored is not None
+        assert stored.data == {"value": "second"}
+
+    asyncio.run(scenario())
+
+
+def test_creating_and_deleting_the_same_document_in_one_transaction_leaves_nothing() -> None:
+    """반대 순서는 없던 일이 되어야 한다. 지울 대상이 저장소에 없다."""
+
+    async def scenario() -> None:
+        backend = FakeFirestoreBackend()
+        session = FirestoreDocumentSession(backend)
+        await session.create("things", "thing-2", {"value": "only"})
+        await session.delete("things", "thing-2")
+        await session.commit()
+
+        assert await backend.get(DocumentKey("things", "thing-2")) is None
+
+    asyncio.run(scenario())

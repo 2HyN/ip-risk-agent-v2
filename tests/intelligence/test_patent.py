@@ -1306,3 +1306,53 @@ def test_every_known_kipris_rejection_stops_instead_of_retrying(code, message, e
         await client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_a_comparison_that_names_an_unknown_segment_is_asked_once_more():
+    """모델이 한 번 미끄러졌다고 재검사 전체가 무의미해지면 안 된다.
+
+    지어낸 근거가 섞인 대조는 버리는 것이 맞다. 그런데 버린 후보는 미판정으로
+    남아 범위가 PARTIAL 이 되고, 그러면 분석 전체가 권위를 잃어 Risk 가 하나도
+    갱신되지 않는다. 배포에서 후보 여섯 중 하나가 없는 segment 를 지목해 재검사가
+    통째로 INCONCLUSIVE 가 됐다.
+
+    모델은 실행마다 다르게 답하므로 같은 프롬프트로 한 번 더 묻는다. KIPRIS 호출은
+    늘지 않는다.
+    """
+    analyzer = make_analyzer(
+        [
+            extraction(),
+            # 후보 A: 한 번 미끄러진 뒤 다시 물으면 제대로 답한다.
+            comparison(PATENT_A, segment="존재하지-않는-segment"),
+            comparison(PATENT_A),
+            # 후보 B: 처음부터 제대로 답한다.
+            comparison(PATENT_B),
+        ]
+    )
+    result = run(analyzer.analyze(patent_artifact()))
+    assert result.status is AnalysisStatus.SUCCEEDED
+    assert result.coverage is AnalysisCoverage.COMPLETE
+    assert {item.normalized_application_number for item in result.candidates} == {
+        PATENT_A,
+        PATENT_B,
+    }
+    assert result.provider_failures == []
+
+
+def test_a_comparison_that_stays_malformed_is_still_discarded():
+    """두 번 다 어긋나면 형식이 아니라 내용의 문제일 수 있다. 그때는 버린다."""
+    analyzer = make_analyzer(
+        [
+            extraction(),
+            comparison(PATENT_A, segment="존재하지-않는-segment"),
+            comparison(PATENT_A, segment="여전히-없는-segment"),
+            comparison(PATENT_B),
+        ]
+    )
+    result = run(analyzer.analyze(patent_artifact()))
+    assert [item.normalized_application_number for item in result.candidates] == [PATENT_B]
+    # 보지 못한 후보가 있으므로 범위는 완전하지 않다.
+    assert result.coverage is AnalysisCoverage.PARTIAL
+    assert [failure.category for failure in result.provider_failures] == [
+        FailureCategory.MALFORMED_OUTPUT
+    ]

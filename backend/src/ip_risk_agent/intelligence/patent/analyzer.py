@@ -362,32 +362,46 @@ class PatentAnalyzer:
             segments=render_segments(artifact),
             patent_evidence=evidence_builder.render_evidence(evidence),
         )
-        try:
-            comparison = await self._client.generate(prompt, PatentComparison)
-        except ProviderFailureError as failure:
-            builder.record_failure(failure)
-            return None
+        evidence_bodies = {
+            **{
+                source_segment_id(segment.segment_id): segment.text
+                for segment in artifact.text_segments
+            },
+            **evidence.text_by_id,
+        }
+        allowed_segment_ids = {item.segment_id for item in artifact.text_segments}
 
-        try:
-            grounded = grounding.validate_comparison(
-                comparison,
-                allowed_segment_ids={s.segment_id for s in artifact.text_segments},
-                evidence_types=evidence.types,
-                # 잘렸는지는 모델에게 묻지 않는다. 원장이 아는 사실이다.
-                truncated_evidence_ids=builder.ledger.truncated_ids,
-                # 인용이 본문에 실제로 있는지 코드가 확인한다. 양쪽 본문을 넘긴다.
-                evidence_bodies={
-                    **{
-                        source_segment_id(segment.segment_id): segment.text
-                        for segment in artifact.text_segments
-                    },
-                    **evidence.text_by_id,
-                },
-            )
-        except MalformedProviderOutputError as failure:
-            # 지어낸 근거가 섞였다. 이 특허에 대한 판단 전체를 버린다.
-            builder.record_failure(failure)
-            return None
+        # 지어낸 근거가 섞이면 이 특허에 대한 판단 전체를 버린다. 그런데 버린 후보는
+        # **미판정**으로 남아 범위가 PARTIAL 이 되고, 그러면 분석 전체가 권위를 잃어
+        # Risk 가 하나도 갱신되지 않는다. 후보 여섯 중 하나가 미끄러졌다는 이유로
+        # 재검사가 통째로 무의미해졌다.
+        #
+        # 모델은 실행마다 조금씩 다르게 답한다. 같은 프롬프트로 한 번 더 물어 본다.
+        # KIPRIS 호출은 늘지 않고, 늘어나는 것은 대조 한 번뿐이다. 두 번 다 어긋나면
+        # 그때는 그대로 버린다 — 형식이 아니라 내용의 문제일 수 있다.
+        grounded = None
+        for remaining in (1, 0):
+            try:
+                comparison = await self._client.generate(prompt, PatentComparison)
+            except ProviderFailureError as failure:
+                builder.record_failure(failure)
+                return None
+            try:
+                grounded = grounding.validate_comparison(
+                    comparison,
+                    allowed_segment_ids=allowed_segment_ids,
+                    evidence_types=evidence.types,
+                    # 잘렸는지는 모델에게 묻지 않는다. 원장이 아는 사실이다.
+                    truncated_evidence_ids=builder.ledger.truncated_ids,
+                    # 인용이 본문에 실제로 있는지 코드가 확인한다. 양쪽 본문을 넘긴다.
+                    evidence_bodies=evidence_bodies,
+                )
+                break
+            except MalformedProviderOutputError as failure:
+                if not remaining:
+                    builder.record_failure(failure)
+                    return None
+        assert grounded is not None
 
         priority = grounding.suggested_priority(grounded)
         # 점수는 관측만 한다. 판정은 위 규칙이 하고 이 값은 기록만 된다 (설계 노트 §6-3).

@@ -609,7 +609,9 @@ def _aggregate_job(
         failure_safe = None
     else:
         status = AnalysisJobStatus.INCONCLUSIVE
-        failure_safe = "one or more requested analyses were non-authoritative"
+        # 다른 실패와 같은 형태의 코드를 쓴다. 예전에는 영어 한 문장이 그대로
+        # 화면에 나와, 미판정을 실패로 읽게 만들었다.
+        failure_safe = "ANALYSIS:INCOMPLETE_COVERAGE"
     return (
         complete_analysis_job(
             job,

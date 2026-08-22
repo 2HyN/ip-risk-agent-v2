@@ -91,7 +91,14 @@ class FirestoreDocumentSession:
             raise UniqueConstraintViolation(f"document already exists: {collection}/{document_id}")
         document = dict(data)
         self._overlay[key] = document
-        self._writes[key] = DocumentWrite("create", key, document)
+        previous = self._writes.get(key)
+        # 같은 트랜잭션에서 지웠다가 같은 ID 로 다시 만들면, 쓰기가 ``create`` 로
+        # 뭉개져 **저장소에 아직 있는 문서**를 만들려 든다. Firestore 는 그때
+        # AlreadyExists 로 거부한다. 지운 적이 있다는 것은 그 문서가 있었다는
+        # 뜻이므로 덮어쓰기가 맞다 — 재검사가 자기 근거를 걷어내고 다시 쓸 때가
+        # 정확히 이 경우다.
+        operation = "set" if previous is not None and previous.operation == "delete" else "create"
+        self._writes[key] = DocumentWrite(operation, key, document)
 
     async def set(self, collection: str, document_id: str, data: Document) -> None:
         self.ensure_open()

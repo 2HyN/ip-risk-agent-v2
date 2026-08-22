@@ -28,3 +28,17 @@ describe("analysisFailureNotice", () => {
     expect(analysisFailureNotice("")).toBeNull();
   });
 });
+
+describe("미판정", () => {
+  it("일부만 판정된 검사는 실패가 아니라 경고다", () => {
+    // 실패로 보여 주면 이미 확인된 Risk 까지 믿을 수 없는 것처럼 읽힌다.
+    const notice = analysisFailureNotice("ANALYSIS:INCOMPLETE_COVERAGE");
+    expect(notice?.tone).toBe("warning");
+    expect(notice?.title).toContain("판정하지 못했습니다");
+  });
+
+  it("영어 원문을 그대로 내보내지 않는다", () => {
+    const notice = analysisFailureNotice("ANALYSIS:INCOMPLETE_COVERAGE");
+    expect(notice?.detail).not.toContain("non-authoritative");
+  });
+});
