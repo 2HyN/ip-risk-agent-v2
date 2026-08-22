@@ -117,12 +117,19 @@ class FakeSourceAdapter:
             self.cleanup_count += 1
 
 
+class _UnexpectedAnalyzerCrash(RuntimeError):
+    pass
+
+
 class FakeIntelligence:
-    def __init__(self, *, omit_results: bool = False) -> None:
+    def __init__(self, *, omit_results: bool = False, crash: bool = False) -> None:
         self.omit_results = omit_results
+        self.crash = crash
 
     async def analyze(self, artifact) -> list[AnalysisResult]:
         assert artifact.requested_analyzers == [AnalysisType.PATENT]
+        if self.crash:
+            raise _UnexpectedAnalyzerCrash("provider payload with a secret value")
         if self.omit_results:
             return []
         started = now()
@@ -428,3 +435,37 @@ def test_missing_pipeline_returns_503_instead_of_ack_without_canonical_failure()
         "code": "CONFIGURATION:ANALYSIS_PIPELINE_MISSING",
         "retryable": True,
     }
+
+
+def test_an_unexpected_failure_records_the_exception_class_not_its_message(caplog) -> None:
+    """분류할 수 없는 실패는 배포에서 되짚을 수 없다.
+
+    catch-all 이 예외를 통째로 삼켜서 FAILED 만 보이고 원인을 좁힐 길이 없었다.
+    클래스 이름은 개발자가 쓴 상수라 남겨도 되고, 메시지·인자·트레이스백은 값을
+    담을 수 있어 남기지 않는다.
+    """
+    import json
+    import logging
+
+    container, _adapter = build_worker(intelligence=FakeIntelligence(crash=True))
+    registered = asyncio.run(seed_execution(container, fingerprint="unexpected"))
+    with caplog.at_level(logging.INFO, logger="ip_risk_agent.composition.pipeline"):
+        with TestClient(create_worker_app(container)) as client:
+            response = client.post(
+                "/internal/tasks/analyze-change",
+                headers={"Authorization": f"Bearer {TASK_TOKEN}"},
+                json={"change_event_id": registered.change_event_id},
+            )
+    assert response.status_code == 503
+
+    records = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{")
+    ]
+    failures = [r for r in records if r.get("event") == "analysis_pipeline_failed"]
+    assert failures, "실패는 로그에 남아야 한다"
+    failure = failures[-1]
+    assert failure["failure_safe"] == "INTERNAL:UNEXPECTED_PIPELINE_FAILURE"
+    assert failure["failure_reason"] == "_UnexpectedAnalyzerCrash"
+    assert "secret value" not in json.dumps(failure)

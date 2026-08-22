@@ -176,13 +176,18 @@ class AnalysisPipeline:
             if snapshot_fetched:
                 await _cleanup(adapter, claim.source_change)
             return result
-        except Exception:
+        except Exception as exc:
+            # 예외 **클래스 이름**만 남긴다. 메시지·인자·트레이스백은 값을 담을 수
+            # 있어 남기지 않는다. 이름만으로도 분류는 되짚을 수 있고, 그것이 없으면
+            # 배포에서 FAILED 만 보이고 원인을 좁힐 길이 없다 — 앞서
+            # CANONICAL_INTAKE_REJECTED 에서 같은 값을 치렀다.
             return await self._fail(
                 change_event_id,
                 claim.analysis_job_id,
                 claim.attempt,
                 safe_code="INTERNAL:UNEXPECTED_PIPELINE_FAILURE",
                 retryable=True,
+                reason=type(exc).__name__,
             )
 
     async def _fail(
