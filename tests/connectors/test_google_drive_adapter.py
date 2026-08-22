@@ -355,3 +355,54 @@ def test_reconcile_uses_display_metadata_name_when_available():
         assert result.changes[0].artifact.display_name == "My Spec Doc"
 
     asyncio.run(scenario())
+
+
+def test_fetch_snapshot_reads_text_files_even_when_drive_mislabels_the_mime():
+    """Drive 는 .md 업로드에 application/octet-stream 을 붙이곤 한다.
+
+    mime 만 믿으면 기획서가 "미지원"으로 조용히 빠져 특허 분석이 아예 돌지
+    않는다 — 운영에서 실제로 그렇게 전부 빠졌다. 확장자가 텍스트 계열이면
+    내용을 읽어야 한다.
+    """
+    async def scenario():
+        drive_file = DriveFile(
+            file_id="file-1", name="기획서.md", mime_type="application/octet-stream",
+            modified_time="t1", revision_id="rev-1", web_view_link=None,
+        )
+        provider = FakeDriveProvider(
+            files={"file-1": drive_file}, texts={"file-1": "# VoiceGuard\nSMV decoder"}
+        )
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=["file-1"])
+
+        snapshot = await adapter.fetch_snapshot(_change("file-1"))
+
+        assert snapshot.content_scope.value == "FULL_TEXT"
+        assert "SMV decoder" in snapshot.text_segments[0].text
+
+    asyncio.run(scenario())
+
+
+def test_fetch_snapshot_treats_binary_content_as_unsupported():
+    """확장자는 텍스트인데 내용이 바이너리인 파일.
+
+    깨진 문자열을 분석기에 넘기는 것보다 정직한 "미지원"이 낫다.
+    """
+    class BinaryProvider(FakeDriveProvider):
+        def read_text(self, file_id: str, mime_type: str) -> str:
+            raise UnicodeDecodeError("utf-8", b"\x89PNG", 0, 1, "invalid start byte")
+
+    async def scenario():
+        drive_file = DriveFile(
+            file_id="file-1", name="report.md", mime_type="application/octet-stream",
+            modified_time="t1", revision_id="rev-1", web_view_link=None,
+        )
+        provider = BinaryProvider(files={"file-1": drive_file})
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=["file-1"])
+
+        snapshot = await adapter.fetch_snapshot(_change("file-1"))
+
+        assert snapshot.content_scope.value == "UNSUPPORTED"
+        # 실패 경로에서도 갱신 토큰은 저장돼야 한다.
+        assert provider.export_called is True
+
+    asyncio.run(scenario())

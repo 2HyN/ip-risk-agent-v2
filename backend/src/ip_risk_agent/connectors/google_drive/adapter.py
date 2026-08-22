@@ -43,7 +43,7 @@ from ..common.errors import (
 from ..common.fingerprint import drive_change_fingerprint
 from ..common.runtime_store import DriveRuntime
 from .connection_lookup import DriveConnectionContext, DriveConnectionLookup
-from .models import SELECTABLE_MIME_TYPES, DriveProvider
+from .models import DriveProvider, is_probably_text
 from .tracking_scope import DriveTrackingScope
 
 
@@ -119,13 +119,21 @@ class GoogleDriveAdapter:
 
         drive_file = provider.get_file(file_id)
 
-        if drive_file.mime_type not in SELECTABLE_MIME_TYPES:
+        if not is_probably_text(drive_file.name, drive_file.mime_type):
             await self._persist_refreshed_token(connection, provider)
             return self._unsupported_snapshot(
                 change, resolved_revision=drive_file.revision_id or "unknown"
             )
 
-        text = provider.read_text(file_id, drive_file.mime_type)
+        try:
+            text = provider.read_text(file_id, drive_file.mime_type)
+        except UnicodeDecodeError:
+            # 확장자는 텍스트인데 내용이 바이너리다. 깨진 문자열을 분석기에
+            # 넘기는 것보다 정직한 "미지원"이 낫다.
+            await self._persist_refreshed_token(connection, provider)
+            return self._unsupported_snapshot(
+                change, resolved_revision=drive_file.revision_id or "unknown"
+            )
         await self._persist_refreshed_token(connection, provider)
 
         segment = TextSegment(segment_id="full", text=text, segment_kind=SegmentKind.FULL)

@@ -25,6 +25,60 @@ SELECTABLE_MIME_TYPES = (
     "application/json",
 )
 
+# Drive 는 업로드 파일의 mime 을 신뢰할 수 있게 붙여 주지 않는다 — .md 가
+# application/octet-stream 으로 오는 일이 흔하다. mime 만 믿으면 기획서가
+# "미지원"으로 조용히 빠져 특허 분석이 아예 돌지 않는다(실제로 그랬다).
+# 그래서 v1 과 같은 방식으로 확장자를 함께 본다. 진짜 바이너리는 어차피
+# UTF-8 디코드에서 걸러진다.
+TEXT_FILE_SUFFIXES = (
+    ".md",
+    ".markdown",
+    ".txt",
+    ".text",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".java",
+    ".kt",
+    ".go",
+    ".rs",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".cs",
+    ".rb",
+    ".php",
+    ".swift",
+    ".json",
+    ".yml",
+    ".yaml",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".xml",
+    ".html",
+    ".css",
+    ".csv",
+    ".sql",
+    ".sh",
+    ".bat",
+    ".gradle",
+    ".lock",
+)
+
+
+def is_probably_text(name: str, mime_type: str) -> bool:
+    """내용을 읽어 볼 가치가 있는 파일인가.
+
+    mime 이 알려진 텍스트이거나, 이름의 확장자가 텍스트 계열이면 참이다.
+    """
+    if mime_type in SELECTABLE_MIME_TYPES or mime_type.startswith("text/"):
+        return True
+    return name.lower().endswith(TEXT_FILE_SUFFIXES)
+
 
 class DriveScopeError(ValueError):
     """연결된 Drive OAuth scope가 drive.file 정확히 하나가 아닐 때."""
