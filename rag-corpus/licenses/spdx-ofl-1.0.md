@@ -1,6 +1,6 @@
 # SIL Open Font License 1.0
 
-SPDX 식별자 — `OFL-1.0`
+SPDX 식별자 — `OFL-1.0`, `OFL-1.0-RFN`, `OFL-1.0-no-RFN`
 SPDX license list — `e4c1f27`
 원본 — <https://spdx.org/licenses/OFL-1.0.html>
 

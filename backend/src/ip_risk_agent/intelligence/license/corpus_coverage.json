@@ -14,6 +14,57 @@
     "ISC",
     "MIT"
   ],
+  "spdx-0bsd": [
+    "0BSD"
+  ],
+  "spdx-3d-slicer-1.0": [
+    "3D-Slicer-1.0"
+  ],
+  "spdx-aal": [
+    "AAL"
+  ],
+  "spdx-abstyles": [
+    "Abstyles"
+  ],
+  "spdx-adacore-doc": [
+    "AdaCore-doc"
+  ],
+  "spdx-adobe-2006": [
+    "Adobe-2006"
+  ],
+  "spdx-adobe-display-postscript": [
+    "Adobe-Display-PostScript"
+  ],
+  "spdx-adobe-glyph": [
+    "Adobe-Glyph"
+  ],
+  "spdx-adobe-utopia": [
+    "Adobe-Utopia"
+  ],
+  "spdx-adsl": [
+    "ADSL"
+  ],
+  "spdx-advanced-cryptics-dictionary": [
+    "Advanced-Cryptics-Dictionary"
+  ],
+  "spdx-afl-1.1": [
+    "AFL-1.1"
+  ],
+  "spdx-afl-1.2": [
+    "AFL-1.2"
+  ],
+  "spdx-afl-2.0": [
+    "AFL-2.0"
+  ],
+  "spdx-afl-2.1": [
+    "AFL-2.1"
+  ],
+  "spdx-afl-3.0": [
+    "AFL-3.0"
+  ],
+  "spdx-afmparse": [
+    "Afmparse"
+  ],
   "spdx-agpl-1.0-only": [
     "AGPL-1.0-only",
     "AGPL-1.0-or-later"
@@ -22,17 +73,333 @@
     "AGPL-3.0-only",
     "AGPL-3.0-or-later"
   ],
+  "spdx-aladdin": [
+    "Aladdin"
+  ],
+  "spdx-alglib-documentation": [
+    "ALGLIB-Documentation"
+  ],
+  "spdx-amd-newlib": [
+    "AMD-newlib"
+  ],
+  "spdx-amdplpa": [
+    "AMDPLPA"
+  ],
+  "spdx-aml": [
+    "AML"
+  ],
+  "spdx-aml-glslang": [
+    "AML-glslang"
+  ],
+  "spdx-ampas": [
+    "AMPAS"
+  ],
+  "spdx-antlr-pd": [
+    "ANTLR-PD"
+  ],
+  "spdx-antlr-pd-fallback": [
+    "ANTLR-PD-fallback"
+  ],
+  "spdx-any-osi": [
+    "any-OSI"
+  ],
+  "spdx-any-osi-perl-modules": [
+    "any-OSI-perl-modules"
+  ],
+  "spdx-apache-1.0": [
+    "Apache-1.0"
+  ],
+  "spdx-apache-1.1": [
+    "Apache-1.1"
+  ],
+  "spdx-apache-2.0": [
+    "Apache-2.0"
+  ],
+  "spdx-apafml": [
+    "APAFML"
+  ],
+  "spdx-apl-1.0": [
+    "APL-1.0"
+  ],
+  "spdx-app-s2p": [
+    "App-s2p"
+  ],
+  "spdx-apsl-1.0": [
+    "APSL-1.0"
+  ],
+  "spdx-apsl-1.1": [
+    "APSL-1.1"
+  ],
+  "spdx-apsl-1.2": [
+    "APSL-1.2"
+  ],
   "spdx-apsl-2.0": [
     "APSL-2.0"
+  ],
+  "spdx-arphic-1999": [
+    "Arphic-1999"
   ],
   "spdx-artistic-1.0": [
     "Artistic-1.0"
   ],
+  "spdx-artistic-1.0-cl8": [
+    "Artistic-1.0-cl8"
+  ],
   "spdx-artistic-1.0-perl": [
     "Artistic-1.0-Perl"
   ],
+  "spdx-artistic-2.0": [
+    "Artistic-2.0"
+  ],
+  "spdx-artistic-dist": [
+    "Artistic-dist"
+  ],
+  "spdx-aspell-ru": [
+    "Aspell-RU"
+  ],
+  "spdx-aswf-digital-assets-1.0": [
+    "ASWF-Digital-Assets-1.0"
+  ],
+  "spdx-aswf-digital-assets-1.1": [
+    "ASWF-Digital-Assets-1.1"
+  ],
+  "spdx-atc-game": [
+    "atc-game"
+  ],
+  "spdx-baekmuk": [
+    "Baekmuk"
+  ],
+  "spdx-bahyph": [
+    "Bahyph"
+  ],
+  "spdx-barr": [
+    "Barr"
+  ],
+  "spdx-bcrypt-solar-designer": [
+    "bcrypt-Solar-Designer"
+  ],
+  "spdx-beerware": [
+    "Beerware"
+  ],
+  "spdx-bitstream-charter": [
+    "Bitstream-Charter"
+  ],
+  "spdx-bitstream-vera": [
+    "Bitstream-Vera"
+  ],
+  "spdx-bittorrent-1.0": [
+    "BitTorrent-1.0"
+  ],
+  "spdx-bittorrent-1.1": [
+    "BitTorrent-1.1"
+  ],
+  "spdx-blessing": [
+    "blessing"
+  ],
+  "spdx-blueoak-1.0.0": [
+    "BlueOak-1.0.0"
+  ],
+  "spdx-boehm-gc": [
+    "Boehm-GC"
+  ],
+  "spdx-boehm-gc-without-fee": [
+    "Boehm-GC-without-fee"
+  ],
+  "spdx-bola-1.1": [
+    "BOLA-1.1"
+  ],
+  "spdx-borceux": [
+    "Borceux"
+  ],
+  "spdx-brian-gladman-2-clause": [
+    "Brian-Gladman-2-Clause"
+  ],
+  "spdx-brian-gladman-3-clause": [
+    "Brian-Gladman-3-Clause"
+  ],
+  "spdx-brian-gladman-3-clause-no-conversion": [
+    "Brian-Gladman-3-Clause-no-conversion"
+  ],
+  "spdx-bsd-1-clause": [
+    "BSD-1-Clause"
+  ],
+  "spdx-bsd-2-clause": [
+    "BSD-2-Clause"
+  ],
+  "spdx-bsd-2-clause-darwin": [
+    "BSD-2-Clause-Darwin"
+  ],
+  "spdx-bsd-2-clause-first-lines": [
+    "BSD-2-Clause-first-lines"
+  ],
+  "spdx-bsd-2-clause-patent": [
+    "BSD-2-Clause-Patent"
+  ],
+  "spdx-bsd-2-clause-pkgconf-disclaimer": [
+    "BSD-2-Clause-pkgconf-disclaimer"
+  ],
+  "spdx-bsd-2-clause-views": [
+    "BSD-2-Clause-Views"
+  ],
+  "spdx-bsd-3-clause": [
+    "BSD-3-Clause"
+  ],
+  "spdx-bsd-3-clause-acpica": [
+    "BSD-3-Clause-acpica"
+  ],
+  "spdx-bsd-3-clause-attribution": [
+    "BSD-3-Clause-Attribution"
+  ],
+  "spdx-bsd-3-clause-clear": [
+    "BSD-3-Clause-Clear"
+  ],
+  "spdx-bsd-3-clause-flex": [
+    "BSD-3-Clause-flex"
+  ],
+  "spdx-bsd-3-clause-hp": [
+    "BSD-3-Clause-HP"
+  ],
+  "spdx-bsd-3-clause-lbnl": [
+    "BSD-3-Clause-LBNL"
+  ],
+  "spdx-bsd-3-clause-modification": [
+    "BSD-3-Clause-Modification"
+  ],
+  "spdx-bsd-3-clause-no-military-license": [
+    "BSD-3-Clause-No-Military-License"
+  ],
+  "spdx-bsd-3-clause-no-nuclear-license": [
+    "BSD-3-Clause-No-Nuclear-License"
+  ],
+  "spdx-bsd-3-clause-no-nuclear-license-2014": [
+    "BSD-3-Clause-No-Nuclear-License-2014"
+  ],
+  "spdx-bsd-3-clause-no-nuclear-warranty": [
+    "BSD-3-Clause-No-Nuclear-Warranty"
+  ],
+  "spdx-bsd-3-clause-open-mpi": [
+    "BSD-3-Clause-Open-MPI"
+  ],
+  "spdx-bsd-3-clause-sun": [
+    "BSD-3-Clause-Sun"
+  ],
+  "spdx-bsd-3-clause-tso": [
+    "BSD-3-Clause-Tso"
+  ],
+  "spdx-bsd-4-clause": [
+    "BSD-4-Clause"
+  ],
+  "spdx-bsd-4-clause-shortened": [
+    "BSD-4-Clause-Shortened"
+  ],
+  "spdx-bsd-4-clause-uc": [
+    "BSD-4-Clause-UC"
+  ],
+  "spdx-bsd-4.3reno": [
+    "BSD-4.3RENO"
+  ],
+  "spdx-bsd-4.3tahoe": [
+    "BSD-4.3TAHOE"
+  ],
+  "spdx-bsd-advertising-acknowledgement": [
+    "BSD-Advertising-Acknowledgement"
+  ],
+  "spdx-bsd-attribution-hpnd-disclaimer": [
+    "BSD-Attribution-HPND-disclaimer"
+  ],
+  "spdx-bsd-inferno-nettverk": [
+    "BSD-Inferno-Nettverk"
+  ],
+  "spdx-bsd-mark-modifications": [
+    "BSD-Mark-Modifications"
+  ],
+  "spdx-bsd-protection": [
+    "BSD-Protection"
+  ],
+  "spdx-bsd-source-beginning-file": [
+    "BSD-Source-beginning-file"
+  ],
+  "spdx-bsd-source-code": [
+    "BSD-Source-Code"
+  ],
+  "spdx-bsd-systemics": [
+    "BSD-Systemics"
+  ],
+  "spdx-bsd-systemics-w3works": [
+    "BSD-Systemics-W3Works"
+  ],
+  "spdx-bsl-1.0": [
+    "BSL-1.0"
+  ],
+  "spdx-buddy": [
+    "Buddy"
+  ],
+  "spdx-bugroff": [
+    "Bugroff"
+  ],
   "spdx-busl-1.1": [
     "BUSL-1.1"
+  ],
+  "spdx-bzip2-1.0.6": [
+    "bzip2-1.0.6"
+  ],
+  "spdx-c-uda-1.0": [
+    "C-UDA-1.0"
+  ],
+  "spdx-cal-1.0": [
+    "CAL-1.0",
+    "CAL-1.0-Combined-Work-Exception"
+  ],
+  "spdx-caldera": [
+    "Caldera"
+  ],
+  "spdx-caldera-no-preamble": [
+    "Caldera-no-preamble"
+  ],
+  "spdx-capec-tou": [
+    "CAPEC-tou"
+  ],
+  "spdx-catharon": [
+    "Catharon"
+  ],
+  "spdx-catosl-1.1": [
+    "CATOSL-1.1"
+  ],
+  "spdx-cc-by-1.0": [
+    "CC-BY-1.0"
+  ],
+  "spdx-cc-by-2.0": [
+    "CC-BY-2.0"
+  ],
+  "spdx-cc-by-2.5": [
+    "CC-BY-2.5"
+  ],
+  "spdx-cc-by-2.5-au": [
+    "CC-BY-2.5-AU"
+  ],
+  "spdx-cc-by-3.0": [
+    "CC-BY-3.0"
+  ],
+  "spdx-cc-by-3.0-at": [
+    "CC-BY-3.0-AT"
+  ],
+  "spdx-cc-by-3.0-au": [
+    "CC-BY-3.0-AU"
+  ],
+  "spdx-cc-by-3.0-de": [
+    "CC-BY-3.0-DE"
+  ],
+  "spdx-cc-by-3.0-igo": [
+    "CC-BY-3.0-IGO"
+  ],
+  "spdx-cc-by-3.0-nl": [
+    "CC-BY-3.0-NL"
+  ],
+  "spdx-cc-by-3.0-us": [
+    "CC-BY-3.0-US"
+  ],
+  "spdx-cc-by-4.0": [
+    "CC-BY-4.0"
   ],
   "spdx-cc-by-nc-1.0": [
     "CC-BY-NC-1.0"
@@ -46,11 +413,32 @@
   "spdx-cc-by-nc-3.0": [
     "CC-BY-NC-3.0"
   ],
+  "spdx-cc-by-nc-3.0-de": [
+    "CC-BY-NC-3.0-DE"
+  ],
+  "spdx-cc-by-nc-3.0-igo": [
+    "CC-BY-NC-3.0-IGO"
+  ],
   "spdx-cc-by-nc-4.0": [
     "CC-BY-NC-4.0"
   ],
+  "spdx-cc-by-nc-nd-1.0": [
+    "CC-BY-NC-ND-1.0"
+  ],
+  "spdx-cc-by-nc-nd-2.0": [
+    "CC-BY-NC-ND-2.0"
+  ],
+  "spdx-cc-by-nc-nd-2.5": [
+    "CC-BY-NC-ND-2.5"
+  ],
   "spdx-cc-by-nc-nd-3.0": [
     "CC-BY-NC-ND-3.0"
+  ],
+  "spdx-cc-by-nc-nd-3.0-de": [
+    "CC-BY-NC-ND-3.0-DE"
+  ],
+  "spdx-cc-by-nc-nd-3.0-igo": [
+    "CC-BY-NC-ND-3.0-IGO"
   ],
   "spdx-cc-by-nc-nd-4.0": [
     "CC-BY-NC-ND-4.0"
@@ -61,17 +449,44 @@
   "spdx-cc-by-nc-sa-2.0": [
     "CC-BY-NC-SA-2.0"
   ],
+  "spdx-cc-by-nc-sa-2.0-de": [
+    "CC-BY-NC-SA-2.0-DE"
+  ],
+  "spdx-cc-by-nc-sa-2.0-fr": [
+    "CC-BY-NC-SA-2.0-FR"
+  ],
+  "spdx-cc-by-nc-sa-2.0-uk": [
+    "CC-BY-NC-SA-2.0-UK"
+  ],
   "spdx-cc-by-nc-sa-2.5": [
     "CC-BY-NC-SA-2.5"
   ],
   "spdx-cc-by-nc-sa-3.0": [
     "CC-BY-NC-SA-3.0"
   ],
+  "spdx-cc-by-nc-sa-3.0-de": [
+    "CC-BY-NC-SA-3.0-DE"
+  ],
+  "spdx-cc-by-nc-sa-3.0-igo": [
+    "CC-BY-NC-SA-3.0-IGO"
+  ],
   "spdx-cc-by-nc-sa-4.0": [
     "CC-BY-NC-SA-4.0"
   ],
+  "spdx-cc-by-nd-1.0": [
+    "CC-BY-ND-1.0"
+  ],
+  "spdx-cc-by-nd-2.0": [
+    "CC-BY-ND-2.0"
+  ],
+  "spdx-cc-by-nd-2.5": [
+    "CC-BY-ND-2.5"
+  ],
   "spdx-cc-by-nd-3.0": [
     "CC-BY-ND-3.0"
+  ],
+  "spdx-cc-by-nd-3.0-de": [
+    "CC-BY-ND-3.0-DE"
   ],
   "spdx-cc-by-nd-4.0": [
     "CC-BY-ND-4.0"
@@ -82,14 +497,41 @@
   "spdx-cc-by-sa-2.0": [
     "CC-BY-SA-2.0"
   ],
+  "spdx-cc-by-sa-2.0-uk": [
+    "CC-BY-SA-2.0-UK"
+  ],
+  "spdx-cc-by-sa-2.1-jp": [
+    "CC-BY-SA-2.1-JP"
+  ],
   "spdx-cc-by-sa-2.5": [
     "CC-BY-SA-2.5"
   ],
   "spdx-cc-by-sa-3.0": [
     "CC-BY-SA-3.0"
   ],
+  "spdx-cc-by-sa-3.0-at": [
+    "CC-BY-SA-3.0-AT"
+  ],
+  "spdx-cc-by-sa-3.0-de": [
+    "CC-BY-SA-3.0-DE"
+  ],
+  "spdx-cc-by-sa-3.0-igo": [
+    "CC-BY-SA-3.0-IGO"
+  ],
   "spdx-cc-by-sa-4.0": [
     "CC-BY-SA-4.0"
+  ],
+  "spdx-cc-pddc": [
+    "CC-PDDC"
+  ],
+  "spdx-cc-pdm-1.0": [
+    "CC-PDM-1.0"
+  ],
+  "spdx-cc-sa-1.0": [
+    "CC-SA-1.0"
+  ],
+  "spdx-cc0-1.0": [
+    "CC0-1.0"
   ],
   "spdx-cddl-1.0": [
     "CDDL-1.0"
@@ -97,26 +539,227 @@
   "spdx-cddl-1.1": [
     "CDDL-1.1"
   ],
+  "spdx-cdl-1.0": [
+    "CDL-1.0"
+  ],
+  "spdx-cdla-permissive-1.0": [
+    "CDLA-Permissive-1.0"
+  ],
+  "spdx-cdla-permissive-2.0": [
+    "CDLA-Permissive-2.0"
+  ],
+  "spdx-cdla-sharing-1.0": [
+    "CDLA-Sharing-1.0"
+  ],
+  "spdx-cecill-1.0": [
+    "CECILL-1.0"
+  ],
+  "spdx-cecill-1.1": [
+    "CECILL-1.1"
+  ],
   "spdx-cecill-2.0": [
     "CECILL-2.0"
   ],
   "spdx-cecill-2.1": [
     "CECILL-2.1"
   ],
+  "spdx-cecill-b": [
+    "CECILL-B"
+  ],
   "spdx-cecill-c": [
     "CECILL-C"
+  ],
+  "spdx-cern-ohl-1.1": [
+    "CERN-OHL-1.1"
+  ],
+  "spdx-cern-ohl-1.2": [
+    "CERN-OHL-1.2"
+  ],
+  "spdx-cern-ohl-p-2.0": [
+    "CERN-OHL-P-2.0"
+  ],
+  "spdx-cern-ohl-s-2.0": [
+    "CERN-OHL-S-2.0"
+  ],
+  "spdx-cern-ohl-w-2.0": [
+    "CERN-OHL-W-2.0"
+  ],
+  "spdx-cfitsio": [
+    "CFITSIO"
+  ],
+  "spdx-check-cvs": [
+    "check-cvs"
+  ],
+  "spdx-checkmk": [
+    "checkmk"
+  ],
+  "spdx-clartistic": [
+    "ClArtistic"
+  ],
+  "spdx-clips": [
+    "Clips"
+  ],
+  "spdx-cmu-mach": [
+    "CMU-Mach"
+  ],
+  "spdx-cmu-mach-nodoc": [
+    "CMU-Mach-nodoc"
+  ],
+  "spdx-cnri-jython": [
+    "CNRI-Jython"
+  ],
+  "spdx-cnri-python": [
+    "CNRI-Python"
+  ],
+  "spdx-cnri-python-gpl-compatible": [
+    "CNRI-Python-GPL-Compatible"
+  ],
+  "spdx-coil-1.0": [
+    "COIL-1.0"
+  ],
+  "spdx-community-spec-1.0": [
+    "Community-Spec-1.0"
+  ],
+  "spdx-condor-1.1": [
+    "Condor-1.1"
+  ],
+  "spdx-copyleft-next-0.3.0": [
+    "copyleft-next-0.3.0"
+  ],
+  "spdx-copyleft-next-0.3.1": [
+    "copyleft-next-0.3.1"
+  ],
+  "spdx-cornell-lossless-jpeg": [
+    "Cornell-Lossless-JPEG"
+  ],
+  "spdx-cpal-1.0": [
+    "CPAL-1.0"
   ],
   "spdx-cpl-1.0": [
     "CPL-1.0"
   ],
+  "spdx-cpol-1.02": [
+    "CPOL-1.02"
+  ],
+  "spdx-cronyx": [
+    "Cronyx"
+  ],
+  "spdx-crossword": [
+    "Crossword"
+  ],
+  "spdx-cryptoswift": [
+    "CryptoSwift"
+  ],
+  "spdx-crystalstacker": [
+    "CrystalStacker"
+  ],
+  "spdx-cua-opl-1.0": [
+    "CUA-OPL-1.0"
+  ],
+  "spdx-cube": [
+    "Cube"
+  ],
+  "spdx-curl": [
+    "curl"
+  ],
+  "spdx-cve-tou": [
+    "cve-tou"
+  ],
+  "spdx-d-fsl-1.0": [
+    "D-FSL-1.0"
+  ],
+  "spdx-dec-3-clause": [
+    "DEC-3-Clause"
+  ],
+  "spdx-diffmark": [
+    "diffmark"
+  ],
+  "spdx-dl-de-by-2.0": [
+    "DL-DE-BY-2.0"
+  ],
+  "spdx-dl-de-zero-2.0": [
+    "DL-DE-ZERO-2.0"
+  ],
+  "spdx-doc": [
+    "DOC"
+  ],
+  "spdx-docbook-dtd": [
+    "DocBook-DTD"
+  ],
+  "spdx-docbook-schema": [
+    "DocBook-Schema"
+  ],
+  "spdx-docbook-stylesheet": [
+    "DocBook-Stylesheet"
+  ],
+  "spdx-docbook-xml": [
+    "DocBook-XML"
+  ],
+  "spdx-dotseqn": [
+    "Dotseqn"
+  ],
+  "spdx-drl-1.0": [
+    "DRL-1.0"
+  ],
+  "spdx-drl-1.1": [
+    "DRL-1.1"
+  ],
+  "spdx-dsdp": [
+    "DSDP"
+  ],
+  "spdx-dtoa": [
+    "dtoa"
+  ],
+  "spdx-dvipdfm": [
+    "dvipdfm"
+  ],
+  "spdx-ecl-1.0": [
+    "ECL-1.0"
+  ],
+  "spdx-ecl-2.0": [
+    "ECL-2.0"
+  ],
+  "spdx-efl-1.0": [
+    "EFL-1.0"
+  ],
+  "spdx-efl-2.0": [
+    "EFL-2.0"
+  ],
+  "spdx-egenix": [
+    "eGenix"
+  ],
   "spdx-elastic-2.0": [
     "Elastic-2.0"
+  ],
+  "spdx-entessa": [
+    "Entessa"
+  ],
+  "spdx-epics": [
+    "EPICS"
   ],
   "spdx-epl-1.0": [
     "EPL-1.0"
   ],
   "spdx-epl-2.0": [
     "EPL-2.0"
+  ],
+  "spdx-erlpl-1.1": [
+    "ErlPL-1.1"
+  ],
+  "spdx-esa-pl-permissive-2.4": [
+    "ESA-PL-permissive-2.4"
+  ],
+  "spdx-esa-pl-strong-copyleft-2.4": [
+    "ESA-PL-strong-copyleft-2.4"
+  ],
+  "spdx-esa-pl-weak-copyleft-2.4": [
+    "ESA-PL-weak-copyleft-2.4"
+  ],
+  "spdx-etalab-2.0": [
+    "etalab-2.0"
+  ],
+  "spdx-eudatagrid": [
+    "EUDatagrid"
   ],
   "spdx-eupl-1.0": [
     "EUPL-1.0"
@@ -127,17 +770,116 @@
   "spdx-eupl-1.2": [
     "EUPL-1.2"
   ],
+  "spdx-eurosym": [
+    "Eurosym"
+  ],
+  "spdx-fair": [
+    "Fair"
+  ],
+  "spdx-fbm": [
+    "FBM"
+  ],
+  "spdx-fdk-aac": [
+    "FDK-AAC"
+  ],
+  "spdx-ferguson-twofish": [
+    "Ferguson-Twofish"
+  ],
+  "spdx-frameworx-1.0": [
+    "Frameworx-1.0"
+  ],
+  "spdx-freebsd-doc": [
+    "FreeBSD-DOC"
+  ],
+  "spdx-freeimage": [
+    "FreeImage"
+  ],
+  "spdx-fsfap": [
+    "FSFAP"
+  ],
+  "spdx-fsfap-no-warranty-disclaimer": [
+    "FSFAP-no-warranty-disclaimer"
+  ],
+  "spdx-fsful": [
+    "FSFUL"
+  ],
+  "spdx-fsfullr": [
+    "FSFULLR"
+  ],
+  "spdx-fsfullrsd": [
+    "FSFULLRSD"
+  ],
+  "spdx-fsfullrwd": [
+    "FSFULLRWD"
+  ],
+  "spdx-fsl-1.1-alv2": [
+    "FSL-1.1-ALv2"
+  ],
+  "spdx-fsl-1.1-mit": [
+    "FSL-1.1-MIT"
+  ],
+  "spdx-ftl": [
+    "FTL"
+  ],
+  "spdx-furuseth": [
+    "Furuseth"
+  ],
+  "spdx-fwlw": [
+    "fwlw"
+  ],
+  "spdx-game-programming-gems": [
+    "Game-Programming-Gems"
+  ],
+  "spdx-gcr-docs": [
+    "GCR-docs"
+  ],
+  "spdx-gd": [
+    "GD"
+  ],
+  "spdx-generic-xts": [
+    "generic-xts"
+  ],
   "spdx-gfdl-1.1-only": [
+    "GFDL-1.1-invariants-only",
+    "GFDL-1.1-invariants-or-later",
+    "GFDL-1.1-no-invariants-only",
+    "GFDL-1.1-no-invariants-or-later",
     "GFDL-1.1-only",
     "GFDL-1.1-or-later"
   ],
   "spdx-gfdl-1.2-only": [
+    "GFDL-1.2-invariants-only",
+    "GFDL-1.2-invariants-or-later",
+    "GFDL-1.2-no-invariants-only",
+    "GFDL-1.2-no-invariants-or-later",
     "GFDL-1.2-only",
     "GFDL-1.2-or-later"
   ],
   "spdx-gfdl-1.3-only": [
+    "GFDL-1.3-invariants-only",
+    "GFDL-1.3-invariants-or-later",
+    "GFDL-1.3-no-invariants-only",
+    "GFDL-1.3-no-invariants-or-later",
     "GFDL-1.3-only",
     "GFDL-1.3-or-later"
+  ],
+  "spdx-giftware": [
+    "Giftware"
+  ],
+  "spdx-gl2ps": [
+    "GL2PS"
+  ],
+  "spdx-glide": [
+    "Glide"
+  ],
+  "spdx-glulxe": [
+    "Glulxe"
+  ],
+  "spdx-glwtpl": [
+    "GLWTPL"
+  ],
+  "spdx-gnuplot": [
+    "gnuplot"
   ],
   "spdx-gpl-1.0-only": [
     "GPL-1.0-only",
@@ -151,11 +893,224 @@
     "GPL-3.0-only",
     "GPL-3.0-or-later"
   ],
+  "spdx-graphics-gems": [
+    "Graphics-Gems"
+  ],
+  "spdx-gsoap-1.3b": [
+    "gSOAP-1.3b"
+  ],
+  "spdx-gtkbook": [
+    "gtkbook"
+  ],
+  "spdx-gutmann": [
+    "Gutmann"
+  ],
+  "spdx-haskellreport": [
+    "HaskellReport"
+  ],
+  "spdx-hdf5": [
+    "HDF5"
+  ],
+  "spdx-hdparm": [
+    "hdparm"
+  ],
+  "spdx-hidapi": [
+    "HIDAPI"
+  ],
+  "spdx-hippocratic-2.1": [
+    "Hippocratic-2.1"
+  ],
+  "spdx-hp-1986": [
+    "HP-1986"
+  ],
+  "spdx-hp-1989": [
+    "HP-1989"
+  ],
+  "spdx-hpnd": [
+    "HPND"
+  ],
+  "spdx-hpnd-dec": [
+    "HPND-DEC"
+  ],
+  "spdx-hpnd-doc": [
+    "HPND-doc"
+  ],
+  "spdx-hpnd-doc-sell": [
+    "HPND-doc-sell"
+  ],
+  "spdx-hpnd-export-us": [
+    "HPND-export-US"
+  ],
+  "spdx-hpnd-export-us-acknowledgement": [
+    "HPND-export-US-acknowledgement"
+  ],
+  "spdx-hpnd-export-us-modify": [
+    "HPND-export-US-modify"
+  ],
+  "spdx-hpnd-export2-us": [
+    "HPND-export2-US"
+  ],
+  "spdx-hpnd-fenneberg-livingston": [
+    "HPND-Fenneberg-Livingston"
+  ],
+  "spdx-hpnd-inria-imag": [
+    "HPND-INRIA-IMAG"
+  ],
+  "spdx-hpnd-intel": [
+    "HPND-Intel"
+  ],
+  "spdx-hpnd-kevlin-henney": [
+    "HPND-Kevlin-Henney"
+  ],
+  "spdx-hpnd-markus-kuhn": [
+    "HPND-Markus-Kuhn"
+  ],
+  "spdx-hpnd-merchantability-variant": [
+    "HPND-merchantability-variant"
+  ],
+  "spdx-hpnd-mit-disclaimer": [
+    "HPND-MIT-disclaimer"
+  ],
+  "spdx-hpnd-netrek": [
+    "HPND-Netrek"
+  ],
+  "spdx-hpnd-pbmplus": [
+    "HPND-Pbmplus"
+  ],
+  "spdx-hpnd-sell-mit-disclaimer-xserver": [
+    "HPND-sell-MIT-disclaimer-xserver"
+  ],
+  "spdx-hpnd-sell-regexpr": [
+    "HPND-sell-regexpr"
+  ],
+  "spdx-hpnd-sell-variant": [
+    "HPND-sell-variant"
+  ],
+  "spdx-hpnd-sell-variant-critical-systems": [
+    "HPND-sell-variant-critical-systems"
+  ],
+  "spdx-hpnd-sell-variant-mit-disclaimer": [
+    "HPND-sell-variant-MIT-disclaimer"
+  ],
+  "spdx-hpnd-sell-variant-mit-disclaimer-rev": [
+    "HPND-sell-variant-MIT-disclaimer-rev"
+  ],
+  "spdx-hpnd-smc": [
+    "HPND-SMC"
+  ],
+  "spdx-hpnd-uc": [
+    "HPND-UC"
+  ],
+  "spdx-hpnd-uc-export-us": [
+    "HPND-UC-export-US"
+  ],
+  "spdx-htmltidy": [
+    "HTMLTIDY"
+  ],
+  "spdx-hyphen-bulgarian": [
+    "hyphen-bulgarian"
+  ],
+  "spdx-ibm-pibs": [
+    "IBM-pibs"
+  ],
+  "spdx-icu": [
+    "ICU"
+  ],
+  "spdx-iec-code-components-eula": [
+    "IEC-Code-Components-EULA"
+  ],
+  "spdx-ijg": [
+    "IJG"
+  ],
+  "spdx-ijg-short": [
+    "IJG-short"
+  ],
+  "spdx-imagemagick": [
+    "ImageMagick"
+  ],
+  "spdx-imatix": [
+    "iMatix"
+  ],
+  "spdx-imlib2": [
+    "Imlib2"
+  ],
+  "spdx-info-zip": [
+    "Info-ZIP"
+  ],
+  "spdx-informatica": [
+    "Informatica"
+  ],
+  "spdx-inner-net-2.0": [
+    "Inner-Net-2.0"
+  ],
+  "spdx-innosetup": [
+    "InnoSetup"
+  ],
+  "spdx-intel": [
+    "Intel"
+  ],
+  "spdx-intel-acpi": [
+    "Intel-ACPI"
+  ],
+  "spdx-interbase-1.0": [
+    "Interbase-1.0"
+  ],
+  "spdx-ipa": [
+    "IPA"
+  ],
   "spdx-ipl-1.0": [
     "IPL-1.0"
   ],
+  "spdx-isc": [
+    "ISC"
+  ],
+  "spdx-isc-veillard": [
+    "ISC-Veillard"
+  ],
+  "spdx-iso-permission": [
+    "ISO-permission"
+  ],
+  "spdx-jam": [
+    "Jam"
+  ],
+  "spdx-jasper-2.0": [
+    "JasPer-2.0"
+  ],
+  "spdx-jove": [
+    "jove"
+  ],
+  "spdx-jpl-image": [
+    "JPL-image"
+  ],
+  "spdx-jpnic": [
+    "JPNIC"
+  ],
   "spdx-json": [
     "JSON"
+  ],
+  "spdx-kastrup": [
+    "Kastrup"
+  ],
+  "spdx-kazlib": [
+    "Kazlib"
+  ],
+  "spdx-knuth-ctan": [
+    "Knuth-CTAN"
+  ],
+  "spdx-lal-1.2": [
+    "LAL-1.2"
+  ],
+  "spdx-lal-1.3": [
+    "LAL-1.3"
+  ],
+  "spdx-latex2e": [
+    "Latex2e"
+  ],
+  "spdx-latex2e-translated-notice": [
+    "Latex2e-translated-notice"
+  ],
+  "spdx-leptonica": [
+    "Leptonica"
   ],
   "spdx-lgpl-2.0-only": [
     "LGPL-2.0-only",
@@ -169,6 +1124,189 @@
     "LGPL-3.0-only",
     "LGPL-3.0-or-later"
   ],
+  "spdx-lgpllr": [
+    "LGPLLR"
+  ],
+  "spdx-libpng": [
+    "Libpng"
+  ],
+  "spdx-libpng-1.6.35": [
+    "libpng-1.6.35"
+  ],
+  "spdx-libpng-2.0": [
+    "libpng-2.0"
+  ],
+  "spdx-libselinux-1.0": [
+    "libselinux-1.0"
+  ],
+  "spdx-libtiff": [
+    "libtiff"
+  ],
+  "spdx-libutil-david-nugent": [
+    "libutil-David-Nugent"
+  ],
+  "spdx-liliq-p-1.1": [
+    "LiLiQ-P-1.1"
+  ],
+  "spdx-liliq-r-1.1": [
+    "LiLiQ-R-1.1"
+  ],
+  "spdx-liliq-rplus-1.1": [
+    "LiLiQ-Rplus-1.1"
+  ],
+  "spdx-linux-man-pages-1-para": [
+    "Linux-man-pages-1-para"
+  ],
+  "spdx-linux-man-pages-copyleft": [
+    "Linux-man-pages-copyleft"
+  ],
+  "spdx-linux-man-pages-copyleft-2-para": [
+    "Linux-man-pages-copyleft-2-para"
+  ],
+  "spdx-linux-man-pages-copyleft-var": [
+    "Linux-man-pages-copyleft-var"
+  ],
+  "spdx-linux-openib": [
+    "Linux-OpenIB"
+  ],
+  "spdx-loop": [
+    "LOOP"
+  ],
+  "spdx-lpd-document": [
+    "LPD-document"
+  ],
+  "spdx-lpl-1.0": [
+    "LPL-1.0"
+  ],
+  "spdx-lpl-1.02": [
+    "LPL-1.02"
+  ],
+  "spdx-lppl-1.0": [
+    "LPPL-1.0"
+  ],
+  "spdx-lppl-1.1": [
+    "LPPL-1.1"
+  ],
+  "spdx-lppl-1.2": [
+    "LPPL-1.2"
+  ],
+  "spdx-lppl-1.3a": [
+    "LPPL-1.3a"
+  ],
+  "spdx-lppl-1.3c": [
+    "LPPL-1.3c"
+  ],
+  "spdx-lsof": [
+    "lsof"
+  ],
+  "spdx-lucida-bitmap-fonts": [
+    "Lucida-Bitmap-Fonts"
+  ],
+  "spdx-lzma-sdk-9.11-to-9.20": [
+    "LZMA-SDK-9.11-to-9.20"
+  ],
+  "spdx-lzma-sdk-9.22": [
+    "LZMA-SDK-9.22"
+  ],
+  "spdx-mackerras-3-clause": [
+    "Mackerras-3-Clause"
+  ],
+  "spdx-mackerras-3-clause-acknowledgment": [
+    "Mackerras-3-Clause-acknowledgment"
+  ],
+  "spdx-magaz": [
+    "magaz"
+  ],
+  "spdx-mailprio": [
+    "mailprio"
+  ],
+  "spdx-makeindex": [
+    "MakeIndex"
+  ],
+  "spdx-man2html": [
+    "man2html"
+  ],
+  "spdx-martin-birgmeier": [
+    "Martin-Birgmeier"
+  ],
+  "spdx-mcphee-slideshow": [
+    "McPhee-slideshow"
+  ],
+  "spdx-metamail": [
+    "metamail"
+  ],
+  "spdx-minpack": [
+    "Minpack"
+  ],
+  "spdx-mips": [
+    "MIPS"
+  ],
+  "spdx-miros": [
+    "MirOS"
+  ],
+  "spdx-mit": [
+    "MIT"
+  ],
+  "spdx-mit-0": [
+    "MIT-0"
+  ],
+  "spdx-mit-advertising": [
+    "MIT-advertising"
+  ],
+  "spdx-mit-click": [
+    "MIT-Click"
+  ],
+  "spdx-mit-cmu": [
+    "MIT-CMU"
+  ],
+  "spdx-mit-enna": [
+    "MIT-enna"
+  ],
+  "spdx-mit-feh": [
+    "MIT-feh"
+  ],
+  "spdx-mit-festival": [
+    "MIT-Festival"
+  ],
+  "spdx-mit-khronos-old": [
+    "MIT-Khronos-old"
+  ],
+  "spdx-mit-modern-variant": [
+    "MIT-Modern-Variant"
+  ],
+  "spdx-mit-open-group": [
+    "MIT-open-group"
+  ],
+  "spdx-mit-stk": [
+    "MIT-STK"
+  ],
+  "spdx-mit-testregex": [
+    "MIT-testregex"
+  ],
+  "spdx-mit-wu": [
+    "MIT-Wu"
+  ],
+  "spdx-mitnfa": [
+    "MITNFA"
+  ],
+  "spdx-mmixware": [
+    "MMIXware"
+  ],
+  "spdx-mmpl-1.0.1": [
+    "MMPL-1.0.1"
+  ],
+  "spdx-motosoto": [
+    "Motosoto"
+  ],
+  "spdx-mpeg-ssg": [
+    "MPEG-SSG"
+  ],
+  "spdx-mpi-permissive": [
+    "mpi-permissive"
+  ],
+  "spdx-mpich2": [
+    "mpich2"
+  ],
   "spdx-mpl-1.0": [
     "MPL-1.0"
   ],
@@ -179,22 +1317,261 @@
     "MPL-2.0",
     "MPL-2.0-no-copyleft-exception"
   ],
+  "spdx-mplus": [
+    "mplus"
+  ],
+  "spdx-ms-lpl": [
+    "MS-LPL"
+  ],
+  "spdx-ms-pl": [
+    "MS-PL"
+  ],
   "spdx-ms-rl": [
     "MS-RL"
+  ],
+  "spdx-mtll": [
+    "MTLL"
+  ],
+  "spdx-mulanpsl-1.0": [
+    "MulanPSL-1.0"
+  ],
+  "spdx-mulanpsl-2.0": [
+    "MulanPSL-2.0"
+  ],
+  "spdx-multics": [
+    "Multics"
+  ],
+  "spdx-mup": [
+    "Mup"
+  ],
+  "spdx-mvt-1.1": [
+    "MVT-1.1"
+  ],
+  "spdx-naist-2003": [
+    "NAIST-2003"
+  ],
+  "spdx-nasa-1.3": [
+    "NASA-1.3"
+  ],
+  "spdx-naumen": [
+    "Naumen"
+  ],
+  "spdx-nbpl-1.0": [
+    "NBPL-1.0"
+  ],
+  "spdx-ncbi-pd": [
+    "NCBI-PD"
+  ],
+  "spdx-ncgl-uk-2.0": [
+    "NCGL-UK-2.0"
+  ],
+  "spdx-ncl": [
+    "NCL"
+  ],
+  "spdx-ncsa": [
+    "NCSA"
+  ],
+  "spdx-netcdf": [
+    "NetCDF"
+  ],
+  "spdx-newsletr": [
+    "Newsletr"
+  ],
+  "spdx-ngpl": [
+    "NGPL"
+  ],
+  "spdx-ngrep": [
+    "ngrep"
+  ],
+  "spdx-nicta-1.0": [
+    "NICTA-1.0"
+  ],
+  "spdx-nist-pd": [
+    "NIST-PD"
+  ],
+  "spdx-nist-pd-fallback": [
+    "NIST-PD-fallback"
+  ],
+  "spdx-nist-pd-tnt": [
+    "NIST-PD-TNT"
+  ],
+  "spdx-nist-software": [
+    "NIST-Software"
+  ],
+  "spdx-nlod-1.0": [
+    "NLOD-1.0"
+  ],
+  "spdx-nlod-2.0": [
+    "NLOD-2.0"
+  ],
+  "spdx-nlpl": [
+    "NLPL"
+  ],
+  "spdx-nokia": [
+    "Nokia"
+  ],
+  "spdx-nosl": [
+    "NOSL"
+  ],
+  "spdx-noweb": [
+    "Noweb"
+  ],
+  "spdx-npl-1.0": [
+    "NPL-1.0"
+  ],
+  "spdx-npl-1.1": [
+    "NPL-1.1"
   ],
   "spdx-nposl-3.0": [
     "NPOSL-3.0"
   ],
+  "spdx-nrl": [
+    "NRL"
+  ],
+  "spdx-ntia-pd": [
+    "NTIA-PD"
+  ],
+  "spdx-ntp": [
+    "NTP"
+  ],
+  "spdx-ntp-0": [
+    "NTP-0"
+  ],
+  "spdx-o-uda-1.0": [
+    "O-UDA-1.0"
+  ],
+  "spdx-oar": [
+    "OAR"
+  ],
+  "spdx-occt-pl": [
+    "OCCT-PL"
+  ],
+  "spdx-oclc-2.0": [
+    "OCLC-2.0"
+  ],
   "spdx-odbl-1.0": [
     "ODbL-1.0"
   ],
+  "spdx-odc-by-1.0": [
+    "ODC-By-1.0"
+  ],
+  "spdx-offis": [
+    "OFFIS"
+  ],
   "spdx-ofl-1.0": [
-    "OFL-1.0"
+    "OFL-1.0",
+    "OFL-1.0-RFN",
+    "OFL-1.0-no-RFN"
   ],
   "spdx-ofl-1.1": [
     "OFL-1.1",
     "OFL-1.1-RFN",
     "OFL-1.1-no-RFN"
+  ],
+  "spdx-ogc-1.0": [
+    "OGC-1.0"
+  ],
+  "spdx-ogdl-taiwan-1.0": [
+    "OGDL-Taiwan-1.0"
+  ],
+  "spdx-ogl-canada-2.0": [
+    "OGL-Canada-2.0"
+  ],
+  "spdx-ogl-uk-1.0": [
+    "OGL-UK-1.0"
+  ],
+  "spdx-ogl-uk-2.0": [
+    "OGL-UK-2.0"
+  ],
+  "spdx-ogl-uk-3.0": [
+    "OGL-UK-3.0"
+  ],
+  "spdx-ogtsl": [
+    "OGTSL"
+  ],
+  "spdx-oldap-1.1": [
+    "OLDAP-1.1"
+  ],
+  "spdx-oldap-1.2": [
+    "OLDAP-1.2"
+  ],
+  "spdx-oldap-1.3": [
+    "OLDAP-1.3"
+  ],
+  "spdx-oldap-1.4": [
+    "OLDAP-1.4"
+  ],
+  "spdx-oldap-2.0": [
+    "OLDAP-2.0"
+  ],
+  "spdx-oldap-2.0.1": [
+    "OLDAP-2.0.1"
+  ],
+  "spdx-oldap-2.1": [
+    "OLDAP-2.1"
+  ],
+  "spdx-oldap-2.2": [
+    "OLDAP-2.2"
+  ],
+  "spdx-oldap-2.2.1": [
+    "OLDAP-2.2.1"
+  ],
+  "spdx-oldap-2.2.2": [
+    "OLDAP-2.2.2"
+  ],
+  "spdx-oldap-2.3": [
+    "OLDAP-2.3"
+  ],
+  "spdx-oldap-2.4": [
+    "OLDAP-2.4"
+  ],
+  "spdx-oldap-2.5": [
+    "OLDAP-2.5"
+  ],
+  "spdx-oldap-2.6": [
+    "OLDAP-2.6"
+  ],
+  "spdx-oldap-2.7": [
+    "OLDAP-2.7"
+  ],
+  "spdx-oldap-2.8": [
+    "OLDAP-2.8"
+  ],
+  "spdx-olfl-1.3": [
+    "OLFL-1.3"
+  ],
+  "spdx-oml": [
+    "OML"
+  ],
+  "spdx-openmdw-1.0": [
+    "OpenMDW-1.0"
+  ],
+  "spdx-openpbs-2.3": [
+    "OpenPBS-2.3"
+  ],
+  "spdx-openssl": [
+    "OpenSSL"
+  ],
+  "spdx-openssl-standalone": [
+    "OpenSSL-standalone"
+  ],
+  "spdx-openvision": [
+    "OpenVision"
+  ],
+  "spdx-opl-1.0": [
+    "OPL-1.0"
+  ],
+  "spdx-opl-uk-3.0": [
+    "OPL-UK-3.0"
+  ],
+  "spdx-opubl-1.0": [
+    "OPUBL-1.0"
+  ],
+  "spdx-osc-1.0": [
+    "OSC-1.0"
+  ],
+  "spdx-oset-pl-2.1": [
+    "OSET-PL-2.1"
   ],
   "spdx-osl-1.0": [
     "OSL-1.0"
@@ -211,14 +1588,89 @@
   "spdx-osl-3.0": [
     "OSL-3.0"
   ],
+  "spdx-ossp": [
+    "OSSP"
+  ],
+  "spdx-padl": [
+    "PADL"
+  ],
+  "spdx-paratype-free-font-1.3": [
+    "ParaType-Free-Font-1.3"
+  ],
+  "spdx-parity-6.0.0": [
+    "Parity-6.0.0"
+  ],
+  "spdx-parity-7.0.0": [
+    "Parity-7.0.0"
+  ],
+  "spdx-pddl-1.0": [
+    "PDDL-1.0"
+  ],
+  "spdx-php-3.0": [
+    "PHP-3.0"
+  ],
+  "spdx-php-3.01": [
+    "PHP-3.01"
+  ],
+  "spdx-pixar": [
+    "Pixar"
+  ],
+  "spdx-pkgconf": [
+    "pkgconf"
+  ],
+  "spdx-plexus": [
+    "Plexus"
+  ],
+  "spdx-pnmstitch": [
+    "pnmstitch"
+  ],
   "spdx-polyform-noncommercial-1.0.0": [
     "PolyForm-Noncommercial-1.0.0"
   ],
   "spdx-polyform-small-business-1.0.0": [
     "PolyForm-Small-Business-1.0.0"
   ],
+  "spdx-postgresql": [
+    "PostgreSQL"
+  ],
+  "spdx-ppl": [
+    "PPL"
+  ],
+  "spdx-psf-2.0": [
+    "PSF-2.0"
+  ],
+  "spdx-psfrag": [
+    "psfrag"
+  ],
+  "spdx-psutils": [
+    "psutils"
+  ],
+  "spdx-python-2.0": [
+    "Python-2.0"
+  ],
+  "spdx-python-2.0.1": [
+    "Python-2.0.1"
+  ],
+  "spdx-python-ldap": [
+    "python-ldap"
+  ],
+  "spdx-qhull": [
+    "Qhull"
+  ],
   "spdx-qpl-1.0": [
     "QPL-1.0"
+  ],
+  "spdx-qpl-1.0-inria-2004": [
+    "QPL-1.0-INRIA-2004"
+  ],
+  "spdx-radvd": [
+    "radvd"
+  ],
+  "spdx-rdisc": [
+    "Rdisc"
+  ],
+  "spdx-rhecos-1.1": [
+    "RHeCos-1.1"
   ],
   "spdx-rpl-1.1": [
     "RPL-1.1"
@@ -226,16 +1678,385 @@
   "spdx-rpl-1.5": [
     "RPL-1.5"
   ],
+  "spdx-rpsl-1.0": [
+    "RPSL-1.0"
+  ],
+  "spdx-rsa-md": [
+    "RSA-MD"
+  ],
+  "spdx-rscpl": [
+    "RSCPL"
+  ],
+  "spdx-ruby": [
+    "Ruby"
+  ],
+  "spdx-ruby-pty": [
+    "Ruby-pty"
+  ],
+  "spdx-sax-pd": [
+    "SAX-PD"
+  ],
+  "spdx-sax-pd-2.0": [
+    "SAX-PD-2.0"
+  ],
+  "spdx-saxpath": [
+    "Saxpath"
+  ],
+  "spdx-scea": [
+    "SCEA"
+  ],
+  "spdx-schemereport": [
+    "SchemeReport"
+  ],
+  "spdx-sendmail": [
+    "Sendmail"
+  ],
+  "spdx-sendmail-8.23": [
+    "Sendmail-8.23"
+  ],
+  "spdx-sendmail-open-source-1.1": [
+    "Sendmail-Open-Source-1.1"
+  ],
+  "spdx-sgi-b-1.0": [
+    "SGI-B-1.0"
+  ],
   "spdx-sgi-b-1.1": [
     "SGI-B-1.1"
+  ],
+  "spdx-sgi-b-2.0": [
+    "SGI-B-2.0"
+  ],
+  "spdx-sgi-opengl": [
+    "SGI-OpenGL"
+  ],
+  "spdx-sgmlug-pm": [
+    "SGMLUG-PM"
+  ],
+  "spdx-sgp4": [
+    "SGP4"
+  ],
+  "spdx-shl-0.5": [
+    "SHL-0.5"
+  ],
+  "spdx-shl-0.51": [
+    "SHL-0.51"
+  ],
+  "spdx-simpl-2.0": [
+    "SimPL-2.0"
   ],
   "spdx-sissl": [
     "SISSL"
   ],
+  "spdx-sissl-1.2": [
+    "SISSL-1.2"
+  ],
+  "spdx-sl": [
+    "SL"
+  ],
   "spdx-sleepycat": [
     "Sleepycat"
   ],
+  "spdx-smail-gpl": [
+    "SMAIL-GPL"
+  ],
+  "spdx-smlnj": [
+    "SMLNJ"
+  ],
+  "spdx-smppl": [
+    "SMPPL"
+  ],
+  "spdx-snia": [
+    "SNIA"
+  ],
+  "spdx-snprintf": [
+    "snprintf"
+  ],
+  "spdx-sofa": [
+    "SOFA"
+  ],
+  "spdx-softsurfer": [
+    "softSurfer"
+  ],
+  "spdx-soundex": [
+    "Soundex"
+  ],
+  "spdx-spencer-86": [
+    "Spencer-86"
+  ],
+  "spdx-spencer-94": [
+    "Spencer-94"
+  ],
+  "spdx-spencer-99": [
+    "Spencer-99"
+  ],
+  "spdx-spl-1.0": [
+    "SPL-1.0"
+  ],
+  "spdx-ssh-keyscan": [
+    "ssh-keyscan"
+  ],
+  "spdx-ssh-openssh": [
+    "SSH-OpenSSH"
+  ],
+  "spdx-ssh-short": [
+    "SSH-short"
+  ],
+  "spdx-ssleay-standalone": [
+    "SSLeay-standalone"
+  ],
   "spdx-sspl-1.0": [
     "SSPL-1.0"
+  ],
+  "spdx-sugarcrm-1.1.3": [
+    "SugarCRM-1.1.3"
+  ],
+  "spdx-sul-1.0": [
+    "SUL-1.0"
+  ],
+  "spdx-sun-ppp": [
+    "Sun-PPP"
+  ],
+  "spdx-sun-ppp-2000": [
+    "Sun-PPP-2000"
+  ],
+  "spdx-sunpro": [
+    "SunPro"
+  ],
+  "spdx-swl": [
+    "SWL"
+  ],
+  "spdx-swrule": [
+    "swrule"
+  ],
+  "spdx-symlinks": [
+    "Symlinks"
+  ],
+  "spdx-tapr-ohl-1.0": [
+    "TAPR-OHL-1.0"
+  ],
+  "spdx-tcl": [
+    "TCL"
+  ],
+  "spdx-tcp-wrappers": [
+    "TCP-wrappers"
+  ],
+  "spdx-tekhvc": [
+    "TekHVC"
+  ],
+  "spdx-termreadkey": [
+    "TermReadKey"
+  ],
+  "spdx-tgppl-1.0": [
+    "TGPPL-1.0"
+  ],
+  "spdx-thirdeye": [
+    "ThirdEye"
+  ],
+  "spdx-threeparttable": [
+    "threeparttable"
+  ],
+  "spdx-tmate": [
+    "TMate"
+  ],
+  "spdx-torque-1.1": [
+    "TORQUE-1.1"
+  ],
+  "spdx-tosl": [
+    "TOSL"
+  ],
+  "spdx-tpdl": [
+    "TPDL"
+  ],
+  "spdx-tpl-1.0": [
+    "TPL-1.0"
+  ],
+  "spdx-trustedqsl": [
+    "TrustedQSL"
+  ],
+  "spdx-ttwl": [
+    "TTWL"
+  ],
+  "spdx-ttyp0": [
+    "TTYP0"
+  ],
+  "spdx-tu-berlin-1.0": [
+    "TU-Berlin-1.0"
+  ],
+  "spdx-tu-berlin-2.0": [
+    "TU-Berlin-2.0"
+  ],
+  "spdx-ubuntu-font-1.0": [
+    "Ubuntu-font-1.0"
+  ],
+  "spdx-ucar": [
+    "UCAR"
+  ],
+  "spdx-ucl-1.0": [
+    "UCL-1.0"
+  ],
+  "spdx-ulem": [
+    "ulem"
+  ],
+  "spdx-umich-merit": [
+    "UMich-Merit"
+  ],
+  "spdx-unicode-3.0": [
+    "Unicode-3.0"
+  ],
+  "spdx-unicode-dfs-2015": [
+    "Unicode-DFS-2015"
+  ],
+  "spdx-unicode-dfs-2016": [
+    "Unicode-DFS-2016"
+  ],
+  "spdx-unicode-tou": [
+    "Unicode-TOU"
+  ],
+  "spdx-unixcrypt": [
+    "UnixCrypt"
+  ],
+  "spdx-unlicense": [
+    "Unlicense"
+  ],
+  "spdx-unlicense-libtelnet": [
+    "Unlicense-libtelnet"
+  ],
+  "spdx-unlicense-libwhirlpool": [
+    "Unlicense-libwhirlpool"
+  ],
+  "spdx-unrar": [
+    "UnRAR"
+  ],
+  "spdx-upl-1.0": [
+    "UPL-1.0"
+  ],
+  "spdx-urt-rle": [
+    "URT-RLE"
+  ],
+  "spdx-vim": [
+    "Vim"
+  ],
+  "spdx-vixie-cron": [
+    "Vixie-Cron"
+  ],
+  "spdx-vostrom": [
+    "VOSTROM"
+  ],
+  "spdx-vsl-1.0": [
+    "VSL-1.0"
+  ],
+  "spdx-w3c": [
+    "W3C"
+  ],
+  "spdx-w3c-19980720": [
+    "W3C-19980720"
+  ],
+  "spdx-w3c-20150513": [
+    "W3C-20150513"
+  ],
+  "spdx-w3m": [
+    "w3m"
+  ],
+  "spdx-watcom-1.0": [
+    "Watcom-1.0"
+  ],
+  "spdx-widget-workshop": [
+    "Widget-Workshop"
+  ],
+  "spdx-wordnet": [
+    "WordNet"
+  ],
+  "spdx-wsuipa": [
+    "Wsuipa"
+  ],
+  "spdx-wtfnmfpl": [
+    "WTFNMFPL"
+  ],
+  "spdx-wtfpl": [
+    "WTFPL"
+  ],
+  "spdx-wwl": [
+    "wwl"
+  ],
+  "spdx-x11": [
+    "X11"
+  ],
+  "spdx-x11-distribute-modifications-variant": [
+    "X11-distribute-modifications-variant"
+  ],
+  "spdx-x11-no-permit-persons": [
+    "X11-no-permit-persons"
+  ],
+  "spdx-x11-swapped": [
+    "X11-swapped"
+  ],
+  "spdx-xdebug-1.03": [
+    "Xdebug-1.03"
+  ],
+  "spdx-xerox": [
+    "Xerox"
+  ],
+  "spdx-xfig": [
+    "Xfig"
+  ],
+  "spdx-xfree86-1.1": [
+    "XFree86-1.1"
+  ],
+  "spdx-xinetd": [
+    "xinetd"
+  ],
+  "spdx-xkeyboard-config-zinoviev": [
+    "xkeyboard-config-Zinoviev"
+  ],
+  "spdx-xlock": [
+    "xlock"
+  ],
+  "spdx-xnet": [
+    "Xnet"
+  ],
+  "spdx-xpp": [
+    "xpp"
+  ],
+  "spdx-xskat": [
+    "XSkat"
+  ],
+  "spdx-xzoom": [
+    "xzoom"
+  ],
+  "spdx-ypl-1.0": [
+    "YPL-1.0"
+  ],
+  "spdx-ypl-1.1": [
+    "YPL-1.1"
+  ],
+  "spdx-zed": [
+    "Zed"
+  ],
+  "spdx-zeeff": [
+    "Zeeff"
+  ],
+  "spdx-zend-2.0": [
+    "Zend-2.0"
+  ],
+  "spdx-zimbra-1.3": [
+    "Zimbra-1.3"
+  ],
+  "spdx-zimbra-1.4": [
+    "Zimbra-1.4"
+  ],
+  "spdx-zlib": [
+    "Zlib"
+  ],
+  "spdx-zlib-acknowledgement": [
+    "zlib-acknowledgement"
+  ],
+  "spdx-zpl-1.1": [
+    "ZPL-1.1"
+  ],
+  "spdx-zpl-2.0": [
+    "ZPL-2.0"
+  ],
+  "spdx-zpl-2.1": [
+    "ZPL-2.1"
   ]
 }

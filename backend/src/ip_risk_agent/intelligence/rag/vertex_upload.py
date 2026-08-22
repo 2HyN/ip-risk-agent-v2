@@ -51,6 +51,25 @@ def _corpus_resource(project_id: str, region: str, corpus_id: str) -> str:
     return f"projects/{project_id}/locations/{region}/ragCorpora/{corpus_id}"
 
 
+def display_key(name: str) -> str:
+    """이름을 대조 가능한 형태로 맞춘다.
+
+    corpus 에는 이름이 두 모양으로 들어가 있을 수 있다. 손으로 올린 것은 파일명
+    그대로 ``agpl-3.0-obligations.md`` 이고, 이 업로더는 ``source_id`` 만 쓴다.
+    그대로 비교하면 **같은 문서를 다른 것으로 보아** 옛 것을 지우지 못하고 새 것을
+    덧올려 corpus 에 두 판본이 남는다.
+
+    관련성 게이트가 검색 결과 이름을 맞출 때 쓰는 규칙과 같게 둔다
+    (``license/reference_gate.py`` 의 ``_covered_identifiers``) — 경로를 떼고,
+    소문자로 내리고, ``.md`` 를 뗀다. 두 곳이 다른 규칙을 쓰면 한쪽이 맞다고 본 것을
+    다른 쪽이 아니라고 본다.
+    """
+    key = name.rsplit("/", 1)[-1].strip().lower()
+    if key.endswith(".md"):
+        key = key[: -len(".md")]
+    return key
+
+
 class VertexRagCorpusUploader:
     """``CorpusUploader`` 를 관리형 RAG Engine 에 잇는다.
 
@@ -191,11 +210,12 @@ class VertexRagCorpusUploader:
         """
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             existing = await self.list_files(client)
-            wanted = {document.source_id for document in documents}
+            wanted = {display_key(document.source_id) for document in documents}
             stale = [
                 item["name"]
                 for item in existing
-                if item.get("displayName") in wanted and item.get("name")
+                if display_key(item.get("displayName", "")) in wanted
+                and item.get("name")
             ]
             for name in stale:
                 await self._delete(client, name)
@@ -237,9 +257,9 @@ class VertexRagCorpusUploader:
 
         by_name: dict[str, list[dict]] = {}
         for item in existing:
-            by_name.setdefault(item.get("displayName", ""), []).append(item)
+            by_name.setdefault(display_key(item.get("displayName", "")), []).append(item)
 
-        expected = {document.source_id: document for document in documents}
+        expected = {display_key(d.source_id): d for d in documents}
         missing: list[str] = []
         duplicated: list[str] = []
         mismatched: list[dict[str, str]] = []
@@ -285,10 +305,12 @@ class VertexRagCorpusUploader:
         """매니페스트 밖 문서를 지운다. 사람이 목록을 보고 부른다."""
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             existing = await self.list_files(client)
+            keys = {display_key(name) for name in names}
             targets = [
                 item["name"]
                 for item in existing
-                if item.get("displayName") in set(names) and item.get("name")
+                if display_key(item.get("displayName", "")) in keys
+                and item.get("name")
             ]
             for name in targets:
                 await self._delete(client, name)
@@ -312,4 +334,4 @@ class VertexRagCorpusUploader:
         )
 
 
-__all__ = ["VertexRagCorpusUploader"]
+__all__ = ["VertexRagCorpusUploader", "display_key"]

@@ -11,9 +11,18 @@ SPDX license-list-data 는 CC0 이라 자유롭게 쓸 수 있다.
 
 ## 무엇을 넣는가
 
-`needs_review` 가 참인 식별자만 넣는다. 나머지는 정책 표가 이미 결론을 내므로 RAG 를
-부르지 않고, 넣어 봤자 **오부착 원천만 늘린다** (§5.5). 정책 표가 넓어지면 이 스크립트를
-다시 돌리면 되고, 그때 대상도 함께 넓어진다.
+**SPDX 의 현행 식별자를 전부 넣는다.** 폐기된 것은 뺀다 — `normalize` 가 현행으로 바꿔
+주므로 판정을 이끄는 leaf 로 폐기 식별자가 나오는 일이 없고, 본문도 현행과 같다.
+
+예전에는 `needs_review` 가 참인 것만 넣었다. 그때는 옳았다 — 게이트가 표현식의 **모든**
+leaf 를 보던 시절이라 문서를 늘리면 오부착이 그만큼 늘었기 때문이다. 0-G 가 게이트를
+**판정을 이끈 leaf** 로 좁힌 뒤 전수 측정에서 오부착이 0 이 되었고, 그래서 그 제약이
+사라졌다.
+
+제약을 없애는 진짜 이유는 따로 있다. 대상을 정책 표에서 뽑으면 **표를 넓힐 때마다 corpus
+를 다시 만들어야 한다.** 실제로 표가 158 → 226 이 되자 커버리지가 100% 에서 74.3% 로
+떨어졌다. 아무것도 나빠지지 않았는데 두 작업이 서로를 기다린 것이다. 대상을 SPDX 에서
+직접 뽑으면 그 고리가 사라진다 (`DEVELOPMENT_SPEC.md` §5.4).
 
 ## 왜 스크립트인가
 
@@ -82,19 +91,19 @@ def _fetch(url: str, cache: Path) -> bytes:
     return payload
 
 
-def _needs_review_identifiers() -> list[str]:
-    """RAG 를 실제로 부르는 식별자.
+def _target_identifiers(index: dict) -> list[str]:
+    """corpus 에 넣을 식별자. SPDX 목록에서 직접 뽑는다.
 
-    정책 표에서 읽는다. 여기에 목록을 다시 적으면 표가 넓어질 때 조용히 어긋난다.
+    **정책 표를 보지 않는다.** 보면 표가 넓어질 때마다 corpus 를 다시 만들어야 하고,
+    그동안 커버리지가 떨어진 것처럼 보인다. 대상이 SPDX 이면 그 고리가 없다.
+
+    폐기된 식별자는 뺀다. ``normalize`` 가 현행으로 바꾸므로 판정을 이끄는 leaf 에
+    나타나지 않고, 본문도 현행과 같아 넣어도 같은 문서로 묶일 뿐이다.
     """
-    sys.path.insert(0, str(ROOT / "backend" / "src"))
-    sys.path.insert(0, str(ROOT / "shared" / "contracts" / "python"))
-    from ip_risk_agent.intelligence.license import policy
-
     return sorted(
-        identifier
-        for identifier, outcome in policy._OUTCOME_BY_ID.items()
-        if policy.needs_review(outcome)
+        entry["licenseId"]
+        for entry in index["licenses"]
+        if not entry.get("isDeprecatedLicenseId")
     )
 
 
@@ -165,11 +174,12 @@ def build(*, check: bool, version: str | None = None) -> int:
     list_version = index.get("licenseListVersion", "unknown")
     known = {entry["licenseId"] for entry in index["licenses"]}
 
-    targets = _needs_review_identifiers()
+    targets = _target_identifiers(index)
     missing = [value for value in targets if value not in known]
     if missing:
         print("SPDX 목록에 없는 식별자: " + ", ".join(missing), file=sys.stderr)
         return 1
+    print(f"대상 {len(targets)} 종 (SPDX {list_version}, 폐기 제외)", file=sys.stderr)
 
     # 본문이 같은 식별자를 한 문서로 묶는다.
     details: dict[str, dict] = {}
