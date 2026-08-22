@@ -18,6 +18,11 @@ from iprisk_contracts.common import (
     LicenseCandidate,
 )
 
+from ip_risk_agent.core.artifacts.dependency_files import (
+    DependencyFormat,
+    dependency_format,
+)
+
 from ..common.analyzer import ResultBuilder
 from ..common.errors import FailureCategory, ProviderFailureError
 from ..common.evidence import package_metadata_id, rag_chunk_id
@@ -31,27 +36,26 @@ from .package_metadata import PackageMetadataProvider
 ANALYZER_VERSION = "license-analyzer-1.0.0"
 
 # 파일명 -> 매니페스트 파서. 잠금 파일은 lockfiles.parser_for 가 맡는다.
-_MANIFEST_PARSERS = (
-    ("requirements", manifests.parse_requirements_txt),
-    ("pyproject.toml", manifests.parse_pyproject_toml),
-    ("package.json", manifests.parse_package_json),
-)
+#: 형식마다 파서 하나. 어떤 이름이 어떤 형식인지는 커넥터와 함께 쓰는 표가 정한다
+#: (``core.artifacts.dependency_files``). 표와 파서가 따로 놀면 커넥터가 의존성으로
+#: 분류한 파일을 분석기가 읽지 못해 **어느 분석기도 맡지 못하는 파일**이 생긴다.
+_PARSERS = {
+    DependencyFormat.REQUIREMENTS_TXT: manifests.parse_requirements_txt,
+    DependencyFormat.PYPROJECT_TOML: manifests.parse_pyproject_toml,
+    DependencyFormat.SETUP_CFG: manifests.parse_setup_cfg,
+    DependencyFormat.PACKAGE_JSON: manifests.parse_package_json,
+    DependencyFormat.PACKAGE_LOCK_JSON: lockfiles.parse_package_lock_json,
+    DependencyFormat.UV_LOCK: lockfiles.parse_uv_lock,
+    DependencyFormat.POETRY_LOCK: lockfiles.parse_poetry_lock,
+}
 
 _DEPENDENCY_KINDS = frozenset({ArtifactKind.MANIFEST, ArtifactKind.LOCKFILE})
 
 
 def _select_parser(logical_path: str):
-    """논리 경로로 파서를 고른다. 잠금 파일을 먼저 확인한다.
-
-    ``package-lock.json`` 은 ``package.json`` 을 포함하므로 순서가 중요하다.
-    """
-    if lock_parser := lockfiles.parser_for(logical_path):
-        return lock_parser
-    name = logical_path.rsplit("/", 1)[-1].lower()
-    for marker, parser in _MANIFEST_PARSERS:
-        if name.startswith(marker) or name == marker:
-            return parser
-    return None
+    """파일 이름으로 파서를 고른다. 읽을 수 없으면 ``None``."""
+    found = dependency_format(logical_path)
+    return None if found is None else _PARSERS[found]
 
 
 class LicenseAnalyzer:

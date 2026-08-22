@@ -31,6 +31,7 @@ from iprisk_contracts.common import (
 )
 from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
+from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
@@ -307,11 +308,14 @@ class GoogleDriveAdapter:
 
     @staticmethod
     def _infer_artifact_kind(name: str) -> ArtifactKind:
-        lowered = name.lower()
-        if lowered in {"requirements.txt", "package.json"}:
-            return ArtifactKind.MANIFEST
-        if lowered.endswith(".lock") or lowered.endswith("lockfile"):
-            return ArtifactKind.LOCKFILE
+        # 의존성 판정은 커넥터마다 다를 이유가 없다. 세 커넥터가 각자 목록을 들고
+        # 있어 같은 pyproject.toml 이 Drive 에서는 Patent, GitHub 에서는 License
+        # 검사를 받았다.
+        found = dependency_format(name)
+        if found is not None:
+            return ArtifactKind.LOCKFILE if found.is_lockfile else ArtifactKind.MANIFEST
+        # Drive 는 사용자가 파일을 하나씩 골라 붙인다. 고른 것은 보겠다는 뜻이므로
+        # 나머지는 문서로 본다 — 저장소를 통째로 훑는 쪽과 다른 점이다.
         return ArtifactKind.DOCUMENT_TEXT
 
     async def resolve_original(self, artifact: SourceArtifactRef) -> OriginalSourceLocator:

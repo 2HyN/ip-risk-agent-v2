@@ -26,6 +26,7 @@ from iprisk_contracts.common import (
 )
 from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
+from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
@@ -45,7 +46,6 @@ from .tracking_scope import GitHubTrackingScope
 
 MAX_FILE_BYTES = 1_000_000
 
-_MANIFEST_NAMES = {"requirements.txt", "package.json", "pyproject.toml", "setup.py", "setup.cfg"}
 _CODE_EXTENSIONS = {".py", ".js", ".ts", ".java", ".go", ".c", ".h", ".cpp", ".rs"}
 _DOC_EXTENSIONS = {".md", ".txt", ".rst"}
 
@@ -254,10 +254,12 @@ class GitHubAdapter:
     def _infer_artifact_kind(path: str) -> ArtifactKind:
         lowered = path.lower()
         name = lowered.rsplit("/", 1)[-1]
-        if name in _MANIFEST_NAMES:
-            return ArtifactKind.MANIFEST
-        if name.endswith(".lock") or name.endswith("lockfile"):
-            return ArtifactKind.LOCKFILE
+        # 읽을 수 있는 이름만 의존성으로 본다. 예전에는 setup.py 를 의존성으로
+        # 분류했는데 파서가 없어, License 도 Patent 도 맡지 못한 채 계약 위반으로
+        # 실패했다. setup.py 는 아래에서 소스 코드로 분류된다.
+        found = dependency_format(name)
+        if found is not None:
+            return ArtifactKind.LOCKFILE if found.is_lockfile else ArtifactKind.MANIFEST
         for ext in _CODE_EXTENSIONS:
             if name.endswith(ext):
                 return ArtifactKind.SOURCE_CODE

@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from configparser import ConfigParser
+
 import json
 import re
 import tomllib
@@ -50,6 +52,50 @@ def parse_requirements_txt(text: str, source_path: str | None = None) -> list[De
     for raw_line in text.splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line or line.startswith(_DIRECTIVE_PREFIXES):
+            continue
+        match = _REQUIREMENT.match(line)
+        if not match:
+            continue
+        version, resolution = _classify_spec(match.group("spec"))
+        found.append(
+            DependencyDeclaration(
+                ecosystem=Ecosystem.PYPI,
+                name=normalize_package_name(Ecosystem.PYPI, match.group("name")),
+                version=version,
+                resolution=resolution,
+                raw_spec=line,
+                source_path=source_path,
+            )
+        )
+    return found
+
+
+def parse_setup_cfg(text: str, source_path: str | None = None) -> list[DependencyDeclaration]:
+    """setuptools ``setup.cfg`` 의 ``install_requires`` 와 extras.
+
+    같은 배포판의 ``setup.py`` 는 읽지 않는다 — 임의의 파이썬 코드라 실행하지
+    않고서는 의존성을 확정할 수 없다. ``setup.cfg`` 는 선언이라 읽을 수 있고,
+    그래서 이쪽만 License 검사 대상이다.
+
+    각 줄의 문법은 requirements 와 같으므로 그 판독을 그대로 쓴다.
+    """
+    parser = ConfigParser()
+    try:
+        parser.read_string(text)
+    except Exception:  # noqa: BLE001 - 못 읽는 설정은 선언이 없는 것과 같다
+        return []
+
+    lines: list[str] = []
+    if parser.has_option("options", "install_requires"):
+        lines.extend(parser.get("options", "install_requires").splitlines())
+    if parser.has_section("options.extras_require"):
+        for _name, value in parser.items("options.extras_require"):
+            lines.extend(value.splitlines())
+
+    found: list[DependencyDeclaration] = []
+    for raw_line in lines:
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
             continue
         match = _REQUIREMENT.match(line)
         if not match:

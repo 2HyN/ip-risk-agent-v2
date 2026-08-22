@@ -23,6 +23,7 @@ from iprisk_contracts.common import (
 )
 from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
+from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
@@ -33,7 +34,6 @@ from .device_lookup import LocalDeviceLookup
 from .identity import decode_local_artifact_id
 from .staging_store import LocalStagingStore, StagingRef
 
-_MANIFEST_NAMES = {"requirements.txt", "package.json", "pyproject.toml", "setup.py", "setup.cfg"}
 _CODE_EXTENSIONS = {".py", ".js", ".ts", ".java", ".go", ".c", ".h", ".cpp", ".rs"}
 _DOC_EXTENSIONS = {".md", ".txt", ".rst"}
 
@@ -147,10 +147,9 @@ class LocalAdapter:
     @staticmethod
     def _infer_artifact_kind(display_name: str) -> ArtifactKind:
         lowered = display_name.lower()
-        if lowered in _MANIFEST_NAMES:
-            return ArtifactKind.MANIFEST
-        if lowered.endswith(".lock") or lowered.endswith("lockfile"):
-            return ArtifactKind.LOCKFILE
+        found = dependency_format(lowered)
+        if found is not None:
+            return ArtifactKind.LOCKFILE if found.is_lockfile else ArtifactKind.MANIFEST
         suffix = PurePosixPath(lowered).suffix
         if suffix in _CODE_EXTENSIONS:
             return ArtifactKind.SOURCE_CODE
