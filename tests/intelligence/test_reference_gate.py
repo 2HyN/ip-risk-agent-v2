@@ -92,3 +92,47 @@ def test_patent_search_diagnostic_reports_counts_without_content(caplog) -> None
     assert record["query_count"] == 3
     assert record["hit_total"] == 0
     assert record["ranked_candidates"] == 0
+
+
+# ----------------------------------------------------------------- 0-G
+
+
+def test_the_gate_looks_at_the_leaf_that_led_the_verdict():
+    """판정과 정반대의 근거가 붙던 자리다.
+
+    ``Apache-2.0 AND GPL-3.0-only`` 의 판정은 ``GPL-3.0-only`` 가 만든다. 그런데 게이트가
+    표현식의 **모든** leaf 를 보던 때는 ``Apache-2.0`` 이 있다는 이유만으로
+    "소스코드 공개 의무는 없다" 는 문서가 통과했다. 게이트가 막으려고 만들어진 바로 그
+    오류다.
+    """
+    from ip_risk_agent.intelligence.license import reference_gate as gate
+
+    expression = "Apache-2.0 AND GPL-3.0-only"
+    assert gate.leading_identifiers(expression) == frozenset({"GPL-3.0-only"})
+
+    passed = [
+        source for source in gate.CORPUS_SUBJECT_COVERAGE if gate.is_relevant(source, expression)
+    ]
+    # 통과한 문서는 전부 판정을 이끈 라이선스를 덮어야 한다.
+    for source in passed:
+        assert gate.CORPUS_SUBJECT_COVERAGE[source] & {"GPL-3.0-only"}
+
+
+def test_an_or_expression_gates_on_the_branch_that_was_taken():
+    """``OR`` 은 수취인이 고른다. 버린 갈래의 문서를 근거로 붙이면 안 된다."""
+    from ip_risk_agent.intelligence.license import reference_gate as gate
+
+    expression = "AGPL-3.0-only OR MIT"
+    leading = gate.leading_identifiers(expression)
+    assert "MIT" in leading
+    assert "AGPL-3.0-only" not in leading
+
+
+def test_an_unreadable_expression_attaches_nothing():
+    """모르는 것에 아무 문서나 붙이는 것보다 근거가 없는 편이 낫다."""
+    from ip_risk_agent.intelligence.license import reference_gate as gate
+
+    assert gate.leading_identifiers("((((") == frozenset()
+    assert not [
+        source for source in gate.CORPUS_SUBJECT_COVERAGE if gate.is_relevant(source, "((((")
+    ]

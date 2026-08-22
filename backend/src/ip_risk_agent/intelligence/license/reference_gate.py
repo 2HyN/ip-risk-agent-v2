@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from importlib import resources
 
-from . import spdx
+from . import policy, spdx
 
 # source_id -> 그 문서가 실제로 다루는 SPDX 식별자.
 #
@@ -64,12 +64,60 @@ def expression_identifiers(license_expression: str) -> frozenset[str]:
     return frozenset(leaf.identifier for leaf in spdx.leaves(node))
 
 
+def leading_identifiers(license_expression: str) -> frozenset[str]:
+    """**판정을 이끈** leaf 의 식별자 집합.
+
+    표현식의 모든 leaf 가 아니다. ``Apache-2.0 AND GPL-3.0-only`` 의 판정은
+    ``GPL-3.0-only`` 가 만들고 ``Apache-2.0`` 은 아무 영향이 없다. AND 는 가장 무거운
+    leaf 가, OR 은 실제로 택한 leaf 가 결과를 만든다 — 그 계산은 ``policy.evaluate`` 가
+    이미 하고 있으므로 여기서 다시 하지 않는다.
+
+    읽을 수 없는 표현식과 미상 식별자는 빈 집합이다. 그러면 어떤 문서도 관련되지 않아
+    근거가 붙지 않는다 — 모르는 것에 아무 문서나 붙이는 것보다 낫다.
+
+    ``UNKNOWN`` 을 **규칙으로** 뺀다. 빼지 않아도 지금은 그 이름을 덮는다고 주장하는
+    문서가 없어 결과가 같지만, 그것은 corpus 의 우연이지 게이트의 성질이 아니다. 누군가
+    "미상 라이선스 안내" 문서를 만들어 `UNKNOWN` 을 덮는다고 적는 순간, 파싱에 실패한
+    모든 표현식에 그 문서가 근거로 붙는다.
+    """
+    try:
+        evaluation = policy.evaluate(license_expression)
+    except Exception:
+        return frozenset()
+    return frozenset(
+        leaf.identifier
+        for leaf in evaluation.leading
+        if leaf.identifier != spdx.UNKNOWN_LICENSE
+    )
+
+
 def is_relevant(source_id: str, license_expression: str) -> bool:
-    """이 참조가 분석 대상 라이선스를 실제로 다루는가."""
+    """이 참조가 **판정을 이끈** 라이선스를 실제로 다루는가.
+
+    ## 왜 전체 leaf 를 보면 안 되는가
+
+    예전에는 표현식에 등장하는 leaf 를 전부 봤다. 그래서 이런 일이 일어났다.
+
+    ```
+    'Apache-2.0 AND GPL-3.0-only'  판정 = POLICY_CONFLICT
+    통과한 문서 = ['permissive-notice']      본문 = "소스코드 공개 의무는 없다"
+    ```
+
+    **판정과 정반대의 근거가 붙는다.** 게이트가 막으려고 만들어진 바로 그 오류다.
+    ``Apache-2.0`` 이 표현식에 있다는 이유만으로 그 문서가 통과했고, 정작 판정을 만든
+    ``GPL-3.0-only`` 는 덮는 문서가 없어 조용히 넘어갔다.
+
+    ## corpus 를 넓히면 이 오류가 커진다
+
+    문서가 3 편일 때 오부착을 막고 있던 것은 게이트가 아니라 **덮는 문서가 거의 없다는
+    우연**이었다. 73 편으로 늘리자 게이트를 통과하는 질의가 686 건에서 26,890 건이 됐고
+    그중 오부착이 318 건에서 7,902 건이 됐다. 틀린 식별자마다 그럴듯한 문서가 하나씩
+    생기기 때문이다. 그래서 §5.5 가 이 수정을 corpus 확대의 선행 조건으로 둔다.
+    """
     covered = _covered_identifiers(source_id)
     if not covered:
         return False
-    return bool(covered & expression_identifiers(license_expression))
+    return bool(covered & leading_identifiers(license_expression))
 
 
 def select_relevant(chunks, license_expression: str) -> list:
@@ -85,5 +133,6 @@ __all__ = [
     "CORPUS_SUBJECT_COVERAGE",
     "expression_identifiers",
     "is_relevant",
+    "leading_identifiers",
     "select_relevant",
 ]
