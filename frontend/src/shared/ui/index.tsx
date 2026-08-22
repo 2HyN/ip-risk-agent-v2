@@ -157,6 +157,9 @@ export function toneFor(
     ].includes(value)
   )
     return "warning";
+  // 판정을 못 내린 것은 심각도가 아니다. HIGH 와 같은 색으로 두면 "심각하다" 로
+  // 읽히고, MEDIUM 과 같게 두면 지금처럼 묻힌다. 눈에 띄되 다른 색이어야 한다.
+  if (value === "INDETERMINATE") return "info";
   if (["PATENT", "LICENSE", "MONITORING"].includes(value)) return "info";
   return "neutral";
 }

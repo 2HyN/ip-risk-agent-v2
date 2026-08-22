@@ -88,6 +88,7 @@ export function RiskListPage() {
         >
           <option value="">All priorities</option>
           <option value="HIGH">High</option>
+          <option value="INDETERMINATE">Needs a look</option>
           <option value="MEDIUM">Medium</option>
           <option value="LOW">Low</option>
         </Select>

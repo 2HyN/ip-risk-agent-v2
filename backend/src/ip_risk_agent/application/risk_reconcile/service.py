@@ -722,7 +722,7 @@ def _with_quote_span(
 
 
 def _is_risk_worthy(priority: ReviewPriority) -> bool:
-    """이 후보를 Risk 로 다룰지. 상·중만 Risk 다.
+    """이 후보를 Risk 로 다룰지. **하 등급만 Risk 가 아니다.**
 
     검토 우선도는 "확실히 risk" 에서 "전혀 risk 아님" 까지의 눈금이고, **하 등급은
     그 눈금의 아래쪽 전부**를 뜻한다. 즉 하는 "낮은 위험" 이 아니라 "우리가 관리할
@@ -732,9 +732,9 @@ def _is_risk_worthy(priority: ReviewPriority) -> bool:
     이미 있던 Risk 라면 ``candidate_present=False`` 경로를 타 ``RESOLVED`` 가 된다.
     사용자는 그렇게 닫힌 Risk 를 확인하고 받아들이면 된다.
 
-    주의 — 이것은 "모른다" 와 다르다. 분석이 권위적이지 않으면(``INCONCLUSIVE``,
-    ``PARTIAL``) 애초에 이 경로가 Risk 를 바꾸지 못한다. 하 등급은 **알아보고 나서**
-    관리 대상이 아니라고 판정한 것이다.
+    주의 — 이것은 "모른다" 와 다르다. 하 등급은 **알아보고 나서** 관리 대상이 아니라고
+    판정한 것이다. 모르는 것은 ``INDETERMINATE`` 이고, 그것은 Risk 가 된다 — 자동으로
+    닫아 버리면 안 되기 때문이다.
     """
     return priority is not ReviewPriority.LOW
 
@@ -825,7 +825,10 @@ def _license_priority(outcome: LicensePolicyOutcome) -> ReviewPriority:
         LicensePolicyOutcome.POLICY_CONFLICT: ReviewPriority.HIGH,
         LicensePolicyOutcome.REVIEW_REQUIRED: ReviewPriority.HIGH,
         LicensePolicyOutcome.NOTICE_REQUIRED: ReviewPriority.MEDIUM,
-        LicensePolicyOutcome.UNKNOWN: ReviewPriority.MEDIUM,
+        # 모른다는 것은 심각도가 아니다. MEDIUM 에 두면 강한 copyleft 가 중간으로
+        # 묻히고(CECILL·NPL 이 그랬다), HIGH 에 두면 폰트 라이선스가 AGPL 과 같은
+        # 칸에 앉는다. 그래서 칸을 따로 둔다.
+        LicensePolicyOutcome.UNKNOWN: ReviewPriority.INDETERMINATE,
         LicensePolicyOutcome.NO_ACTION: ReviewPriority.LOW,
     }[outcome]
 

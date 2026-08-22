@@ -74,7 +74,7 @@ export interface ProviderFailure {
   safe_message: string;
 }
 
-export type ReviewPriority = "LOW" | "MEDIUM" | "HIGH";
+export type ReviewPriority = "LOW" | "MEDIUM" | "INDETERMINATE" | "HIGH";
 
 export type SegmentKind = "FULL" | "CHANGED" | "CONTEXT";
 

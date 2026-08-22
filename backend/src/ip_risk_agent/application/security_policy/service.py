@@ -306,7 +306,10 @@ class WorkspaceSecurityService:
                     key=lambda value: {
                         ReviewPriority.LOW: 0,
                         ReviewPriority.MEDIUM: 1,
-                        ReviewPriority.HIGH: 2,
+                        # 판정을 못 내린 것은 MEDIUM 위, HIGH 아래다. 심각한 것이 먼저
+                        # 보이고 그다음이 "모르겠으니 봐 달라" 다.
+                        ReviewPriority.INDETERMINATE: 2,
+                        ReviewPriority.HIGH: 3,
                     }[value],
                     default=None,
                 )

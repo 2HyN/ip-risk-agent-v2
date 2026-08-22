@@ -74,7 +74,7 @@ export type Risk = {
     | "MONITORING"
     | "ACCEPTED_RISK"
     | "EXCLUDED";
-  review_priority: "HIGH" | "MEDIUM" | "LOW";
+  review_priority: "HIGH" | "INDETERMINATE" | "MEDIUM" | "LOW";
   summary: string;
   first_seen_at: string;
   last_seen_at: string;
