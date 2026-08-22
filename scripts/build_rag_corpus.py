@@ -268,10 +268,21 @@ def build(*, check: bool, version: str | None = None) -> int:
         if not check:
             COVERAGE_INDEX.write_text(index_body, encoding="utf-8", newline="\n")
 
-    covered = sorted({value for entry in written for value in entry["covers"]})
+    covered = {value for entry in (guides + written) for value in entry["covers"]}
+    gaps = sorted(set(targets) - covered)
+    if check:
+        print("아래는 **다시 만들면** 어떻게 되는가다. 지금 디스크 상태가 아니다.")
     print(f"SPDX license list  {list_version}")
     print(f"라이선스 문서      {len(written)} 편 (식별자 {len(covered)} 종)")
     print(f"의무 해설          {len(guides)} 편")
+    # 덮이지 않은 `needs_review` 는 **조용한 실패**로 이어진다 — RAG 를 부르는데 붙을
+    # 문서가 없어 근거 없이 판정이 나간다. 넓게 덮는 것은 무해하고 좁은 것이 위험하므로
+    # 이 수를 눈에 보이게 둔다.
+    if gaps:
+        print(f"덮이지 않음        {len(gaps)} 종 — {', '.join(gaps[:6])}"
+              + (" ..." if len(gaps) > 6 else ""))
+    else:
+        print("덮이지 않음        없다")
     if check:
         print("다시 만들면 달라진다" if changed else "다시 만들어도 같다")
         return 1 if changed else 0
