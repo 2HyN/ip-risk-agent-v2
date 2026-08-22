@@ -1,11 +1,18 @@
 """KIPRIS 없이 특허 파이프라인을 끝까지 돌리기 위한 고정 코퍼스 provider.
 
-## 프로덕션에 배선하지 않는다
+## 사용자는 쓸 수 없고, 개발자도 실수로는 쓸 수 없다
 
-이 모듈은 시험과 `scripts/` 에서만 만들어진다. 여기서 나온 특허 본문은 **합성**이고
-실제 공보가 아니므로, 이것으로 만들어진 근거는 실제 IP 판단에 쓸 수 없다.
-`tests/intelligence/test_patent.py` 가 production 조립이 이 모듈을 참조하지 않는지
-확인한다.
+여기서 나온 특허 본문은 **합성**이고 실제 공보가 아니다. 이것으로 만들어진 근거가
+사용자 화면에 Risk 로 뜨면 그것은 거짓 근거다. 그래서 잠금을 세 겹으로 둔다.
+
+1. **프로덕션에서는 만들어지지 않는다.** ``APP_ENV=production`` 이면 무조건 거부한다
+2. **의도를 명시해야 한다.** ``acknowledge_synthetic=True`` 를 직접 넘기거나
+   ``IPRISK_SYNTHETIC_PATENT_CORPUS=1`` 을 켜야 한다. 기본값으로는 동작하지 않는다
+3. **조립에 들어가지 않는다.** `tests/intelligence/test_patent.py` 가 production
+   조립이 이 모듈을 참조하지 않는지 확인한다
+
+빠뜨린 인자 하나로 합성 데이터가 흘러드는 일이 없어야 한다. 그래서 기본값을
+"거부" 로 두었다 — 켜는 쪽이 번거로운 것이 옳다.
 
 ## 왜 대역이 아니라 XML 인가
 
@@ -25,6 +32,7 @@ KIPRIS 의 단어 검색은 넣은 단어를 **모두** 포함하는 문서를 �
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -36,7 +44,32 @@ from .kipris import KiprisClient
 _HEADER = "<header><resultCode>00</resultCode><resultMsg>NORMAL SERVICE.</resultMsg></header>"
 
 
-def load_corpus(path: Path) -> dict[str, dict]:
+#: 이 값을 ``1`` 로 두면 개발 환경에서 합성 코퍼스를 쓸 수 있다.
+SYNTHETIC_OPT_IN_ENV = "IPRISK_SYNTHETIC_PATENT_CORPUS"
+
+
+class SyntheticCorpusRefused(RuntimeError):
+    """합성 코퍼스를 의도 없이 쓰려 했다."""
+
+
+def _require_deliberate_use(acknowledge_synthetic: bool) -> None:
+    if (os.environ.get("APP_ENV") or "").strip().casefold() == "production":
+        raise SyntheticCorpusRefused(
+            "synthetic patent corpus is never available in production"
+        )
+    if acknowledge_synthetic:
+        return
+    if os.environ.get(SYNTHETIC_OPT_IN_ENV) == "1":
+        return
+    raise SyntheticCorpusRefused(
+        "synthetic patent corpus requires acknowledge_synthetic=True or "
+        f"{SYNTHETIC_OPT_IN_ENV}=1; its patent text is fabricated and must not "
+        "become user-facing evidence"
+    )
+
+
+def load_corpus(path: Path, *, acknowledge_synthetic: bool = False) -> dict[str, dict]:
+    _require_deliberate_use(acknowledge_synthetic)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -82,11 +115,17 @@ def _detail_xml(corpus: dict[str, dict], application_number: str) -> bytes:
     ).encode("utf-8")
 
 
-def offline_kipris_client(corpus: dict[str, dict], **kwargs) -> KiprisClient:
+def offline_kipris_client(
+    corpus: dict[str, dict],
+    *,
+    acknowledge_synthetic: bool = False,
+    **kwargs,
+) -> KiprisClient:
     """코퍼스를 실제 응답 모양의 XML 로 내주는 ``KiprisClient``.
 
     호출 횟수를 세고 싶으면 ``client.offline_calls`` 를 본다.
     """
+    _require_deliberate_use(acknowledge_synthetic)
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -111,4 +150,9 @@ def offline_kipris_client(corpus: dict[str, dict], **kwargs) -> KiprisClient:
     return client
 
 
-__all__ = ["load_corpus", "offline_kipris_client"]
+__all__ = [
+    "SYNTHETIC_OPT_IN_ENV",
+    "SyntheticCorpusRefused",
+    "load_corpus",
+    "offline_kipris_client",
+]

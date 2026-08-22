@@ -18,6 +18,7 @@ import {
   Input,
   toneFor,
 } from "../shared/ui/index.js";
+import { analysisFailureNotice } from "../shared/analysis-failure.js";
 import { useWorkspace } from "../workspace/workspace-context.js";
 import { AddSourceChooser, type SourceProviderType } from "./AddSourceChooser.js";
 import { ConnectLocalSource } from "./ConnectLocalSource.js";
@@ -235,6 +236,17 @@ export function SourcePanel({
                     {artifact.analysis_status ?? artifact.availability}
                   </Badge>
                 </div>
+                {(() => {
+                  // 실패를 상태 배지 하나로만 두면 "왜" 를 알 수 없다. 특히 provider
+                  // 한도 소진은 다시 눌러도 같으므로 그 사실을 말해 주어야 한다.
+                  const notice = analysisFailureNotice(artifact.analysis_failure_safe);
+                  if (notice === null) return null;
+                  return (
+                    <p className={`analysis-notice analysis-notice--${notice.tone}`} role="status">
+                      <strong>{notice.title}</strong> {notice.detail}
+                    </p>
+                  );
+                })()}
                 {artifact.first_risk_id === null ? (
                   <p>No risk has been produced for the latest analyzed state.</p>
                 ) : (

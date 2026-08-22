@@ -520,6 +520,38 @@ def _outcome_from_result(
     )
 
 
+#: provider 호출 한도가 소진되면 다른 실패와 다르게 다뤄야 한다. 코드를 고칠 일이
+#: 아니라 키를 늘리거나 기다릴 일이고, 그때까지 재시도해도 소용이 없다.
+#: 화면이 이 코드를 보고 별도 안내를 띄운다.
+PROVIDER_QUOTA_EXHAUSTED = "PROVIDER:QUOTA_EXHAUSTED"
+
+#: Contract 의 ``ProviderFailure.category`` 값이다. Intelligence plane 의 enum 을
+#: 여기서 import 하면 계층이 뒤집히므로 계약 값으로 비교한다.
+_RATE_LIMITED_CATEGORY = "RATE_LIMITED"
+
+
+def _failure_reason(outcomes: tuple[AnalysisOutcome, ...]) -> str:
+    """실패의 원인이 provider 한도인지 가려낸다.
+
+    한도 소진을 "분석이 실패했습니다" 로 뭉뚱그리면 사용자는 무엇을 해야 할지 알 수
+    없다. 코드를 고칠 일이 아니라 키를 늘리거나 초기화를 기다릴 일이다.
+
+    실패한 결과의 provider 오류가 **전부** 한도 초과일 때만 이 코드를 쓴다. 다른
+    실패가 섞여 있으면 그쪽이 먼저 볼 문제다.
+    """
+    failures = [
+        failure
+        for outcome in outcomes
+        if outcome.status is AnalysisStatus.FAILED
+        for failure in outcome.provider_failures
+    ]
+    if failures and all(
+        failure.category == _RATE_LIMITED_CATEGORY for failure in failures
+    ):
+        return PROVIDER_QUOTA_EXHAUSTED
+    return "one or more requested analyses failed"
+
+
 def _aggregate_job(
     job: AnalysisJob,
     event: ChangeEvent,
@@ -530,7 +562,7 @@ def _aggregate_job(
         return job, event
     outcomes = tuple(job.analysis_outcomes.values())
     if any(outcome.status is AnalysisStatus.FAILED for outcome in outcomes):
-        failure_safe = "one or more requested analyses failed"
+        failure_safe = _failure_reason(outcomes)
         return (
             complete_analysis_job(
                 job,

@@ -72,6 +72,9 @@ class TrackedArtifactSummary:
     latest_revision: str | None
     change_status: ChangeEventStatus | None
     analysis_status: AnalysisJobStatus | None
+    # 실패를 "무언가 잘못됨" 으로 뭉뚱그리면 사용자가 무엇을 해야 할지 알 수 없다.
+    # 특히 provider 한도 소진은 코드를 고칠 일이 아니라 기다리거나 키를 늘릴 일이다.
+    analysis_failure_safe: str | None
     # 수동 재검사가 어떤 실행을 다시 돌릴지 가리키기 위한 값이다.
     change_event_id: str | None
     risk_count: int
@@ -323,6 +326,9 @@ class WorkspaceSecurityService:
                         latest_revision=None if state is None else state.latest_revision,
                         change_status=None if change is None else change.status,
                         analysis_status=None if latest_job is None else latest_job.status,
+                        analysis_failure_safe=(
+                            None if latest_job is None else latest_job.failure_safe
+                        ),
                         risk_count=len(artifact_risks),
                         active_risk_count=len(active_risks),
                         first_risk_id=None if first_risk is None else first_risk.id,

@@ -120,6 +120,7 @@ class TrackedArtifactResponse(StrictApiModel):
     latest_revision: str | None
     change_status: str | None
     analysis_status: str | None
+    analysis_failure_safe: str | None = None
     risk_count: int
     active_risk_count: int
     first_risk_id: str | None
@@ -240,6 +241,7 @@ def create_security_router(deps: SecurityRouterDependencies) -> APIRouter:
                     change_status=(
                         None if item.change_status is None else item.change_status.value
                     ),
+                    analysis_failure_safe=item.analysis_failure_safe,
                     analysis_status=(
                         None if item.analysis_status is None else item.analysis_status.value
                     ),

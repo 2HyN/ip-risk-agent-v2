@@ -63,8 +63,9 @@ def _artifact(path: Path) -> AnalysisArtifact:
 
 
 async def run(documents: list[Path]) -> int:
-    corpus = load_corpus(CORPUS)
-    client = offline_kipris_client(corpus)
+    # 합성 코퍼스는 의도를 명시해야 열린다. 이 스크립트가 그 의도다.
+    corpus = load_corpus(CORPUS, acknowledge_synthetic=True)
+    client = offline_kipris_client(corpus, acknowledge_synthetic=True)
     model = GoogleGenAIClient(
         os.environ["GEMINI_MODEL_ID"],
         vertex_config={

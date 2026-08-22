@@ -172,6 +172,7 @@ export type TrackedArtifact = {
   latest_revision: string | null;
   change_status: string | null;
   analysis_status: string | null;
+  analysis_failure_safe: string | null;
   risk_count: number;
   active_risk_count: number;
   first_risk_id: string | null;

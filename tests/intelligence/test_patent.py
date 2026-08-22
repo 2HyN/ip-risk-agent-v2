@@ -916,8 +916,8 @@ def test_the_offline_corpus_goes_through_the_real_parsing_path():
         offline_kipris_client,
     )
 
-    corpus = load_corpus(CORPUS_PATH)
-    client = offline_kipris_client(corpus)
+    corpus = load_corpus(CORPUS_PATH, acknowledge_synthetic=True)
+    client = offline_kipris_client(corpus, acknowledge_synthetic=True)
 
     async def scenario():
         hits = await client.search("보이스피싱 탐지", rows=5)
@@ -1083,3 +1083,36 @@ def test_a_missing_quote_is_allowed_and_simply_has_no_highlight():
     )
     assert grounded.quote_spans == {}
     assert grounded.match_count == 1
+
+
+def test_the_synthetic_corpus_refuses_casual_use(monkeypatch):
+    """빠뜨린 인자 하나로 합성 근거가 흘러들면 안 된다.
+
+    여기서 나온 특허 본문은 실제 공보가 아니다. 그것이 사용자 화면에 Risk 로 뜨면
+    거짓 근거다. 그래서 기본값을 "거부" 로 둔다.
+    """
+    from ip_risk_agent.intelligence.patent.offline_corpus import (
+        SYNTHETIC_OPT_IN_ENV,
+        SyntheticCorpusRefused,
+        load_corpus,
+        offline_kipris_client,
+    )
+
+    monkeypatch.delenv(SYNTHETIC_OPT_IN_ENV, raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+
+    with pytest.raises(SyntheticCorpusRefused):
+        load_corpus(CORPUS_PATH)
+    with pytest.raises(SyntheticCorpusRefused):
+        offline_kipris_client({})
+
+    # 개발 환경에서 의도를 켜면 열린다.
+    monkeypatch.setenv(SYNTHETIC_OPT_IN_ENV, "1")
+    assert load_corpus(CORPUS_PATH)
+
+    # 프로덕션에서는 의도를 켜도 열리지 않는다.
+    monkeypatch.setenv("APP_ENV", "production")
+    with pytest.raises(SyntheticCorpusRefused):
+        load_corpus(CORPUS_PATH, acknowledge_synthetic=True)
+    with pytest.raises(SyntheticCorpusRefused):
+        offline_kipris_client({}, acknowledge_synthetic=True)

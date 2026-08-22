@@ -363,6 +363,22 @@ textarea:focus-visible {
   background: #fff1f1;
   color: var(--danger);
 }
+/* 분석 실패 안내. 한도 소진처럼 사용자가 고칠 수 없는 것은 경고 톤으로 둔다 —
+   위험을 알리는 것이 아니라 기다리면 된다는 뜻이기 때문이다. */
+.analysis-notice {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 9px;
+  line-height: 1.5;
+}
+.analysis-notice--warning {
+  background: #fff8e6;
+  color: #7a5200;
+}
+.analysis-notice--danger {
+  background: #fff1f1;
+  color: var(--danger);
+}
 @media (max-width: 860px) {
   .source-layout {
     grid-template-columns: 1fr;

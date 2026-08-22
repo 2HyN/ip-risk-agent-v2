@@ -531,6 +531,7 @@ def test_control_workspace_risk_history_security_notification_routes() -> None:
                 "latest_revision": "revision-1",
                 "change_status": "PENDING",
                 "analysis_status": "QUEUED",
+                "analysis_failure_safe": None,
                 "risk_count": 1,
                 "active_risk_count": 1,
                 "first_risk_id": "risk-1",
