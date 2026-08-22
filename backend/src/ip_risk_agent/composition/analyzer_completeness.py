@@ -28,6 +28,17 @@ class CompleteIntelligenceFacade:
         self._delegate = delegate
         self._active = active
 
+    @property
+    def risk_explainer(self):
+        """감싼 쪽의 설명기를 그대로 내보낸다.
+
+        이 경계는 **분석기 집합**의 완결성만 본다. 설명기는 판정이 아니어서 여기서
+        다루지 않는데, 그렇다고 가려 버리면 조립이 그것을 찾지 못한다. 실제로
+        배포된 Risk 에 설명과 권고가 하나도 붙지 않았다 — 설명기가 없는 것으로
+        처리되어 실패조차 남지 않았다.
+        """
+        return getattr(self._delegate, "risk_explainer", None)
+
     async def analyze(self, artifact: AnalysisArtifact) -> list[AnalysisResult]:
         requested = frozenset(artifact.requested_analyzers)
         if (

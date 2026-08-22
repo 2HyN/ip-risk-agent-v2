@@ -1032,3 +1032,121 @@ def test_a_malformed_quote_span_is_dropped_instead_of_stored() -> None:
             assert "quote_end" not in item.metadata_safe
 
     run(scenario())
+
+
+async def _reanalyze(store: InMemoryControlStore, job_id: str, suffix: str) -> datetime:
+    """제품의 "다시 검사" 와 같은 방식으로 되돌린 뒤 다시 점유한다."""
+    from ip_risk_agent.application.analysis_jobs.transitions import (
+        claim_analysis_job,
+        reanalyze_analysis_job,
+    )
+    from ip_risk_agent.application.process_change.transitions import (
+        claim_change_event,
+        reanalyze_change_event,
+    )
+
+    started_at = NOW + timedelta(minutes=5)
+    async with store() as uow:
+        job = await uow.analysis_jobs.get(job_id)
+        event = await uow.change_events.get(f"change-{suffix}")
+        assert job is not None and event is not None
+        event = reanalyze_change_event(event, occurred_at=started_at)
+        job = reanalyze_analysis_job(job)
+        event = claim_change_event(
+            event,
+            occurred_at=started_at,
+            lease_expires_at=started_at + timedelta(minutes=5),
+        )
+        job = claim_analysis_job(job, occurred_at=started_at)
+        await uow.change_events.save(event)
+        await uow.analysis_jobs.save(job)
+        await uow.commit()
+    return started_at
+
+
+def test_reanalyzing_an_unchanged_document_does_not_collide_with_its_own_evidence() -> None:
+    """배포에서 재검사가 매번 이것으로 실패했다.
+
+    근거 문서 ID 는 (Risk, 분석 실행, 근거 이름) 에서 결정된다. 재검사는 같은
+    분석 실행을 다시 돌리므로 ID 도 같아진다. 실행 결과는 되돌릴 때 지워지는데
+    근거는 남아 있어, 같은 ID 를 다시 만들려다 고유키 위반으로 죽었다. 화면에는
+    ``INTERNAL:UNEXPECTED_PIPELINE_FAILURE`` 만 보였다.
+
+    이력과 알림도 결과 지문에서 ID 가 나오므로 같은 함정이 있다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        job_id, started_at = await add_running_job(
+            store, suffix="again", revision="revision-1"
+        )
+        service = make_service(store)
+        first = await service.accept_analysis_result(
+            patent_result(job_id, "revision-1", started_at)
+        )
+        assert first.disposition is AnalysisResultDisposition.ACCEPTED
+
+        restarted_at = await _reanalyze(store, job_id, "again")
+        second = await service.accept_analysis_result(
+            patent_result(job_id, "revision-1", restarted_at)
+        )
+        assert second.disposition is AnalysisResultDisposition.ACCEPTED
+
+        async with store() as uow:
+            risks = await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            # 바뀐 것이 없으므로 Risk 도 하나 그대로다.
+            assert len(risks) == 1
+            evidence = await uow.risks.list_evidence(risks[0].id)
+            # 근거가 두 배로 늘어서도 안 된다.
+            assert len(evidence) == 1
+            notifications = await uow.notifications.list_for_user("owner-1")
+            assert len(notifications) == 1
+
+    run(scenario())
+
+
+def test_reanalysis_replaces_the_evidence_that_run_recorded_before() -> None:
+    """다시 검사하면 그 실행의 근거는 이번 것으로 바뀌어야 한다.
+
+    지난번 것을 남겨 두면 화면이 이번 판정과 다른 구간을 강조한다. 사람은 그것을
+    근거로 읽는다.
+
+    해소된 Risk 의 근거는 여기서 다루지 않는다 — 왜 위험이었는지의 기록이므로
+    남는 것이 맞다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+        job_id, started_at = await add_running_job(
+            store, suffix="span-again", revision="revision-1"
+        )
+        await service.accept_analysis_result(
+            patent_result(
+                job_id,
+                "revision-1",
+                started_at,
+                quote_spans={"evidence-1": {"start": 3, "end": 11}},
+            )
+        )
+
+        restarted_at = await _reanalyze(store, job_id, "span-again")
+        await service.accept_analysis_result(
+            patent_result(
+                job_id,
+                "revision-1",
+                restarted_at,
+                quote_spans={"evidence-1": {"start": 5, "end": 20}},
+            )
+        )
+
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.PATENT)
+            )[0]
+            evidence = await uow.risks.list_evidence(risk.id)
+        assert len(evidence) == 1
+        assert evidence[0].metadata_safe["quote_start"] == 5
+        assert evidence[0].metadata_safe["quote_end"] == 20
+
+    run(scenario())

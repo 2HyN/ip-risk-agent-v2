@@ -654,6 +654,17 @@ class InMemoryRiskRepository(_Repository):
             raise _missing("risk", evidence.risk_id)
         self._state.risk_evidence[evidence.id] = evidence
 
+    async def clear_evidence(self, risk_id: str, analysis_job_id: str) -> int:
+        self._open()
+        stale = [
+            key
+            for key, item in self._state.risk_evidence.items()
+            if item.risk_id == risk_id and item.analysis_job_id == analysis_job_id
+        ]
+        for key in stale:
+            del self._state.risk_evidence[key]
+        return len(stale)
+
     async def list_evidence(self, risk_id: str) -> tuple[RiskEvidence, ...]:
         self._open()
         return _sorted(

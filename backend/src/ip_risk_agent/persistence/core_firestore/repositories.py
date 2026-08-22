@@ -768,6 +768,27 @@ class FirestoreRiskRepository(_Repository):
             RISK_EVIDENCE, evidence.id, evidence, risk_evidence_to_document
         )
 
+    async def clear_evidence(self, risk_id: str, analysis_job_id: str) -> int:
+        """이 분석 실행이 앞서 남긴 근거를 지운다.
+
+        근거 문서 ID 는 (Risk, 분석 실행, 근거 이름) 에서 결정된다. 같은 문서를
+        다시 검사하면 분석 실행 ID 도 같으므로 ID 도 같아진다. 실행 결과는
+        재검사 때 초기화되는데 근거는 남아 있어, 같은 ID 를 다시 만들려다
+        충돌했다 — 배포에서 재검사가 매번 이 이유로 실패했다.
+        """
+        # Risk 하나로만 걸러 온 뒤 실행 ID 는 여기서 본다. 동등 조건 둘을 함께
+        # 거는 질의는 색인 구성에 기대게 되고, Risk 하나의 근거는 몇 건뿐이다.
+        documents = await self._session.query(
+            RISK_EVIDENCE, (QueryFilter("risk_id", risk_id),)
+        )
+        removed = 0
+        for document in documents:
+            if document.data.get("analysis_job_id") != analysis_job_id:
+                continue
+            await self._session.delete(RISK_EVIDENCE, document.key.document_id)
+            removed += 1
+        return removed
+
     async def list_evidence(self, risk_id: str) -> tuple[RiskEvidence, ...]:
         return await self._query(
             RISK_EVIDENCE,

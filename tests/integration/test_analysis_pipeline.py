@@ -125,10 +125,39 @@ class _UnexpectedAnalyzerCrash(RuntimeError):
     pass
 
 
+class FakeExplainer:
+    """설명기 대역. 판정을 바꾸지 않고 저장된 근거만 읽는다."""
+
+    model_id = "fake-model"
+    prompt_version = "fake-prompt_v1"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def explain(self, *, risk, evidence):
+        from ip_risk_agent.application.risk_explanation import RiskExplanation
+
+        self.calls.append(risk.id)
+        return RiskExplanation(
+            summary="겹치는 구성이 있다.",
+            recommendation="담당자와 확인한다.",
+            reference_evidence_ids=tuple(
+                item.evidence_id_from_result for item in evidence
+            ),
+        )
+
+
 class FakeIntelligence:
-    def __init__(self, *, omit_results: bool = False, crash: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        omit_results: bool = False,
+        crash: bool = False,
+        risk_explainer=None,
+    ) -> None:
         self.omit_results = omit_results
         self.crash = crash
+        self.risk_explainer = risk_explainer
 
     async def analyze(self, artifact) -> list[AnalysisResult]:
         assert artifact.requested_analyzers == [AnalysisType.PATENT]
@@ -531,3 +560,37 @@ def test_a_superseded_revision_stops_before_the_access_receipt() -> None:
         assert accesses == ()
 
     asyncio.run(verify())
+
+
+def test_an_explanation_is_attached_through_the_completeness_boundary() -> None:
+    """분석이 끝나면 설명과 권고가 자동으로 붙어야 한다.
+
+    배포에서는 하나도 붙지 않았다. 완결성 경계가 분석기 집합만 다루면서 설명기를
+    그대로 내보내지 않았고, 조립은 감싼 쪽에서 그것을 찾다가 **없는 것으로**
+    처리했다. 설명 실패는 조용히 넘기도록 되어 있어 로그에도 남지 않았다.
+
+    그래서 여기서는 감싼 뒤에도 설명이 Risk 까지 도달하는지 본다.
+    """
+    explainer = FakeExplainer()
+    container, _adapter = build_worker(
+        intelligence=FakeIntelligence(risk_explainer=explainer)
+    )
+    registered = asyncio.run(seed_execution(container, fingerprint="explained"))
+    with TestClient(create_worker_app(container)) as client:
+        response = client.post(
+            "/internal/tasks/analyze-change",
+            headers={"Authorization": f"Bearer {TASK_TOKEN}"},
+            json={"change_event_id": registered.change_event_id},
+        )
+    assert response.status_code == 200
+
+    async def stored() -> tuple[str | None, str | None]:
+        async with container.unit_of_work_factory() as uow:
+            risks = await uow.risks.list_for_workspace("vws-1")
+            assert len(risks) == 1
+            return risks[0].explanation_safe, risks[0].recommendation_safe
+
+    explanation, recommendation = asyncio.run(stored())
+    assert explainer.calls, "설명기가 호출되지 않았다"
+    assert explanation == "겹치는 구성이 있다."
+    assert recommendation == "담당자와 확인한다."

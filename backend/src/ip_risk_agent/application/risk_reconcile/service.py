@@ -327,6 +327,12 @@ class AnalysisResultIntakeService:
                 )
                 await uow.risks.save(risk)
 
+            # 같은 문서를 다시 검사하면 분석 실행 ID 가 같고, 근거 문서 ID 는
+            # 그것에서 결정된다. 실행 결과는 초기화되는데 근거만 남아 있으면 같은
+            # ID 를 다시 만들려다 충돌한다. 이번 실행이 앞서 남긴 것을 먼저 걷어
+            # 낸다 — 후보가 줄었을 때 지난번 근거가 남는 것도 함께 막는다.
+            await uow.risks.clear_evidence(risk.id, result.analysis_job_id)
+
             evidence_refs: list[str] = []
             for evidence_id in projection.evidence_ids:
                 source = evidence_by_id[evidence_id]
@@ -358,7 +364,14 @@ class AnalysisResultIntakeService:
                 coverage=result.coverage,
             )
             assert lifecycle_decision.event_type is not None
-            await uow.risks.append_event(
+            # 이력은 덧붙이기만 한다. 그런데 이력 ID 는 결과 지문에서 결정되므로,
+            # 바뀐 것이 없는 재검사는 **같은 이력을 다시 쓰려 한다.** 같은 지문은
+            # 같은 관측이라는 뜻이므로 이미 있으면 그대로 둔다. 지문이 다르면
+            # ID 도 달라 새 이력이 남는다.
+            recorded_event_ids = {item.id for item in await uow.risks.list_events(risk.id)}
+            await _append_event_once(
+                uow,
+                recorded_event_ids,
                 _risk_event(
                     risk=risk,
                     result_fingerprint=result_fingerprint,
@@ -370,7 +383,9 @@ class AnalysisResultIntakeService:
                 )
             )
             if previous_priority is not None and previous_priority is not risk.review_priority:
-                await uow.risks.append_event(
+                await _append_event_once(
+                    uow,
+                    recorded_event_ids,
                     _priority_event(
                         risk=risk,
                         result_fingerprint=result_fingerprint,
@@ -391,7 +406,8 @@ class AnalysisResultIntakeService:
                     if lifecycle_decision.event_type is RiskEventType.REOPENED
                     else NotificationType.RISK_HIGH_DETECTED
                 )
-                await uow.notifications.add(
+                await _add_notification_once(
+                    uow,
                     _risk_notification(
                         risk=risk,
                         owner_user_id=workspace_owner,
@@ -806,6 +822,28 @@ def _priority_event(
         new_state_safe={"review_priority": risk.review_priority.value},
         analysis_job_id=analysis_job_id,
     )
+
+
+async def _append_event_once(uow, recorded_ids: set[str], event: RiskEvent) -> None:
+    """같은 이력을 두 번 쓰지 않는다.
+
+    이력 ID 는 (Risk, 결과 지문, 이력 종류) 에서 결정된다. 같은 ID 는 같은 관측을
+    뜻하므로 다시 쓸 것이 없다. 바뀐 것이 없는 재검사가 정확히 이 경우다.
+
+    ``recorded_ids`` 를 함께 갱신한다. 한 번의 조정 안에서 이력을 둘 이상 남길 수
+    있고, 저장소는 아직 그것을 돌려주지 않는다.
+    """
+    if event.id in recorded_ids:
+        return
+    recorded_ids.add(event.id)
+    await uow.risks.append_event(event)
+
+
+async def _add_notification_once(uow, notification: Notification) -> None:
+    """알림도 결과 지문에서 ID 가 나온다. 같은 관측을 두 번 알리지 않는다."""
+    if await uow.notifications.get(notification.id) is not None:
+        return
+    await uow.notifications.add(notification)
 
 
 def _risk_notification(
