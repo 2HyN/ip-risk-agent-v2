@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from iprisk_contracts import (
@@ -594,3 +594,73 @@ def test_an_explanation_is_attached_through_the_completeness_boundary() -> None:
     assert explainer.calls, "설명기가 호출되지 않았다"
     assert explanation == "겹치는 구성이 있다."
     assert recommendation == "담당자와 확인한다."
+
+
+async def register_newer_change(container, *, fingerprint: str, after) -> None:
+    """같은 artifact 에 더 늦게 관측된 변경을 하나 더 등록한다."""
+    source = await container.control_facade.register_source_metadata(
+        SourceMetadataRegistrationCommand(
+            registration_key="github:install-1:repo-1:vws-1",
+            actor_user_id="owner-1",
+            risk_workspace_id="vws-1",
+            source_type=SourceType.GITHUB,
+            connection_key="install-1",
+            source_workspace_key="acme/repo@main",
+            external_scope_id="acme/repo@main",
+            source_workspace_display_name="acme/repo",
+            mount_alias="Repository",
+            provider_subject="install-1",
+        )
+    )
+    await container.control_facade.register_source_change(
+        SourceChange(
+            contract_version="1",
+            event_id=f"event-{fingerprint}",
+            provider_event_id=f"delivery-{fingerprint}",
+            event_fingerprint=fingerprint,
+            risk_workspace_id="vws-1",
+            mount_id=source.mount_id,
+            source_workspace_id=source.source_workspace_id,
+            source_type=SourceType.GITHUB,
+            artifact=SourceArtifactRef(
+                source_artifact_id="repo:path:src/main.py",
+                display_name="main.py",
+                path_hint="src/main.py",
+            ),
+            change_type=ChangeType.UPDATE,
+            revision="revision-2",
+            observed_at=after,
+            safe_metadata={"branch": "main"},
+        )
+    )
+
+
+def test_a_run_overtaken_by_a_newer_change_pays_nothing() -> None:
+    """한 번의 편집이 판본을 여럿 만들면 분석도 여럿 돈다.
+
+    마지막 하나만 살아남는 것은 옳다. 그런데 그 판정이 **분석이 끝난 뒤** 결과를
+    받는 자리에서 나면, 버려질 실행이 KIPRIS 와 모델 호출을 이미 다 쓴 뒤다.
+    실제로 한 번의 편집에서 분석 네 개가 돌아 18 회를 썼다.
+
+    소스를 읽기도 전에 알 수 있어야 한다.
+    """
+    adapter = FakeSourceAdapter()
+    container, adapter = build_worker(adapter=adapter)
+    registered = asyncio.run(seed_execution(container, fingerprint="overtaken"))
+    asyncio.run(
+        register_newer_change(
+            container, fingerprint="overtaken-newer", after=now() + timedelta(minutes=1)
+        )
+    )
+
+    with TestClient(create_worker_app(container)) as client:
+        response = client.post(
+            "/internal/tasks/analyze-change",
+            headers={"Authorization": f"Bearer {TASK_TOKEN}"},
+            json={"change_event_id": registered.change_event_id},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["safe_code"] == "SOURCE:REVISION_SUPERSEDED"
+    # 소스를 건드리지도 않았다. 값을 치르는 것은 그 뒤부터다.
+    assert adapter.fetch_count == 0

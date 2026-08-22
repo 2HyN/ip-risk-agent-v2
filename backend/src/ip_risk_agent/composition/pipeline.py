@@ -102,6 +102,18 @@ class AnalysisPipeline:
         if claim is None:
             return PipelineResult(PipelineDisposition.DUPLICATE, change_event_id)
 
+        # 소스를 건드리기 전에 확인한다. 이 실행보다 뒤에 관측된 변경이 있으면
+        # 결과는 어차피 버려지고, 그 판정은 지금까지 분석이 끝난 **뒤에** 났다.
+        # 그때는 KIPRIS 와 모델 호출을 이미 다 쓴 뒤다.
+        if await self._control.newer_change_exists(claim):
+            return await self._fail(
+                change_event_id,
+                claim.analysis_job_id,
+                claim.attempt,
+                safe_code="SOURCE:REVISION_SUPERSEDED",
+                retryable=False,
+            )
+
         adapter = None
         snapshot_fetched = False
         try:
@@ -157,6 +169,18 @@ class AnalysisPipeline:
 
             artifact = gated.analysis_artifact
             assert artifact is not None
+            # 소스를 읽고 관문을 통과하는 사이에 새 변경이 올 수 있다. 값을 치르는
+            # 것은 여기서부터이므로 마지막으로 한 번 더 본다.
+            if await self._control.newer_change_exists(claim):
+                result = await self._fail(
+                    change_event_id,
+                    claim.analysis_job_id,
+                    claim.attempt,
+                    safe_code="SOURCE:REVISION_SUPERSEDED",
+                    retryable=False,
+                )
+                await _cleanup(adapter, claim.source_change)
+                return result
             results = await self._intelligence.analyze(artifact)
             final_status: str | None = None
             explained: list[str] = []

@@ -17,6 +17,7 @@ from ip_risk_agent.composition.settings import (
     Settings,
     SettingsError,
 )
+from ip_risk_agent.gcp_contract import ANALYSIS_COALESCE_DELAY_SECONDS
 from ip_risk_agent.persistence.core_firestore import FirestoreControlUnitOfWorkFactory
 
 from .cloud_tasks import CloudTasksEnqueuer
@@ -163,6 +164,7 @@ def build_google_cloud_foundation(
             queue=settings.cloud_tasks_queue,
             worker_base_url=settings.analysis_worker_url,
             service_account_email=settings.cloud_tasks_service_account,
+            coalesce_delay_seconds=ANALYSIS_COALESCE_DELAY_SECONDS,
         )
     return GoogleCloudFoundation(
         clients=clients,

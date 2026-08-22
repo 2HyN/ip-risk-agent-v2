@@ -43,6 +43,17 @@ FIXED_SECRET_IDS = {
 }
 DYNAMIC_CREDENTIAL_SECRET_PREFIX = "iprisk-v2-cred"
 
+#: 분석을 큐에 넣고 실제로 시작하기까지 미루는 시간(초).
+#:
+#: 문서를 한 번 고쳐도 Drive 는 판본을 여럿 만들고 알림도 여럿 보낸다. 그때마다
+#: 분석이 따로 돌면 마지막 하나만 살아남고 나머지는 KIPRIS 와 모델 호출을 쓴 뒤
+#: 버려진다. 실제로 한 번의 편집에서 분석 네 개가 돌아 18 회를 썼다.
+#:
+#: 미뤄 두면 그 사이에 뒤엣것이 도착하고, 앞엣것은 시작 직전 검사에서 밀린 것을
+#: 알아 아무 값도 치르지 않는다. 대가는 감지에서 분석까지의 지연이 그만큼 는다는
+#: 것이다. 분석 자체가 1~2 분 걸리므로 이 정도는 체감되지 않는다.
+ANALYSIS_COALESCE_DELAY_SECONDS = 45
+
 
 def service_account_email(account_id: str) -> str:
     return f"{account_id}@{PROJECT_ID}.iam.gserviceaccount.com"
@@ -56,6 +67,7 @@ DEPLOY_SERVICE_ACCOUNT = service_account_email(DEPLOY_SERVICE_ACCOUNT_ID)
 
 
 __all__ = [
+    "ANALYSIS_COALESCE_DELAY_SECONDS",
     "API_SERVICE",
     "API_SERVICE_ACCOUNT",
     "ARTIFACT_REPOSITORY",

@@ -477,6 +477,17 @@ class InMemoryChangeEventRepository(_Repository):
         self._state.change_events[change_event.id] = change_event
         self._state.change_events_by_fingerprint[change_event.event_fingerprint] = change_event.id
 
+    async def list_for_artifact(self, artifact_id: str) -> tuple[ChangeEvent, ...]:
+        self._open()
+        return _sorted(
+            [
+                event
+                for event in self._state.change_events.values()
+                if event.artifact_id == artifact_id
+            ],
+            key=lambda event: event.id,
+        )
+
     async def list_for_workspace(
         self, risk_workspace_id: str
     ) -> tuple[ChangeEvent, ...]:

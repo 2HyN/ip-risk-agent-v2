@@ -10,7 +10,11 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import AwareDatetime, Field, model_validator
 
 from ip_risk_agent.application.auth import AuthenticationService
-from ip_risk_agent.application.analysis_jobs import AnalysisJobStatus
+from ip_risk_agent.application.artifact_view import (
+    current_change_for_artifact,
+    latest_job,
+    needs_attention,
+)
 from ip_risk_agent.application.repositories import (
     ControlUnitOfWorkFactory,
     RecordNotFoundError,
@@ -236,9 +240,25 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
             risks = await uow.risks.list_for_workspace(vws_id)
             mounts = await uow.mounts.list_for_workspace(vws_id)
             change_events = await uow.change_events.list_for_workspace(vws_id)
-            jobs = []
+            # 실패는 기록을 세는 것이 아니라 **문서를 세는 것**이다. 한 번의 편집이
+            # 판본을 여럿 만들면 밀려서 끝난 실행이 여럿 남는데, 그것까지 세면
+            # 고칠 때마다 "분석 실패" 가 늘고 뒤이어 성공해도 줄지 않는다. Sources
+            # 화면은 이미 지금 판본의 실행만 보므로 두 화면이 서로 어긋났다.
+            changes_by_artifact: dict[str, list] = {}
             for event in change_events:
-                jobs.extend(await uow.analysis_jobs.list_for_change(event.id))
+                if event.artifact_id is not None:
+                    changes_by_artifact.setdefault(event.artifact_id, []).append(event)
+            failed_artifacts = 0
+            for artifact in await uow.artifacts.list_for_workspace(vws_id):
+                change = current_change_for_artifact(
+                    changes_by_artifact.get(artifact.id),
+                    await uow.artifacts.get_state(artifact.id),
+                )
+                if change is None:
+                    continue
+                job = latest_job(await uow.analysis_jobs.list_for_change(change.id))
+                if needs_attention(job):
+                    failed_artifacts += 1
         recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         return WorkspaceDashboardResponse(
             new_risks=sum(
@@ -255,7 +275,7 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
                 and risk.resolved_at >= recent_cutoff
                 for risk in risks
             ),
-            analysis_failed=sum(job.status is AnalysisJobStatus.FAILED for job in jobs),
+            analysis_failed=failed_artifacts,
             source_health=SourceHealthSummaryResponse(
                 active=sum(mount.status is MountStatus.ACTIVE for mount in mounts),
                 action_required=sum(

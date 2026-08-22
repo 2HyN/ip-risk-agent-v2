@@ -614,6 +614,13 @@ class FirestoreChangeEventRepository(_Repository):
             change_event_from_document,
         )
 
+    async def list_for_artifact(self, artifact_id: str) -> tuple[ChangeEvent, ...]:
+        return await self._query(
+            CHANGE_EVENTS,
+            (QueryFilter("artifact_id", artifact_id),),
+            change_event_from_document,
+        )
+
 
 class FirestoreAnalysisJobRepository(_Repository):
     async def get(self, analysis_job_id: str) -> AnalysisJob | None:

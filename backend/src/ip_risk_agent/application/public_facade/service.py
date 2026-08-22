@@ -247,6 +247,27 @@ class ControlPlaneFacade:
             source_change=state.change_event.source_change,
         )
 
+    async def newer_change_exists(self, claim: AnalysisExecutionClaim) -> bool:
+        """이 실행보다 뒤에 관측된 변경이 같은 artifact 에 있는가.
+
+        있으면 이 실행의 결과는 어차피 버려진다 — 옛 판본의 내용으로 현재 상태를
+        덮을 수 없기 때문이다. 그런데 그 판정은 지금까지 **분석이 끝난 뒤** 결과를
+        받는 자리에서 났다. 그때는 KIPRIS 호출과 모델 호출을 이미 다 쓴 뒤다.
+
+        한 번의 편집으로 Drive 가 판본 네 개를 만들었을 때 분석 네 개가 돌았고,
+        셋은 그렇게 값을 치르고 버려졌다. 시작 전에 알 수 있으면 치르지 않는다.
+
+        비교는 관측 시각으로 한다. 판본 문자열은 provider 마다 형식이 달라 순서를
+        말해 주지 않는다.
+        """
+        async with self._unit_of_work_factory() as uow:
+            events = await uow.change_events.list_for_artifact(claim.artifact_id)
+        mine = claim.source_change.observed_at
+        return any(
+            event.id != claim.change_event_id and event.observed_at > mine
+            for event in events
+        )
+
     async def fail_analysis(
         self,
         change_event_id: str,

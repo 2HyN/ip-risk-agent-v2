@@ -523,3 +523,66 @@ def test_oidc_authenticator_checks_exact_verified_service_account() -> None:
         assert error.value.status_code == 403
 
     run(scenario())
+
+
+def test_cloud_tasks_defers_a_task_so_a_burst_of_revisions_can_coalesce() -> None:
+    """한 번의 편집이 판본을 여럿 만들면 분석도 여럿 돈다.
+
+    미뤄 두면 그 사이에 뒤엣것이 도착하고, 앞엣것은 시작 직전 검사에서 밀린 것을
+    알아 KIPRIS 와 모델 호출을 쓰지 않는다. 실제로 한 번의 편집에서 분석 네 개가
+    돌아 18 회를 썼다.
+    """
+
+    async def scenario() -> None:
+        client = FakeTasksClient()
+        now = datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc)
+        queue = CloudTasksEnqueuer(
+            client=client,
+            project_id="project-1",
+            location="asia-northeast3",
+            queue="analysis",
+            worker_base_url="https://worker.example.run.app",
+            service_account_email="tasks@example.iam.gserviceaccount.com",
+            coalesce_delay_seconds=45,
+            clock=lambda: now,
+        )
+        await queue.enqueue_change("change-1")
+        task = client.calls[0][1]
+        assert task.schedule_time == now + timedelta(seconds=45)
+
+    run(scenario())
+
+
+def test_cloud_tasks_without_a_delay_runs_now() -> None:
+    """미룰 이유가 없으면 미루지 않는다. 지연은 감지에서 분석까지를 늘린다."""
+
+    async def scenario() -> None:
+        client = FakeTasksClient()
+        queue = CloudTasksEnqueuer(
+            client=client,
+            project_id="project-1",
+            location="asia-northeast3",
+            queue="analysis",
+            worker_base_url="https://worker.example.run.app",
+            service_account_email="tasks@example.iam.gserviceaccount.com",
+        )
+        await queue.enqueue_change("change-1")
+        # 필드를 넣지 않으면 Cloud Tasks 는 즉시 실행한다.
+        assert client.calls[0][1].schedule_time is None
+
+    run(scenario())
+
+
+@pytest.mark.parametrize("delay", (-1, 301))
+def test_an_unreasonable_coalesce_delay_is_refused(delay: int) -> None:
+    """지연이 길면 변경이 오래 방치된다. 지속 추적이 이 시스템의 값이다."""
+    with pytest.raises(ValueError, match="coalesce delay"):
+        CloudTasksEnqueuer(
+            client=FakeTasksClient(),
+            project_id="project-1",
+            location="asia-northeast3",
+            queue="analysis",
+            worker_base_url="https://worker.example.run.app",
+            service_account_email="tasks@example.iam.gserviceaccount.com",
+            coalesce_delay_seconds=delay,
+        )

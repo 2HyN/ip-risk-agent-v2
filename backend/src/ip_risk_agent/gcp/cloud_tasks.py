@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from google.cloud import tasks_v2
@@ -23,6 +24,8 @@ class CloudTasksEnqueuer:
         worker_base_url: str,
         service_account_email: str,
         dispatch_deadline_seconds: int = 240,
+        coalesce_delay_seconds: int = 0,
+        clock=None,
     ) -> None:
         endpoint = worker_base_url.rstrip("/") + "/internal/tasks/analyze-change"
         parsed = urlsplit(endpoint)
@@ -37,7 +40,14 @@ class CloudTasksEnqueuer:
         self._service_account = require_non_empty(
             service_account_email, "cloud_tasks.service_account"
         )
+        if not 0 <= coalesce_delay_seconds <= 300:
+            raise ValueError("coalesce delay must be between 0 and 300 seconds")
         self._deadline = dispatch_deadline_seconds
+        # 한 번의 편집이 판본을 여럿 만들면 변경도 여럿이 된다. 잠깐 미뤄 두면 그
+        # 사이에 뒤엣것이 도착하고, 앞엣것은 시작 전에 밀린 것을 알아 값을 치르지
+        # 않는다 (``AnalysisPipeline`` 의 newer_change_exists).
+        self._coalesce_delay = coalesce_delay_seconds
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     async def enqueue_change(self, change_event_id: str) -> None:
         change_event_id = require_non_empty(
@@ -59,6 +69,7 @@ class CloudTasksEnqueuer:
         # 두 번 디스패치되면 두 번째 claim 이 빈손으로 끝난다.
         task = tasks_v2.Task(
             dispatch_deadline=duration_pb2.Duration(seconds=self._deadline),
+            **self._schedule(),
             http_request=tasks_v2.HttpRequest(
                 http_method=tasks_v2.HttpMethod.POST,
                 url=self._endpoint,
@@ -74,6 +85,12 @@ class CloudTasksEnqueuer:
             await self._client.create_task(parent=self._parent, task=task)
         except Exception as exc:
             raise TaskEnqueueError("Cloud Tasks enqueue failed") from exc
+
+    def _schedule(self) -> dict:
+        """미룰 시각. 0 이면 필드를 넣지 않아 지금 바로 실행된다."""
+        if not self._coalesce_delay:
+            return {}
+        return {"schedule_time": self._clock() + timedelta(seconds=self._coalesce_delay)}
 
 
 __all__ = ["CloudTasksEnqueuer"]

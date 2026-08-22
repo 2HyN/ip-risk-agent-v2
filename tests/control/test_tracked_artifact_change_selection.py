@@ -14,7 +14,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from ip_risk_agent.application.security_policy.service import _current_change
+from ip_risk_agent.application.artifact_view import (
+    SUPERSEDED_FAILURE,
+    latest_job,
+    needs_attention,
+)
+from ip_risk_agent.application.artifact_view import (
+    current_change_for_artifact as _current_change,
+)
 
 NOW = datetime(2026, 8, 22, tzinfo=timezone.utc)
 
@@ -77,3 +84,52 @@ def test_the_latest_observed_change_is_used_when_the_revision_is_unknown() -> No
 def test_an_artifact_with_no_change_has_nothing_to_show() -> None:
     assert _current_change(None, _State("rev-1")) is None
     assert _current_change([], _State("rev-1")) is None
+
+
+# --------------------------------------------------------------- 실패 집계
+
+
+@dataclass(frozen=True)
+class _Status:
+    value: str
+
+
+@dataclass(frozen=True)
+class _Job:
+    id: str
+    created_at: datetime
+    status: _Status
+    failure_safe: str | None
+
+
+def _job(name: str, status: str, failure: str | None = None, offset: int = 0) -> _Job:
+    return _Job(name, NOW + timedelta(seconds=offset), _Status(status), failure)
+
+
+def test_a_run_pushed_aside_by_a_newer_revision_is_not_a_failure_to_show() -> None:
+    """문서를 한 번 고칠 때마다 "분석 실패" 가 늘고 성공해도 줄지 않았다.
+
+    밀려서 끝난 실행은 새 판본이 그 자리를 맡았다는 뜻이다. 사람이 할 일이 없다.
+    """
+    assert not needs_attention(_job("j1", "FAILED", SUPERSEDED_FAILURE))
+
+
+def test_a_real_failure_is_still_shown() -> None:
+    assert needs_attention(_job("j1", "FAILED", "INTERNAL:UNEXPECTED_PIPELINE_FAILURE"))
+    assert needs_attention(_job("j1", "FAILED", None))
+
+
+def test_a_finished_or_missing_run_is_not_a_failure() -> None:
+    assert not needs_attention(_job("j1", "SUCCEEDED"))
+    assert not needs_attention(_job("j1", "INCONCLUSIVE"))
+    assert not needs_attention(None)
+
+
+def test_the_last_run_of_a_change_decides() -> None:
+    """재검사는 같은 변경에 실행을 덧붙인다. 옛 시도가 결과를 말하면 안 된다."""
+    first = _job("j1", "FAILED", "INTERNAL:UNEXPECTED_PIPELINE_FAILURE", offset=0)
+    second = _job("j2", "SUCCEEDED", offset=60)
+    assert latest_job([first, second]) is second
+    assert latest_job([second, first]) is second
+    assert not needs_attention(latest_job([first, second]))
+    assert latest_job([]) is None

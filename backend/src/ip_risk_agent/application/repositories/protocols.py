@@ -90,6 +90,7 @@ class ChangeEventRepository(Protocol):
     async def list_for_workspace(
         self, risk_workspace_id: str
     ) -> tuple[ChangeEvent, ...]: ...
+    async def list_for_artifact(self, artifact_id: str) -> tuple[ChangeEvent, ...]: ...
 
 
 class AnalysisJobRepository(Protocol):

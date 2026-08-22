@@ -11,6 +11,10 @@ from hashlib import sha256
 
 from iprisk_contracts import ReviewPriority, SourceType
 from ip_risk_agent.application.analysis_jobs.models import AnalysisJobStatus
+from ip_risk_agent.application.artifact_view import (
+    current_change_for_artifact,
+    latest_job,
+)
 from ip_risk_agent.application.process_change.models import ChangeEventStatus
 from ip_risk_agent.core.artifacts import Artifact, ArtifactAvailability
 
@@ -277,13 +281,15 @@ class WorkspaceSecurityService:
             mounts_by_id = {mount.id: mount for mount in mounts}
             for artifact in artifacts:
                 state = await uow.artifacts.get_state(artifact.id)
-                change = _current_change(changes_by_artifact.get(artifact.id), state)
+                change = current_change_for_artifact(
+                    changes_by_artifact.get(artifact.id), state
+                )
                 jobs = (
                     ()
                     if change is None
                     else await uow.analysis_jobs.list_for_change(change.id)
                 )
-                latest_job = max(jobs, key=lambda job: (job.created_at, job.id), default=None)
+                latest = latest_job(jobs)
                 artifact_risks = risks_by_artifact.get(artifact.id, [])
                 active_risks = [
                     risk
@@ -320,9 +326,9 @@ class WorkspaceSecurityService:
                         ),
                         latest_revision=None if state is None else state.latest_revision,
                         change_status=None if change is None else change.status,
-                        analysis_status=None if latest_job is None else latest_job.status,
+                        analysis_status=None if latest is None else latest.status,
                         analysis_failure_safe=(
-                            None if latest_job is None else latest_job.failure_safe
+                            None if latest is None else latest.failure_safe
                         ),
                         risk_count=len(artifact_risks),
                         active_risk_count=len(active_risks),
@@ -391,23 +397,3 @@ __all__ = [
     "WorkspaceSecurityService",
     "WorkspaceSecuritySettings",
 ]
-
-
-def _current_change(changes, state):
-    """artifact 카드가 보여 줄 변경을 고른다.
-
-    **지금 소스에 있는 판본**을 맡은 변경이다. 예전에는 "가장 최근에 갱신된" 것을
-    골랐는데, 그러면 뒤늦게 실패한 옛 판본이 아직 돌고 있는 새 판본을 덮는다.
-    실제로 문서를 한 번 고쳤을 때 Drive 가 판본 네 개를 연달아 만들었고, 화면에는
-    최신 판본이 분석 중인데도 옛 판본의 실패가 보였다.
-
-    지금 판본을 맡은 변경이 아직 없으면(감지 직전) 가장 늦게 관측된 것을 준다.
-    """
-    if not changes:
-        return None
-    latest_revision = None if state is None else state.latest_revision
-    if latest_revision is not None:
-        current = [item for item in changes if item.revision == latest_revision]
-        if current:
-            return max(current, key=lambda item: (item.observed_at, item.id))
-    return max(changes, key=lambda item: (item.observed_at, item.id))
