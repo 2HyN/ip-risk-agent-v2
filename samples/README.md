@@ -7,21 +7,35 @@ Drive/GitHub/Local mount 에 올려 Patent·License 분석 경로를 실제로 �
 
 ## 가장 중요한 것 — 파일 이름이 분석기를 결정한다
 
-Drive 커넥터는 **파일 이름**으로 `ArtifactKind` 를 정하고, 그 종류가 어느 분석기로
-갈지를 결정한다 (`connectors/google_drive/adapter.py::_infer_artifact_kind`).
+커넥터는 **파일 이름**으로 `ArtifactKind` 를 정하고, 그 종류가 어느 분석기로 갈지를
+결정한다. 한 문서는 둘 중 **하나만** 받는다.
 
-| Drive 파일 이름 | ArtifactKind | 가는 분석기 |
+어떤 이름이 의존성 선언인지는 세 커넥터와 License 분석기가 **같은 표**를 본다
+(`core/artifacts/dependency_files.py`). 경로는 보지 않고 파일 이름만 본다 —
+`deps/requirements.txt` 도 `requirements.txt` 와 같게 다룬다.
+
+| 파일 이름 | ArtifactKind | 가는 분석기 |
 |---|---|---|
-| `requirements.txt`, `package.json` (정확히 이 이름) | `MANIFEST` | **License** |
-| `*.lock`, `*lockfile` | `LOCKFILE` | **License** |
-| 그 밖의 모든 이름 | `DOCUMENT_TEXT` | **Patent** |
+| `requirements*.txt`, `requirements*.in` | `MANIFEST` | **License** |
+| `pyproject.toml`, `setup.cfg`, `package.json` | `MANIFEST` | **License** |
+| `package-lock.json`, `uv.lock`, `poetry.lock` | `LOCKFILE` | **License** |
+| 그 밖의 이름 | 아래 "되돌림" 참고 | 대개 **Patent** |
 
-따라서 `requirements-sample.txt` 처럼 이름을 바꿔 올리면 License 가 아니라 Patent
-분석으로 간다. **이름을 그대로 유지해서 올린다.**
+**읽을 수 있는 이름만 의존성으로 인정한다.** 읽지 못할 것을 의존성으로 분류하면
+License 분석기는 파서가 없어 거절하고 Patent 분석기는 종류가 맞지 않아 거절해,
+어느 쪽도 맡지 않은 채 분석이 계약 위반으로 실패한다. `setup.py` 가 그랬다 —
+임의의 파이썬 코드라 실행하지 않고서는 의존성을 확정할 수 없으므로 표에 없고,
+저장소에서는 소스 코드로 다뤄진다. 선언 파일인 `setup.cfg` 만 대상이다.
 
-> Drive 는 `pyproject.toml`, `go.mod`, `Cargo.toml`, `package-lock.json` 을 manifest 로
-> 인식하지 않는다 (`package-lock.json` 은 `.lock` 으로 끝나지 않는다). License 분석기
-> 자체는 `pyproject.toml` 파서를 갖고 있으므로, 이는 커넥터 쪽 분류 범위의 한계다.
+### 되돌림은 커넥터마다 다르다
+
+표에 없는 이름을 어떻게 볼지는 소스의 성격에 따라 다르며, 이는 의도된 차이다.
+
+* **Drive** — 사용자가 파일을 하나씩 골라 붙인다. 고른 것은 보겠다는 뜻이므로
+  나머지를 `DOCUMENT_TEXT` 로 본다. 확장자가 없는 파일도 검사된다.
+* **GitHub · Local** — 저장소나 폴더를 통째로 훑는다. 코드·문서 확장자만 각각
+  `SOURCE_CODE`·`DOCUMENT_TEXT` 로 보고 나머지는 `UNKNOWN` 으로 두어, 이미지와
+  바이너리까지 분석하지 않는다.
 
 ## 읽을 수 있는 형식
 
