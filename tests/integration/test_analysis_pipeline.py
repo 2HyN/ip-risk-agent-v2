@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
@@ -472,6 +473,25 @@ def test_an_unexpected_failure_records_the_exception_class_not_its_message(caplo
     assert failure["failure_safe"] == "INTERNAL:UNEXPECTED_PIPELINE_FAILURE"
     assert failure["failure_reason"] == "_UnexpectedAnalyzerCrash"
     assert "secret value" not in json.dumps(failure)
+    # 클래스 이름만으로는 수만 줄에서 위치를 찾을 수 없다. 파일 이름과 줄 번호는
+    # 개발자가 쓴 것이고 사용자 값이 아니므로 함께 남긴다.
+    site = failure["failure_site"]
+    assert re.fullmatch(r"[A-Za-z0-9_.]+\.py:\d+", site), site
+    # 터진 곳은 이 시험 파일의 대역이지만, 위치는 **우리 코드**를 가리켜야 한다.
+    # 대역이나 라이브러리 안쪽 줄 번호는 원인을 좁히는 데 쓸모가 없다.
+    assert not site.startswith("test_"), site
+
+
+def test_the_failure_site_carries_no_message() -> None:
+    """메시지에는 문서 내용이나 파일 이름이 실릴 수 있다."""
+    from ip_risk_agent.composition.pipeline import failure_site
+
+    try:
+        raise ValueError("confidential document body")
+    except Exception as exc:  # noqa: BLE001 - 위치만 본다
+        site = failure_site(exc)
+    assert site is not None
+    assert "confidential" not in site
 
 
 def test_a_superseded_revision_stops_before_the_access_receipt() -> None:

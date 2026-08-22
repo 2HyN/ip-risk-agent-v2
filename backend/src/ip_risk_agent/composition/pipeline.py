@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -18,6 +19,28 @@ from ip_risk_agent.core.common import DomainInvariantError
 from .analyzer_completeness import AnalyzerCompletenessError
 
 logger = logging.getLogger(__name__)
+
+#: 우리 코드로 볼 경로 조각. 이 밖의 frame 은 라이브러리이므로 위치로 삼지 않는다.
+_OUR_PACKAGE = "ip_risk_agent"
+
+
+def failure_site(exc: BaseException) -> str | None:
+    """예외가 터진 **우리 코드**의 위치를 ``module.py:12`` 로 돌려준다.
+
+    예외 메시지와 인자는 사용자 값(문서 내용, 파일 이름, 토큰)을 담을 수 있어
+    남길 수 없다. 그래서 클래스 이름만 남겼는데, ``AttributeError`` 하나만 보고
+    수만 줄에서 위치를 찾는 것은 사실상 불가능했다.
+
+    파일 이름과 줄 번호는 우리가 쓴 코드이고 사용자 값이 아니다. 라이브러리
+    안쪽에서 터졌으면 그 호출부(우리 코드의 가장 안쪽 frame)를 준다 — 원인을
+    좁히는 데 쓸모 있는 것은 그쪽이다.
+    """
+    frames = traceback.extract_tb(exc.__traceback__)
+    ours = [frame for frame in frames if _OUR_PACKAGE in frame.filename.replace("\\", "/")]
+    chosen = (ours or frames)[-1] if (ours or frames) else None
+    if chosen is None:
+        return None
+    return f"{chosen.filename.replace(chr(92), '/').rsplit('/', 1)[-1]}:{chosen.lineno}"
 from .providers import ProviderRegistryError, SourceAdapterRegistry
 
 
@@ -211,10 +234,10 @@ class AnalysisPipeline:
                 await _cleanup(adapter, claim.source_change)
             return result
         except Exception as exc:
-            # 예외 **클래스 이름**만 남긴다. 메시지·인자·트레이스백은 값을 담을 수
-            # 있어 남기지 않는다. 이름만으로도 분류는 되짚을 수 있고, 그것이 없으면
-            # 배포에서 FAILED 만 보이고 원인을 좁힐 길이 없다 — 앞서
-            # CANONICAL_INTAKE_REJECTED 에서 같은 값을 치렀다.
+            # 예외 **클래스 이름과 터진 위치**만 남긴다. 메시지·인자·지역변수는
+            # 값을 담을 수 있어 남기지 않는다. 이름만으로도 분류는 되짚을 수
+            # 있고, 그것이 없으면 배포에서 FAILED 만 보이고 원인을 좁힐 길이
+            # 없다 — 앞서 CANONICAL_INTAKE_REJECTED 에서 같은 값을 치렀다.
             return await self._fail(
                 change_event_id,
                 claim.analysis_job_id,
@@ -222,6 +245,7 @@ class AnalysisPipeline:
                 safe_code="INTERNAL:UNEXPECTED_PIPELINE_FAILURE",
                 retryable=True,
                 reason=type(exc).__name__,
+                site=failure_site(exc),
             )
 
     async def _fail(
@@ -233,6 +257,7 @@ class AnalysisPipeline:
         safe_code: str,
         retryable: bool,
         reason: object = None,
+        site: str | None = None,
     ) -> PipelineResult:
         # 실패 코드는 canonical 기록에만 남아 있었다. 배포에서 화면은 FAILED 인데
         # 로그에는 아무것도 없어 분류를 되짚을 수 없었다. 코드는 개발자가 쓴
@@ -253,6 +278,9 @@ class AnalysisPipeline:
                         if isinstance(reason, str) and reason
                         else {}
                     ),
+                    # 우리 코드 어디서 터졌는지. 파일 이름과 줄 번호는 개발자가
+                    # 쓴 것이고 사용자 값이 아니다.
+                    **({"failure_site": site} if site else {}),
                 },
                 ensure_ascii=True,
                 separators=(",", ":"),
