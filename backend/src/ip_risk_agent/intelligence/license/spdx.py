@@ -16,10 +16,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# 정책 테이블과 대조할 때 쓰는 SPDX 데이터 기준. 바뀌면 policy_version 도 올린다.
-SPDX_SNAPSHOT_VERSION = "spdx-3.24-subset"
+from . import spdx_data
 
-_TOKEN = re.compile(r"\(|\)|[A-Za-z0-9.+\-]+")
+# 정책 테이블과 대조할 때 쓰는 SPDX 데이터 기준. 바뀌면 policy_version 도 올린다.
+SPDX_SNAPSHOT_VERSION = f"spdx-{spdx_data.SPDX_LIST_VERSION}"
+
+# ``:`` 는 ``DocumentRef-x:LicenseRef-y`` 하나를 위해 있다. SPDX 표현식에서 그 밖에
+# 쓰이지 않으므로 다른 토큰을 흐트러뜨리지 않는다.
+_TOKEN = re.compile(r"\(|\)|[A-Za-z0-9.+:\-]+")
 _OPERATORS = {"AND", "OR", "WITH"}
 
 # 자유 서술 라이선스 문자열 -> SPDX. 구체적인 것을 앞에 둔다.
@@ -68,18 +72,66 @@ _ID_ALIASES: dict[str, str] = {
     "zlib/libpng": "Zlib",
 }
 
-# 등록된 식별자의 정규 표기. 소문자 키로 찾는다.
-_CANONICAL: tuple[str, ...] = (
-    "0BSD", "AFL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later", "Apache-2.0",
-    "Artistic-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0",
-    "CDDL-1.0", "CDDL-1.1", "CPL-1.0", "EPL-1.0", "EPL-2.0", "EUPL-1.2",
-    "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later",
-    "ISC", "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0-only",
-    "LGPL-3.0-or-later", "MIT", "MPL-1.1", "MPL-2.0", "MS-PL", "MS-RL",
-    "NCSA", "OFL-1.1", "OSL-3.0", "PostgreSQL", "Python-2.0", "SSPL-1.0",
-    "Unlicense", "W3C", "WTFPL", "X11", "Zlib", "ZPL-2.1",
-)
+#: 등록된 식별자 전부. **어휘는 넓게, 판단은 좁게.**
+#:
+#: 예전에는 정책 표에 있는 42 개만 여기 있었고, 그래서 ``BUSL-1.1`` 처럼 **등록된 진짜
+#: 식별자가 저장 경계 이전에 ``UNKNOWN`` 으로 소거**됐다. 소거된 뒤에는 정책 표를 넓혀도
+#: 구제할 수 없다 — 원문이 어디에도 남지 않기 때문이다.
+#:
+#: 이제 어휘는 SPDX 전부이고, "어느 검토 등급인가" 만 :mod:`.policy` 가 따로 정한다.
+#: 정책 표에 없는 식별자는 등급이 ``UNKNOWN`` 이 되지만 **문자열은 살아남는다.**
+_CANONICAL: tuple[str, ...] = spdx_data.LICENSE_IDS
 _CANONICAL_BY_LOWER = {name.lower(): name for name in _CANONICAL}
+
+_EXCEPTION_BY_LOWER = {name.lower(): name for name in spdx_data.EXCEPTION_IDS}
+
+#: ``LicenseRef-Acme-Internal`` 처럼 SPDX 목록 밖을 가리키는 사용자 정의 참조.
+#: ``DocumentRef-x:LicenseRef-y`` 형태도 문법상 허용된다.
+_LICENSE_REF = re.compile(r"^(?:DocumentRef-[A-Za-z0-9.\-]+:)?LicenseRef-[A-Za-z0-9.\-]+$")
+
+#: SPDX 가 폐기한 표기를 현행 표기로 옮긴다. 값은 ``(식별자, 딸려 오는 예외)``.
+#:
+#: 폐기된 것도 등록된 식별자이므로 소거하지 않는다. 다만 그대로 두면 현행 표기를 쓰는 정책
+#: 표와 어긋나 조용히 ``UNKNOWN`` 등급이 되므로 옮긴다.
+#:
+#: **기계적으로 유도되는 것만 적었다.** ``Net-SNMP`` 와 ``Nunit`` 은 SPDX 가 대체 식별자를
+#: 주지 않아 비워 두었다 — 추측해서 옮기면 없는 판단을 만들어 낸다.
+_DEPRECATED_REPLACEMENT: dict[str, tuple[str, str | None]] = {
+    # 접미사가 빠진 옛 표기
+    "agpl-1.0": ("AGPL-1.0-only", None),
+    "agpl-3.0": ("AGPL-3.0-only", None),
+    "gfdl-1.1": ("GFDL-1.1-only", None),
+    "gfdl-1.2": ("GFDL-1.2-only", None),
+    "gfdl-1.3": ("GFDL-1.3-only", None),
+    "gpl-1.0": ("GPL-1.0-only", None),
+    "gpl-2.0": ("GPL-2.0-only", None),
+    "gpl-3.0": ("GPL-3.0-only", None),
+    "lgpl-2.0": ("LGPL-2.0-only", None),
+    "lgpl-2.1": ("LGPL-2.1-only", None),
+    "lgpl-3.0": ("LGPL-3.0-only", None),
+    # "+" 를 붙인 옛 표기. 그 자체가 등록된 폐기 식별자다.
+    "gpl-1.0+": ("GPL-1.0-or-later", None),
+    "gpl-2.0+": ("GPL-2.0-or-later", None),
+    "gpl-3.0+": ("GPL-3.0-or-later", None),
+    "lgpl-2.0+": ("LGPL-2.0-or-later", None),
+    "lgpl-2.1+": ("LGPL-2.1-or-later", None),
+    "lgpl-3.0+": ("LGPL-3.0-or-later", None),
+    # 예외를 이름 안에 품고 있던 합성 표기. 지금은 WITH 로 쓴다.
+    "gpl-2.0-with-gcc-exception": ("GPL-2.0-only", "GCC-exception-2.0"),
+    "gpl-2.0-with-autoconf-exception": ("GPL-2.0-only", "Autoconf-exception-2.0"),
+    "gpl-2.0-with-bison-exception": ("GPL-2.0-only", "Bison-exception-2.2"),
+    "gpl-2.0-with-classpath-exception": ("GPL-2.0-only", "Classpath-exception-2.0"),
+    "gpl-2.0-with-font-exception": ("GPL-2.0-only", "Font-exception-2.0"),
+    "gpl-3.0-with-gcc-exception": ("GPL-3.0-only", "GCC-exception-3.1"),
+    "gpl-3.0-with-autoconf-exception": ("GPL-3.0-only", "Autoconf-exception-3.0"),
+    "ecos-2.0": ("GPL-2.0-or-later", "eCos-exception-2.0"),
+    "wxwindows": ("LGPL-2.0-or-later", "WxWindows-exception-3.1"),
+    # 이름이 바뀐 것
+    "standardml-nj": ("SMLNJ", None),
+    "bzip2-1.0.5": ("bzip2-1.0.6", None),
+    "bsd-2-clause-netbsd": ("BSD-2-Clause", None),
+    "bsd-2-clause-freebsd": ("BSD-2-Clause-Views", None),
+}
 
 UNKNOWN_LICENSE = "UNKNOWN"
 
@@ -87,11 +139,38 @@ UNKNOWN_LICENSE = "UNKNOWN"
 _NON_STANDARD = frozenset({"", "non-standard", "unknown", "none", "other", "proprietary"})
 
 
-def canonicalize(identifier: str) -> str:
-    """단일 식별자를 등록된 표기로 되돌린다. 모르면 :data:`UNKNOWN_LICENSE`."""
+def canonicalize_exception(token: str) -> str | None:
+    """등록된 예외면 정규 표기를, 아니면 ``None``.
+
+    예외 식별자는 지금까지 아무 검증도 받지 않았다. 오타든 날조든 그대로 통과해
+    **맨 라이선스와 같은 판정**을 받았다. 완화 여부는 :mod:`.policy` 가 정하지만, 그 전에
+    "등록된 것인가" 를 여기서 가른다.
+    """
+    return _EXCEPTION_BY_LOWER.get(token.strip().lower())
+
+
+def _resolve(identifier: str) -> tuple[str, str | None]:
+    """식별자 하나를 ``(현행 표기, 딸려 오는 예외)`` 로 푼다.
+
+    폐기된 합성 표기(``GPL-2.0-with-classpath-exception``)가 예외를 품고 있으므로 둘을 함께
+    돌려준다. 예외를 버리면 그 표기가 맨 GPL 과 같아진다.
+    """
     raw = identifier.strip()
     if raw.lower() in _NON_STANDARD:
-        return UNKNOWN_LICENSE
+        return UNKNOWN_LICENSE, None
+
+    # ``LicenseRef-*`` 는 SPDX 문법이 인정하는 **사용자 정의 참조**다. 목록에 없다고
+    # 소거하면 "우리가 쓰는 사내 라이선스" 가 "모르는 라이선스" 와 구별되지 않는다.
+    # 표기만 맞추고 그대로 둔다. 등급은 정책 표에 없으므로 UNKNOWN 이 되고, 그것이
+    # 맞다 — 사내 라이선스의 의무는 우리가 알 수 없다.
+    if _LICENSE_REF.match(raw):
+        return raw, None
+
+    # 폐기 표기를 먼저 본다 — "GPL-2.0+" 처럼 그 자체가 등록된 폐기 식별자라
+    # 아래의 "+" 처리보다 앞서야 한다.
+    replaced = _DEPRECATED_REPLACEMENT.get(raw.lower())
+    if replaced is not None:
+        return replaced
 
     # "GPL-2.0+" 은 "-or-later" 의 옛 표기다.
     plus = raw.endswith("+")
@@ -103,10 +182,19 @@ def canonicalize(identifier: str) -> str:
         # "GPL-2.0" 처럼 접미사가 빠진 표기는 -only 로 본다. SPDX 권고와 같다.
         resolved = _CANONICAL_BY_LOWER.get(f"{low}-only")
     if resolved is None:
-        return UNKNOWN_LICENSE
+        return UNKNOWN_LICENSE, None
     if plus and resolved.endswith("-only"):
         resolved = resolved[: -len("-only")] + "-or-later"
-    return resolved
+    return resolved, None
+
+
+def canonicalize(identifier: str) -> str:
+    """단일 식별자를 등록된 표기로 되돌린다. 모르면 :data:`UNKNOWN_LICENSE`.
+
+    합성 폐기 표기가 품고 있던 예외는 여기서 사라진다. 예외까지 필요하면 표현식으로
+    파싱한다 — :func:`parse_expression` 이 :class:`LicenseNode` 에 함께 담는다.
+    """
+    return _resolve(identifier)[0]
 
 
 def from_free_text(text: str) -> str:
@@ -143,6 +231,18 @@ class LicenseNode:
     @property
     def is_unknown(self) -> bool:
         return self.identifier == UNKNOWN_LICENSE
+
+    @property
+    def exception_is_registered(self) -> bool:
+        """달린 예외가 SPDX 에 등록된 것인가.
+
+        등록되지 않은 예외도 문자열은 그대로 둔다 (원문 보존과 같은 이유다). 다만
+        :mod:`.policy` 는 이 값이 거짓이면 **어떤 완화도 주지 않는다.**
+        """
+        return (
+            self.exception is not None
+            and canonicalize_exception(self.exception) is not None
+        )
 
 
 @dataclass(frozen=True)
@@ -222,11 +322,13 @@ class _Parser:
         if token == ")" or token.upper() in _OPERATORS:
             raise SpdxParseError(f"unexpected token: {token!r}")
 
-        identifier = canonicalize(token)
-        exception: str | None = None
+        identifier, exception = _resolve(token)
         if (nxt := self._peek()) and nxt.upper() == "WITH":
             self._next()
-            exception = self._next()
+            written = self._next()
+            # 등록된 것이면 정규 표기로, 아니면 쓰인 그대로 둔다. 버리지 않는 이유는
+            # 원문이 남아야 목록이 넓어졌을 때 다시 볼 수 있기 때문이다.
+            exception = canonicalize_exception(written) or written
         return LicenseNode(identifier=identifier, exception=exception)
 
 
