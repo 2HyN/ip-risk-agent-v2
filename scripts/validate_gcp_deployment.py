@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
+import re
 import shlex
 import tomllib
 from pathlib import Path
@@ -49,11 +51,6 @@ SCHEDULER_ROUTES = (
     "/internal/scheduler/expired-state-cleanup",
     "/internal/scheduler/source-health-refresh",
 )
-RAG_SOURCE_IDS = {
-    "agpl-3.0-obligations",
-    "lgpl-2.1-obligations",
-    "permissive-notice",
-}
 COMMON_ENVIRONMENT = {
     "APP_ENV",
     "APP_ROLE",
@@ -281,17 +278,7 @@ def validate(root: Path = ROOT) -> list[str]:
 
     _validate_v2_namespace(deploy, cloud_run, errors)
 
-    rag_manifest = yaml.safe_load(
-        (root / "rag-corpus" / "manifest.yaml").read_text("utf-8")
-    )
-    rag_sources = rag_manifest.get("sources", [])
-    if (
-        rag_manifest.get("corpus_version") != "2026-08-14.1"
-        or {source.get("source_id") for source in rag_sources} != RAG_SOURCE_IDS
-        or len(rag_sources) != 3
-        or any(source.get("approved_for_rag") is not True for source in rag_sources)
-    ):
-        errors.append("RAG corpus must contain exactly the three approved v2 sources")
+    _validate_rag_corpus_manifest(root, errors)
 
     lifecycle = json.loads((deploy / "storage-lifecycle.json").read_text("utf-8"))
     rules = lifecycle.get("lifecycle", {}).get("rule", [])
@@ -611,6 +598,11 @@ def _validate_iam_contract(iam: dict, errors: list[str]) -> None:
     for name, permission in (
         ("versionManager", "secretmanager.versions.add"),
         ("accessor", "secretmanager.versions.access"),
+        # workspace 삭제가 자격증명 secret 을 지운다. 이 권한이 없으면 지우기가
+        # 권한 거부로 실패하고, eraser 가 그 실패를 올려 workspace 가 DELETING 에
+        # 머문 채 영원히 재시도된다. create 와 달리 삭제는 존재하는 secret resource
+        # 에 평가되므로 prefix condition 이 실제로 걸린다.
+        ("deleter", "secretmanager.secrets.delete"),
     ):
         entry = dynamic.get(name, {})
         if entry.get("conditionPrefix") != expected_prefix:
@@ -634,6 +626,85 @@ def _condition_resource(expression: object) -> str | None:
     if not expression.startswith(prefix) or not expression.endswith('"'):
         return None
     return expression[len(prefix) : -1]
+
+
+_CORPUS_VERSION_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
+
+
+def _corpus_checksum(text: str) -> str:
+    """``intelligence.rag.ingestion.checksum`` 과 같은 규칙.
+
+    수집이 본문을 ``strip()`` 한 뒤 지문을 내므로 여기서도 그렇게 한다. 두 규칙이
+    어긋나면 배포 검증은 통과하는데 수집이 거부한다.
+    """
+    return "sha256:" + hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+
+
+def _validate_rag_corpus_manifest(root: Path, errors: list[str]) -> None:
+    """corpus 에 **검토된 자료만** 들어 있는지 확인한다.
+
+    예전에는 "source_id 세 개가 정확히 이것이고 corpus_version 이 이 문자열" 로
+    확인했다. 의도는 옳았지만 — 아무도 검토하지 않은 문서가 RAG 로 가면 안 된다 —
+    수단이 **문서를 하나도 더할 수 없게** 만들었다. corpus 를 넓히는 것이 계획에
+    들어 있으므로 목록을 고정하는 대신 **자료마다 성질을 확인한다.**
+
+    그중 지문 대조가 가장 세다. 예전 검사는 파일 내용을 한 번도 보지 않았으므로
+    manifest 에 적힌 세 이름만 맞으면 본문이 무엇으로 바뀌었든 통과했다. 지금은
+    manifest 가 가리키는 것과 디스크에 있는 것이 같아야 한다 — 수집이 실제로
+    거부하는 조건과 같은 조건을 배포 전에 본다.
+    """
+    manifest_path = root / "rag-corpus" / "manifest.yaml"
+    if not manifest_path.is_file():
+        errors.append("rag-corpus/manifest.yaml is missing")
+        return
+
+    document = yaml.safe_load(manifest_path.read_text("utf-8")) or {}
+    version = document.get("corpus_version")
+    if not isinstance(version, str) or not _CORPUS_VERSION_PATTERN.match(version):
+        errors.append(
+            "RAG corpus_version must look like YYYY-MM-DD.N, got %r" % (version,)
+        )
+
+    sources = document.get("sources") or []
+    if not sources:
+        errors.append("RAG corpus declares no sources")
+        return
+
+    corpus_root = (root / "rag-corpus").resolve()
+    seen: set[str] = set()
+    for source in sources:
+        source_id = source.get("source_id")
+        if not isinstance(source_id, str) or not source_id:
+            errors.append("RAG corpus source is missing a source_id")
+            continue
+        if source_id in seen:
+            errors.append(f"RAG corpus source_id is duplicated: {source_id}")
+        seen.add(source_id)
+
+        # 검토를 거치지 않은 자료는 들어오지 못한다. 이것이 원래 검사의 핵심이고
+        # 그대로 남는다.
+        if source.get("approved_for_rag") is not True:
+            errors.append(f"RAG corpus source is not approved: {source_id}")
+
+        relative = source.get("path")
+        if not isinstance(relative, str) or not relative:
+            errors.append(f"RAG corpus source has no path: {source_id}")
+            continue
+        target = (corpus_root / relative).resolve()
+        if not target.is_relative_to(corpus_root):
+            errors.append(f"RAG corpus source escapes rag-corpus/: {source_id}")
+            continue
+        if not target.is_file():
+            errors.append(f"RAG corpus source file is missing: {relative}")
+            continue
+
+        declared = source.get("checksum")
+        actual = _corpus_checksum(target.read_text(encoding="utf-8"))
+        if declared != actual:
+            errors.append(
+                f"RAG corpus checksum mismatch for {source_id}: "
+                f"manifest says {declared}, file is {actual}"
+            )
 
 
 def _validate_rag_subject_coverage(root: Path, errors: list[str]) -> None:

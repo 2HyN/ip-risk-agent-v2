@@ -87,6 +87,13 @@ dynamicCredentialPermissions:
     conditionExpression: resource.name.startsWith("projects/555102774494/secrets/iprisk-v2-cred-")
     permissions:
       - secretmanager.versions.access
+  deleter:
+    members:
+      - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+    conditionPrefix: projects/555102774494/secrets/iprisk-v2-cred-
+    conditionExpression: resource.name.startsWith("projects/555102774494/secrets/iprisk-v2-cred-")
+    permissions:
+      - secretmanager.secrets.delete
   disable:
     members: []
     permissions: []

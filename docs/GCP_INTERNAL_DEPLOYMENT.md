@@ -145,9 +145,19 @@ source fetch 중 access와 refresh 시 add를 사용한다. 현재 runtime 경�
 >
 > `secrets.create` 와 달리 삭제는 존재하는 secret resource 에 대해 평가되므로 위 문단이
 > 말한 prefix 조건의 한계가 적용되지 않는다 — `iprisk-v2-cred-` prefix condition 을 실제로
-> 걸 수 있다. 실제 IAM 에 무엇이 붙어 있는지 먼저 확인한 뒤, 없으면 이 문서의 표와 custom
-> role 을 함께 고치고 **자격증명이 붙은 workspace 를 실제로 지워** 끝나는지 확인한다.
-> `docs/DEVELOPMENT_SPEC.md` §9.4 · 결함 23.
+> 걸 수 있다. `docs/DEVELOPMENT_SPEC.md` §9.4 · 결함 23.
+>
+> **[진행] 계약에는 `deleter` 를 넣었다** — `dynamicCredentialPermissions.deleter`, API SA
+> 하나에 `secretmanager.secrets.delete` 를 같은 prefix 조건으로. worker 는 넣지 않았다:
+> 삭제 경로가 `api/workspaces/router.py:314` 하나뿐이라 worker 는 이 길을 타지 않는다
+> (`creator` 와 같은 모양이다). `scripts/validate_gcp_deployment.py` 도 이 항목을 기대하도록
+> 함께 고쳤다.
+>
+> **아직 끝나지 않았다.** 이 검증기는 **계약 파일만** 읽는다. 실제 IAM 정책은 보지 않으므로
+> 계약을 고쳤다고 운영이 고쳐지지 않는다. 남은 것 셋 —
+> ① 실제 정책에 이 binding 이 있는지 `gcloud projects get-iam-policy` 로 확인,
+> ② 없으면 조건부 binding 을 실제로 부여,
+> ③ **자격증명이 붙은 workspace 를 실제로 지워** `DELETING` 에서 벗어나는지 확인.
 
 중요한 IAM 한계가 있다. `secretmanager.secrets.create`는 새 secret이 아니라 project parent에
 대해 평가되므로 IAM resource-name condition으로 미래의 `iprisk-v2-cred-*` ID만 생성하도록
