@@ -45,8 +45,18 @@ def complete_analysis_job(
     )
 
 
-def requeue_analysis_job(job: AnalysisJob) -> AnalysisJob:
-    if job.status is not AnalysisJobStatus.FAILED:
+def requeue_analysis_job(
+    job: AnalysisJob, *, allow_inconclusive: bool = False
+) -> AnalysisJob:
+    """FAILED 작업을 다시 줄 세운다.
+
+    ``allow_inconclusive`` 는 미결 실행의 재개용이다. INCONCLUSIVE 는
+    "권위 있는 결론이 없다"는 뜻이므로 다시 돌려도 사실이 뒤집히지 않는다.
+    """
+    allowed = {AnalysisJobStatus.FAILED}
+    if allow_inconclusive:
+        allowed.add(AnalysisJobStatus.INCONCLUSIVE)
+    if job.status not in allowed:
         raise DomainInvariantError("only a FAILED analysis job may be requeued")
     return replace(
         job,

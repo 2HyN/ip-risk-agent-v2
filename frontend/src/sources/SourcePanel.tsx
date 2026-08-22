@@ -226,7 +226,7 @@ export function SourcePanel({ apiBaseUrl = "" }: SourcePanelProps) {
 
       <p>
         <button type="button" onClick={() => void retryFailed()} disabled={retryBusy}>
-          {retryBusy ? "다시 시작하는 중…" : "실패한 분석 다시 실행"}
+          {retryBusy ? "다시 시작하는 중…" : "실패·미결 분석 다시 실행"}
         </button>
         {retryMessage && <span> {retryMessage}</span>}
       </p>

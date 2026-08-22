@@ -20,7 +20,10 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from ip_risk_agent.application.analysis_jobs.models import AnalysisJobStatus
+from ip_risk_agent.application.analysis_jobs.transitions import requeue_analysis_job
 from ip_risk_agent.application.process_change.models import ChangeEventStatus
+from ip_risk_agent.application.process_change.transitions import requeue_change_event
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,7 @@ def create_retry_failed_router(
     change_sink,
     authz_dependency,
     fail_analysis=None,
+    task_enqueuer=None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -99,6 +103,48 @@ def create_retry_failed_router(
                 )
                 continue
             requeued += 1
+
+        # 미결(INCONCLUSIVE) 실행도 되살린다. 내용을 읽지 못한 채(예: mime
+        # 오분류로 미지원 처리) 끝난 분석이 여기 남는다 — 이벤트는 DONE 이라
+        # 재선택의 중복 판정(DUPLICATE_DONE)이 재큐잉하지 않으므로, 수집
+        # 결함을 고쳐 배포해도 이 버튼 없이는 영영 다시 돌지 않는다.
+        # SUCCEEDED(권위 있는 결론)는 건드리지 않는다.
+        if task_enqueuer is not None:
+            revived: list[str] = []
+            async with unit_of_work_factory() as uow:
+                for event in await uow.change_events.list_for_workspace(vws_id):
+                    if event.status is not ChangeEventStatus.DONE:
+                        continue
+                    jobs = await uow.analysis_jobs.list_for_change(event.id)
+                    if len(jobs) != 1 or jobs[0].status is not (
+                        AnalysisJobStatus.INCONCLUSIVE
+                    ):
+                        continue
+                    if await change_relay.resolve(event.id) is None:
+                        expired += 1
+                        continue
+                    await uow.change_events.save(
+                        requeue_change_event(
+                            event,
+                            occurred_at=datetime.now(UTC),
+                            allow_done=True,
+                        )
+                    )
+                    await uow.analysis_jobs.save(
+                        requeue_analysis_job(jobs[0], allow_inconclusive=True)
+                    )
+                    revived.append(event.id)
+                await uow.commit()
+            for event_id in revived:
+                try:
+                    await task_enqueuer.enqueue_change(event_id)
+                except Exception:
+                    # 상태는 PENDING 으로 돌아가 있으므로 다음 버튼이 줍는다.
+                    logger.exception(
+                        "retry-failed: enqueue failed (event=%s)", event_id
+                    )
+                    continue
+                requeued += 1
 
         return RetryFailedResponse(requeued=requeued, expired=expired)
 

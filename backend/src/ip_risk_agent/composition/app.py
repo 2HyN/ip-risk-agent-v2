@@ -299,6 +299,7 @@ def _mount_source_routers(
                 facade.authorize_vws_action, PublicVwsAction.SOURCE_MOUNT
             ),
             fail_analysis=facade.fail_analysis,
+            task_enqueuer=container.task_enqueuer,
         )
     )
 

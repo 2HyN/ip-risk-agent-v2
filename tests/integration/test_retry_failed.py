@@ -197,3 +197,162 @@ def test_recent_processing_is_left_running() -> None:
     assert failed_calls == []
     assert body == {"requeued": 0, "expired": 0}
     assert sink.persisted == []
+
+
+def _real_event(event_id: str, status: ChangeEventStatus):
+    from iprisk_contracts.common import ChangeType, SourceType
+
+    from ip_risk_agent.application.process_change.models import ChangeEvent
+
+    return ChangeEvent(
+        id=event_id,
+        event_fingerprint=f"fp-{event_id}",
+        risk_workspace_id="vws-1",
+        mount_id="mount-1",
+        source_workspace_id="sws-1",
+        source_artifact_id=f"src-{event_id}",
+        source_type=SourceType.GOOGLE_DRIVE,
+        change_type=ChangeType.CREATE,
+        revision="r1",
+        previous_revision=None,
+        observed_at=NOW,
+        status=status,
+        attempts=1,
+        created_at=NOW,
+        updated_at=NOW,
+        artifact_id=f"art-{event_id}",
+    )
+
+
+def _real_job(event_id: str, status):
+    from iprisk_contracts.common import AnalysisType
+
+    from ip_risk_agent.application.analysis_jobs.models import AnalysisJob
+
+    return AnalysisJob(
+        id=f"job-{event_id}",
+        change_event_id=event_id,
+        artifact_id=f"art-{event_id}",
+        revision="r1",
+        requested_analysis_types=(AnalysisType.PATENT,),
+        status=status,
+        created_at=NOW,
+        # 종결 상태(SUCCEEDED/INCONCLUSIVE)는 시작·완료 시각을 요구한다.
+        started_at=NOW,
+        completed_at=NOW,
+    )
+
+
+class StatefulUow:
+    """save 를 실제로 반영하는 uow 대역."""
+
+    def __init__(self, events, jobs_by_event):
+        self._events = {e.id: e for e in events}
+        self._jobs = dict(jobs_by_event)
+        self.change_events = self
+        self.analysis_jobs = self
+
+    async def list_for_workspace(self, risk_workspace_id):
+        return tuple(self._events.values())
+
+    async def list_for_change(self, change_event_id):
+        return tuple(self._jobs.get(change_event_id, ()))
+
+    async def save(self, record):
+        # ChangeEvent 와 AnalysisJob 을 한 대역이 받는다. id 모양으로 구분.
+        if hasattr(record, "event_fingerprint"):
+            self._events[record.id] = record
+        else:
+            self._jobs[record.change_event_id] = (record,)
+
+    async def commit(self):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class RecordingEnqueuer:
+    def __init__(self):
+        self.enqueued: list[str] = []
+
+    async def enqueue_change(self, change_event_id: str) -> None:
+        self.enqueued.append(change_event_id)
+
+
+def build_inconclusive_client(events, jobs_by_event, relay, enqueuer):
+    async def authz(request, resource_id: str) -> None:
+        pass
+
+    async def fail_analysis(change_event_id: str, *, failure_safe: str) -> None:
+        pass
+
+    uow = StatefulUow(events, jobs_by_event)
+    app = FastAPI()
+    app.include_router(
+        create_retry_failed_router(
+            unit_of_work_factory=lambda: uow,
+            change_relay=relay,
+            change_sink=FakeSink(),
+            authz_dependency=authz,
+            fail_analysis=fail_analysis,
+            task_enqueuer=enqueuer,
+        )
+    )
+    return TestClient(app), uow
+
+
+def test_inconclusive_executions_are_revived_but_succeeded_are_not() -> None:
+    """미결은 권위 있는 결론이 아니다 — 수집 결함을 고친 뒤 다시 돌 수
+    있어야 한다. 진짜 성공은 건드리면 사실이 뒤집힌다."""
+    from ip_risk_agent.application.analysis_jobs.models import AnalysisJobStatus
+    from ip_risk_agent.application.process_change.models import (
+        ChangeEventStatus as CES,
+    )
+
+    events = [
+        _real_event("evt-incl", CES.DONE),
+        _real_event("evt-good", CES.DONE),
+    ]
+    jobs = {
+        "evt-incl": (_real_job("evt-incl", AnalysisJobStatus.INCONCLUSIVE),),
+        "evt-good": (_real_job("evt-good", AnalysisJobStatus.SUCCEEDED),),
+    }
+    enqueuer = RecordingEnqueuer()
+    client, uow = build_inconclusive_client(
+        events, jobs, FakeRelay({"evt-incl": "change-i", "evt-good": "change-g"}), enqueuer
+    )
+
+    body = client.post("/api/v1/workspaces/vws-1/analyses/retry-failed").json()
+
+    assert body["requeued"] == 1
+    assert enqueuer.enqueued == ["evt-incl"]
+    assert uow._events["evt-incl"].status.value == "PENDING"
+    assert uow._jobs["evt-incl"][0].status is AnalysisJobStatus.QUEUED
+    # 성공한 실행은 그대로다.
+    assert uow._events["evt-good"].status.value == "DONE"
+
+
+def test_inconclusive_without_relay_counts_as_expired() -> None:
+    from ip_risk_agent.application.analysis_jobs.models import AnalysisJobStatus
+    from ip_risk_agent.application.process_change.models import (
+        ChangeEventStatus as CES,
+    )
+
+    enqueuer = RecordingEnqueuer()
+    client, uow = build_inconclusive_client(
+        [_real_event("evt-old", CES.DONE)],
+        {"evt-old": (_real_job("evt-old", AnalysisJobStatus.INCONCLUSIVE),)},
+        FakeRelay(),
+        enqueuer,
+    )
+
+    body = client.post("/api/v1/workspaces/vws-1/analyses/retry-failed").json()
+
+    assert body == {"requeued": 0, "expired": 1}
+    assert enqueuer.enqueued == []
+    # 원본을 못 구하면 상태도 건드리지 않는다.
+    assert uow._events["evt-old"].status.value == "DONE"
