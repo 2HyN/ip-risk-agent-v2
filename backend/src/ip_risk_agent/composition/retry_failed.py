@@ -110,7 +110,11 @@ def create_retry_failed_router(
         # 결함을 고쳐 배포해도 이 버튼 없이는 영영 다시 돌지 않는다.
         # SUCCEEDED(권위 있는 결론)는 건드리지 않는다.
         if task_enqueuer is not None:
-            revived: list[str] = []
+            # 후보를 먼저 모으고, **이벤트마다 독립된 uow** 로 되살린다.
+            # 한 uow 에 몰아넣으면 레코드 하나의 충돌이 전체를 409 로
+            # 만들어, 어떤 이벤트가 문제인지도 모른 채 아무것도 되살아나지
+            # 않는다 — 실제로 그렇게 됐다.
+            candidates: list[str] = []
             async with unit_of_work_factory() as uow:
                 for event in await uow.change_events.list_for_workspace(vws_id):
                     if event.status is not ChangeEventStatus.DONE:
@@ -120,22 +124,44 @@ def create_retry_failed_router(
                         AnalysisJobStatus.INCONCLUSIVE
                     ):
                         continue
-                    if await change_relay.resolve(event.id) is None:
-                        expired += 1
-                        continue
-                    await uow.change_events.save(
-                        requeue_change_event(
-                            event,
-                            occurred_at=datetime.now(UTC),
-                            allow_done=True,
+                    candidates.append(event.id)
+
+            for event_id in candidates:
+                if await change_relay.resolve(event_id) is None:
+                    expired += 1
+                    continue
+                try:
+                    async with unit_of_work_factory() as uow:
+                        event = await uow.change_events.get(event_id)
+                        jobs = await uow.analysis_jobs.list_for_change(event_id)
+                        if (
+                            event is None
+                            or event.status is not ChangeEventStatus.DONE
+                            or len(jobs) != 1
+                            or jobs[0].status
+                            is not AnalysisJobStatus.INCONCLUSIVE
+                        ):
+                            continue  # 그 사이 상태가 바뀌었다.
+                        await uow.change_events.save(
+                            requeue_change_event(
+                                event,
+                                occurred_at=datetime.now(UTC),
+                                allow_done=True,
+                            )
                         )
+                        await uow.analysis_jobs.save(
+                            requeue_analysis_job(
+                                jobs[0], allow_inconclusive=True
+                            )
+                        )
+                        await uow.commit()
+                except Exception:
+                    # 이 이벤트만 잃는다. 원인은 로그에 남아 다음 결함
+                    # 제거의 단서가 된다.
+                    logger.exception(
+                        "retry-failed: revive failed (event=%s)", event_id
                     )
-                    await uow.analysis_jobs.save(
-                        requeue_analysis_job(jobs[0], allow_inconclusive=True)
-                    )
-                    revived.append(event.id)
-                await uow.commit()
-            for event_id in revived:
+                    continue
                 try:
                     await task_enqueuer.enqueue_change(event_id)
                 except Exception:

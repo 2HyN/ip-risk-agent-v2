@@ -255,6 +255,9 @@ class StatefulUow:
     async def list_for_workspace(self, risk_workspace_id):
         return tuple(self._events.values())
 
+    async def get(self, change_event_id):
+        return self._events.get(change_event_id)
+
     async def list_for_change(self, change_event_id):
         return tuple(self._jobs.get(change_event_id, ()))
 
