@@ -296,6 +296,7 @@ class PatentAnalyzer:
                     CachedExtraction(
                         payload=extraction.model_dump(mode="json"),
                         stored_at=datetime.now(timezone.utc),
+                        risk_workspace_id=artifact.risk_workspace_id,
                     ),
                 )
             )

@@ -3,9 +3,13 @@
 프로세스 안에만 두면 재분석 때마다 다시 받아온다. 아끼려는 호출이 바로 그것이므로
 프로세스 밖에 남겨야 한다.
 
-여기 담기는 것은 **공개된 특허 문헌**이지 사용자 원문이 아니다. 근거로 이미
-청구항 일부를 저장하고 있고, 이 캐시는 그 출처를 다시 부르지 않기 위한 것이다.
-사용자 문서는 어떤 경우에도 들어가지 않는다.
+검색·상세 캐시에 담기는 것은 **공개된 특허 문헌**이지 사용자 원문이 아니다.
+근거로 이미 청구항 일부를 저장하고 있고, 이 캐시는 그 출처를 다시 부르지 않기
+위한 것이다. 사용자 문서 원문은 어떤 경우에도 들어가지 않는다.
+
+추출 캐시는 다르다. 기술 요소와 검색어는 **사용자 문서에서 파생된 값**이다.
+그래서 그 문서가 속한 workspace 를 함께 적어 두고, workspace 삭제 때 지운다
+(``gcp/operational_eraser.py`` 의 ``OPERATIONAL_COLLECTIONS``).
 """
 
 from __future__ import annotations
@@ -13,11 +17,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 
-from ip_risk_agent.intelligence.patent.cache import CachedDocument, CachedSearch
+from ip_risk_agent.intelligence.patent.cache import (
+    CachedDocument,
+    CachedExtraction,
+    CachedSearch,
+)
 from ip_risk_agent.intelligence.patent.kipris import PatentDocument, PatentSearchHit
 
 SEARCH_COLLECTION = "intelligence_patent_search_cache"
 DOCUMENT_COLLECTION = "intelligence_patent_document_cache"
+EXTRACTION_COLLECTION = "intelligence_patent_extraction_cache"
 
 _SCHEMA_VERSION = 1
 
@@ -106,6 +115,35 @@ class FirestorePatentResponseCache:
             },
         )
 
+    # ------------------------------------------------------------ 추출
+
+    async def get_extraction(self, key: str) -> CachedExtraction | None:
+        data = await self._get(EXTRACTION_COLLECTION, _document_id(key))
+        if data is None:
+            return None
+        payload = data.get("payload")
+        if not isinstance(payload, dict):
+            # 모양이 아니면 캐시를 믿지 않는다. 다시 뽑으면 그만이다.
+            return None
+        return CachedExtraction(
+            payload=payload,
+            stored_at=_stored_at(data),
+            risk_workspace_id=str(data.get("risk_workspace_id", "")),
+        )
+
+    async def put_extraction(self, key: str, value: CachedExtraction) -> None:
+        await self._put(
+            EXTRACTION_COLLECTION,
+            _document_id(key),
+            {
+                "payload": dict(value.payload),
+                "stored_at": value.stored_at,
+                # workspace 삭제가 이 문서를 찾을 수 있는 유일한 실마리다.
+                # 키는 문서 내용 체크섬이라 그것만으로는 알 수 없다.
+                "risk_workspace_id": value.risk_workspace_id,
+            },
+        )
+
     # ------------------------------------------------------------ 내부
 
     async def _get(self, collection: str, document_id: str) -> dict | None:
@@ -134,6 +172,7 @@ def _stored_at(data: dict) -> datetime:
 
 __all__ = [
     "DOCUMENT_COLLECTION",
+    "EXTRACTION_COLLECTION",
     "FirestorePatentResponseCache",
     "SEARCH_COLLECTION",
 ]

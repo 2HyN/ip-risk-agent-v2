@@ -40,6 +40,10 @@ OPERATIONAL_COLLECTIONS = (
     "source_operational_device_challenges",
     "source_operational_device_credentials",
     "source_operational_oauth_states",
+    # 추출 캐시에는 문서에서 뽑은 기술 요소와 검색어가 들어 있다. 원문은 아니지만
+    # 원문에서 나온 값이라 workspace 와 함께 사라져야 한다. 특허 검색·상세 캐시는
+    # 공개 문헌이므로 남긴다.
+    "intelligence_patent_extraction_cache",
 )
 
 

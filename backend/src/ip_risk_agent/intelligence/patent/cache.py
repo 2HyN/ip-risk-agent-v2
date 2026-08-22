@@ -84,8 +84,17 @@ class CachedSearch:
 
 @dataclass(frozen=True, slots=True)
 class CachedExtraction:
+    """추출 결과. **사용자 문서에서 파생된 값**을 담는다.
+
+    기술 요소와 검색어는 원문 자체는 아니지만 원문에서 나온 것이다. 검색·상세
+    캐시가 공개 특허 문헌만 담는 것과 다르다. 그래서 어느 workspace 의 문서에서
+    나왔는지를 함께 들고 다닌다 — workspace 삭제가 전체 말소이므로 지울 대상을
+    특정할 수 있어야 한다. 키는 문서 내용 체크섬이라 그것만으로는 알 수 없다.
+    """
+
     payload: dict
     stored_at: datetime
+    risk_workspace_id: str
 
 
 @dataclass(frozen=True, slots=True)
