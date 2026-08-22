@@ -19,6 +19,23 @@ def source_segment_id(segment_id: str) -> str:
     return f"src:{segment_id}"
 
 
+def source_reference(logical_path: str) -> str:
+    """artifact 의 canonical logical path 를 근거 참조 표기로 바꾼다.
+
+    Security Gate 는 canonical logical path 를 ``/{mount alias}/{...}`` 로 만든다
+    (``_canonical_logical_path``). 앞의 ``/`` 는 workspace 안에서의 뿌리를 뜻하는
+    내부 표기일 뿐 파일시스템 경로가 아니다.
+
+    반면 증거 보존 정책은 ``/`` 로 시작하는 참조를 로컬 절대경로 유출로 보고
+    거부한다 (``sanitize_reference``). 두 규칙은 각각 옳고 이음매에서만 어긋나므로,
+    참조에는 canonical artifact 레코드와 같은 상대 표기를 쓴다.
+    """
+    reference = logical_path.strip().lstrip("/")
+    if not reference:
+        raise ValueError("artifact logical path did not yield an evidence reference")
+    return reference
+
+
 def patent_claim_id(application_number: str, claim_number: int) -> str:
     return f"patent:{application_number}:claim:{claim_number}"
 

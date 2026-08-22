@@ -50,7 +50,10 @@ DOC = (
 
 
 def patent_artifact(text: str = DOC, **kwargs):
-    kwargs.setdefault("logical_path", "docs/plan.md")
+    # Security Gate 가 실제로 넘기는 형태다. canonical logical path 는 앞에 `/` 가
+    # 붙는다 (`_canonical_logical_path`). 예전 fixture 는 이 `/` 가 없어서
+    # 근거 참조가 보존 정책에 걸리는 결함을 통과시켰다.
+    kwargs.setdefault("logical_path", "/Google Drive user@example.com/docs/plan.md")
     kwargs.setdefault("kind", ArtifactKind.DOCUMENT_TEXT)
     kwargs.setdefault("analyzers", [AnalysisType.PATENT])
     return make_artifact(text, **kwargs)
@@ -260,6 +263,39 @@ def test_matched_candidate_carries_verified_evidence():
     for candidate in result.candidates:
         assert set(candidate.evidence_ids) <= known
         assert candidate.matched_elements
+
+
+def test_every_evidence_reference_survives_the_retention_policy():
+    """분석기가 만든 근거 참조는 canonical 수용을 통과해야 한다.
+
+    이 둘은 서로 다른 plane 에 있고 각각은 옳았다. Security Gate 는 logical path 를
+    `/` 로 시작하는 canonical 형태로 만들고, 보존 정책은 `/` 로 시작하는 참조를
+    로컬 절대경로 유출로 보고 거부한다. 이음매를 아무도 시험하지 않아서 특허 Risk 가
+    한 건도 만들어지지 않았다. 그 이음매를 여기서 고정한다.
+    """
+    from ip_risk_agent.application.risk_reconcile.retention import (
+        EvidenceRetentionPolicy,
+        sanitize_reference,
+    )
+
+    analyzer = make_analyzer([extraction(), comparison(PATENT_A), comparison(PATENT_B)])
+    result = run(analyzer.analyze(patent_artifact()))
+    assert result.candidates, "이음매를 확인하려면 후보가 있어야 한다"
+
+    policy = EvidenceRetentionPolicy()
+    referenced = {
+        evidence_id
+        for candidate in result.candidates
+        for evidence_id in candidate.evidence_ids
+    }
+    assert referenced, "후보가 근거를 참조해야 한다"
+    checked = 0
+    for evidence in result.evidence:
+        if evidence.evidence_id not in referenced:
+            continue
+        sanitize_reference(evidence.reference, policy)
+        checked += 1
+    assert checked == len(referenced)
 
 
 def test_hallucinated_comparison_drops_the_candidate_and_lowers_coverage():

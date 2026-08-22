@@ -26,7 +26,7 @@ from iprisk_contracts.common import (
 
 from ..common.analyzer import ResultBuilder
 from ..common.errors import MalformedProviderOutputError, ProviderFailureError
-from ..common.evidence import source_segment_id
+from ..common.evidence import source_reference, source_segment_id
 from ..common.validation import validate_artifact
 from ..gemini.client import PromptLibrary, StructuredModelClient
 from ..gemini.schemas import PatentComparison
@@ -142,7 +142,7 @@ class PatentAnalyzer:
                 source_segment_id(segment.segment_id),
                 EvidenceType.SOURCE_EXCERPT,
                 segment.text,
-                artifact.logical_path,
+                source_reference(artifact.logical_path),
                 {"segment_kind": segment.segment_kind.value},
             )
 
