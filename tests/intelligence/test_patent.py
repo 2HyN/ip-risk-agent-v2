@@ -531,3 +531,75 @@ def test_kipris_detail_includes_claims_not_only_the_abstract():
         await client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_a_transient_timeout_is_retried_once_and_recovers():
+    """검색 다섯 건이 한꺼번에 타임아웃해 분석 전체가 실패한 적이 있다.
+
+    개별 요청의 결함이 아니라 그 시점 provider 가 느렸던 것이므로, GET 한 번은
+    다시 걸어본다.
+    """
+    import httpx
+
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    body = (
+        b"<response><header><resultCode>00</resultCode>"
+        b"<resultMsg>NORMAL SERVICE.</resultMsg></header><body><items>"
+        b"<item><applicationNumber>1020080080388</applicationNumber>"
+        b"<inventionTitle>test</inventionTitle></item>"
+        b"</items></body></response>"
+    )
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, content=body)
+
+    client = KiprisClient(
+        "unused-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        retry_backoff_seconds=0.0,
+    )
+
+    async def scenario():
+        hits = await client.search("음성")
+        assert [hit.application_number for hit in hits] == ["1020080080388"]
+        assert len(calls) == 2
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_an_auth_failure_is_not_retried():
+    """다시 걸어도 같은 답이 오고, 호출량만 쓴다."""
+    import httpx
+
+    from ip_risk_agent.intelligence.common.errors import (
+        FailureCategory,
+        ProviderFailureError,
+    )
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(401, content=b"<response/>")
+
+    client = KiprisClient(
+        "unused-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        retry_backoff_seconds=0.0,
+    )
+
+    async def scenario():
+        with pytest.raises(ProviderFailureError) as failure:
+            await client.search("음성")
+        assert failure.value.category is FailureCategory.AUTH
+        assert len(calls) == 1
+        await client.aclose()
+
+    asyncio.run(scenario())

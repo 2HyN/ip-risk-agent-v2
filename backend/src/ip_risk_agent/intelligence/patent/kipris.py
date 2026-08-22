@@ -38,6 +38,17 @@ SUCCESS_RESULT_CODE = "00"
 PROVIDER = "KIPRIS"
 _TIMEOUT_SECONDS = 20.0
 
+# 검색 다섯 건이 한꺼번에 타임아웃해 분석 전체가 실패한 적이 있다. 개별 요청의
+# 문제가 아니라 그 시점 KIPRIS 가 느렸던 것이므로 짧게 한 번 더 시도한다.
+# GET 이라 재시도가 안전하다. 최악 지연은 두 배가 되지만 (검색 120s + 대조)
+# worker 요청 예산 300 초 안에 든다.
+_RETRY_ATTEMPTS = 2
+_RETRY_BACKOFF_SECONDS = 1.0
+
+# 다시 걸어볼 값어치가 있는 것만 재시도한다. 인증 실패는 다시 해도 같고,
+# 호출량 초과는 재시도가 상황을 악화시킨다.
+_RETRYABLE_CATEGORIES = frozenset({FailureCategory.TIMEOUT, FailureCategory.UNAVAILABLE})
+
 # 출원번호는 하이픈 유무가 응답마다 다르다. 숫자만 남겨 하나로 본다.
 _DIGITS = re.compile(r"\D+")
 
@@ -134,9 +145,13 @@ class KiprisClient:
         base_url: str = BASE_URL,
         timeout_seconds: float = _TIMEOUT_SECONDS,
         max_concurrency: int = 2,
+        retry_attempts: int = _RETRY_ATTEMPTS,
+        retry_backoff_seconds: float = _RETRY_BACKOFF_SECONDS,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._access_key = access_key
+        self._retry_attempts = max(1, retry_attempts)
+        self._retry_backoff_seconds = retry_backoff_seconds
         self._base_url = base_url.rstrip("/")
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
@@ -227,6 +242,20 @@ class KiprisClient:
     # ------------------------------------------------------------ 내부
 
     async def _get(self, path: str, params: dict[str, str]) -> Element:
+        for attempt in range(1, self._retry_attempts + 1):
+            try:
+                return await self._get_once(path, params)
+            except ProviderFailureError as exc:
+                last = exc
+                if (
+                    attempt == self._retry_attempts
+                    or exc.category not in _RETRYABLE_CATEGORIES
+                ):
+                    raise
+            await asyncio.sleep(self._retry_backoff_seconds * attempt)
+        raise last  # pragma: no cover - 위 루프가 항상 반환하거나 올린다
+
+    async def _get_once(self, path: str, params: dict[str, str]) -> Element:
         url = f"{self._base_url}/{path}"
         async with self._gate:
             try:
