@@ -378,6 +378,11 @@ textarea:focus-visible {
   border-radius: 9px;
   line-height: 1.5;
 }
+/* 판정할 것이 없었다는 안내. 경고가 아니라 사실 전달이라 색을 낮춘다. */
+.analysis-notice--info {
+  background: #f2f4f7;
+  color: #4a5361;
+}
 .analysis-notice--warning {
   background: #fff8e6;
   color: #7a5200;

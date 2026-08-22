@@ -7,13 +7,14 @@
  */
 
 export type AnalysisFailureNotice = {
-  readonly tone: "warning" | "danger";
+  readonly tone: "info" | "warning" | "danger";
   readonly title: string;
   readonly detail: string;
 };
 
 const QUOTA_EXHAUSTED = "PROVIDER:QUOTA_EXHAUSTED";
 const INCOMPLETE_COVERAGE = "ANALYSIS:INCOMPLETE_COVERAGE";
+const NOT_APPLICABLE = "ANALYSIS:NOT_APPLICABLE";
 
 export function analysisFailureNotice(
   code: string | null | undefined,
@@ -27,6 +28,18 @@ export function analysisFailureNotice(
         "KIPRIS 호출 한도가 소진되어 이 문서를 검사하지 못했습니다. " +
         "문서나 설정 문제가 아니므로 다시 검사해도 같은 결과입니다. " +
         "한도가 초기화된 뒤(매월 1일) 또는 키 등급을 올린 뒤에 다시 검사하세요.",
+    };
+  }
+  if (code === NOT_APPLICABLE) {
+    // 판정하지 못한 것이 아니라 판정할 것이 없었다. 회의록이나 기술 내용이 없는
+    // README 가 그렇다. 여기에 경고를 띄우면 아무 문제도 없는 문서에 경고가 붙고,
+    // 사용자는 고칠 것을 찾아 시간을 쓴다.
+    return {
+      tone: "info",
+      title: "검사 대상이 아닙니다",
+      detail:
+        "기술 내용이나 의존성 선언이 없어 이 문서에서는 검토할 것이 없습니다. " +
+        "문제가 있는 것이 아니며 다시 검사해도 같은 결과입니다.",
     };
   }
   if (code === INCOMPLETE_COVERAGE) {

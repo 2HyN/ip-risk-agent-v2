@@ -1153,3 +1153,39 @@ def test_reanalysis_replaces_the_evidence_that_run_recorded_before() -> None:
         assert evidence[0].metadata_safe["quote_end"] == 20
 
     run(scenario())
+
+
+def test_a_document_no_analyzer_handles_finishes_rather_than_looking_unfinished() -> None:
+    """회의록이나 기술 내용이 없는 README 는 판정할 후보가 없다.
+
+    예전에는 그런 실행이 INCONCLUSIVE 로 끝나 화면에 "일부 후보를 판정하지
+    못했습니다" 가 떴다. 판정하지 못한 것이 아니라 판정할 것이 없었다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        job_id, started_at = await add_running_job(
+            store, suffix="skipped", revision="revision-1"
+        )
+        acceptance = await make_service(store).accept_analysis_result(
+            patent_result(
+                job_id,
+                "revision-1",
+                started_at,
+                status=AnalysisStatus.SKIPPED,
+                coverage=AnalysisCoverage.NONE,
+                include_candidate=False,
+            )
+        )
+
+        # 상태는 미판정이다 — 권위 있는 결과가 아니므로 기존 Risk 를 건드리지
+        # 않아야 하고, 그 규칙을 상태가 지킨다.
+        assert acceptance.job_status is AnalysisJobStatus.INCONCLUSIVE
+        async with store() as uow:
+            job = await uow.analysis_jobs.get(job_id)
+            assert job is not None
+            # 다만 사유는 달라야 한다. "판정하지 못했다" 가 아니라 "판정할 것이
+            # 없었다" 이고, 화면이 그 둘에 다른 안내를 낸다.
+            assert job.failure_safe == "ANALYSIS:NOT_APPLICABLE"
+
+    run(scenario())

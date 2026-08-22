@@ -625,7 +625,20 @@ def _aggregate_job(
         status = AnalysisJobStatus.INCONCLUSIVE
         # 다른 실패와 같은 형태의 코드를 쓴다. 예전에는 영어 한 문장이 그대로
         # 화면에 나와, 미판정을 실패로 읽게 만들었다.
-        failure_safe = "ANALYSIS:INCOMPLETE_COVERAGE"
+        #
+        # 그런데 미판정에는 성격이 다른 둘이 섞여 있다. **판정할 것이 없었던 것**
+        # (회의록처럼 이 분석기가 다룰 문서가 아니다)과 **판정하지 못한 것**
+        # (후보를 끝까지 대조하지 못했다)이다. 앞의 것에 "일부 후보를 판정하지
+        # 못했습니다" 를 띄우면 아무 문제도 없는 문서에 경고가 붙는다.
+        #
+        # 실행 상태는 둘 다 INCONCLUSIVE 로 둔다 — 어느 쪽도 권위 있는 결과가
+        # 아니므로 기존 Risk 를 건드리지 않아야 하고, 그 규칙은 상태가 지킨다
+        # (`AnalysisJob` 의 불변조건).
+        failure_safe = (
+            "ANALYSIS:NOT_APPLICABLE"
+            if all(outcome.status is AnalysisStatus.SKIPPED for outcome in outcomes)
+            else "ANALYSIS:INCOMPLETE_COVERAGE"
+        )
     return (
         complete_analysis_job(
             job,

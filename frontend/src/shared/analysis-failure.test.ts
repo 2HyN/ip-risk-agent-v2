@@ -42,3 +42,20 @@ describe("미판정", () => {
     expect(notice?.detail).not.toContain("non-authoritative");
   });
 });
+
+describe("검사 대상 아님", () => {
+  it("판정할 것이 없던 문서에는 경고를 띄우지 않는다", () => {
+    // 판정하지 못한 것과 판정할 것이 없던 것은 다르다. 뒤엣것에 경고를 붙이면
+    // 아무 문제도 없는 README 에 경고가 달린다.
+    const notice = analysisFailureNotice("ANALYSIS:NOT_APPLICABLE");
+    expect(notice?.tone).toBe("info");
+    expect(notice?.title).toContain("검사 대상이 아닙니다");
+  });
+
+  it("미판정과는 다른 안내를 낸다", () => {
+    const skipped = analysisFailureNotice("ANALYSIS:NOT_APPLICABLE");
+    const partial = analysisFailureNotice("ANALYSIS:INCOMPLETE_COVERAGE");
+    expect(skipped?.title).not.toBe(partial?.title);
+    expect(partial?.tone).toBe("warning");
+  });
+});
