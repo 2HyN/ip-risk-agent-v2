@@ -96,12 +96,21 @@ def _require_shape(
     *,
     record_kind: str,
     fields: tuple[str, ...],
+    optional_fields: tuple[str, ...] = (),
 ) -> dict[str, object]:
+    """문서의 모양을 확인한다. 필수는 다 있어야 하고 모르는 필드는 없어야 한다.
+
+    ``optional_fields`` 는 **나중에 추가된 필드**를 위한 것이다. 이미 저장된 문서에는
+    없고 앞으로 쓰이는 문서에는 있다. 그것 때문에 옛 문서를 못 읽으면 배포가 곧
+    데이터 손실이 된다. 그렇다고 모양 검사를 느슨하게 하면 드리프트를 못 잡으므로,
+    **허용할 필드를 이름으로 선언**하게 한다.
+    """
     expected = {"schema_version", "record_kind", *fields}
+    allowed = expected | set(optional_fields)
     actual = set(document)
-    if actual != expected:
+    if not expected <= actual or not actual <= allowed:
         missing = sorted(expected - actual)
-        extra = sorted(actual - expected)
+        extra = sorted(actual - allowed)
         raise DocumentMappingError(
             f"invalid {record_kind} document fields; missing={missing}, extra={extra}"
         )
@@ -755,6 +764,8 @@ def risk_to_document(value: Risk) -> Document:
         resolved_at=value.resolved_at,
         latest_evidence_revision=value.latest_evidence_revision,
         review_version=value.review_version,
+        explanation_safe=value.explanation_safe,
+        recommendation_safe=value.recommendation_safe,
     )
 
 
@@ -780,6 +791,8 @@ def risk_from_document(document: Mapping[str, object]) -> Risk:
             "latest_evidence_revision",
             "review_version",
         ),
+        # 나중에 추가한 필드다. 이미 저장된 Risk 에는 없다.
+        optional_fields=("explanation_safe", "recommendation_safe"),
     )
     return Risk(
         id=str(data["id"]),
@@ -798,6 +811,8 @@ def risk_from_document(document: Mapping[str, object]) -> Risk:
         resolved_at=_optional_datetime(data["resolved_at"]),
         latest_evidence_revision=_optional_str(data["latest_evidence_revision"]),
         review_version=_int(data["review_version"]),
+        explanation_safe=_optional_str(data.get("explanation_safe")),
+        recommendation_safe=_optional_str(data.get("recommendation_safe")),
     )
 
 

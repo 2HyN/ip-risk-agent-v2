@@ -35,6 +35,15 @@ KEY_PARAM = "ServiceKey"
 # 실측한 성공 응답의 코드. 오류는 30(등록/키), 11(필수 파라미터) 등이다.
 SUCCESS_RESULT_CODE = "00"
 
+#: 실측한 KIPRIS 오류 코드. 코드가 곧 분류다.
+#:
+#: 22 는 호출 한도 초과다. 이것을 UNAVAILABLE 로 두면 재시도가 한도를 더 쓴다.
+#: 30 은 키/서비스 미등록이라 다시 걸어도 같다.
+_RESULT_CODE_CATEGORIES = {
+    "22": FailureCategory.RATE_LIMITED,
+    "30": FailureCategory.AUTH,
+}
+
 PROVIDER = "KIPRIS"
 _TIMEOUT_SECONDS = 20.0
 
@@ -109,19 +118,28 @@ def _require_successful_result(root: Element) -> None:
 
     실측한 성공 응답은 ``resultCode=00`` / ``resultMsg=NORMAL SERVICE.`` 다.
     메시지는 성공에도 채워지므로 **코드로 판정한다.**
+
+    분류는 코드로 한다. 특히 한도 초과(22)를 ``UNAVAILABLE`` 로 두면 재시도가
+    상황을 악화시킨다 — 이미 한도를 넘긴 키로 한 번 더 부를 뿐이다. 실측한 응답은
+    ``resultCode=22`` / ``resultMsg=LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR``
+    이고, ``RATE_LIMITED`` 는 ``_RETRYABLE_CATEGORIES`` 에 없으므로 즉시 실패한다.
     """
     code = (root.findtext(".//resultCode") or "").strip()
     if not code or code == SUCCESS_RESULT_CODE:
         return
     message = (root.findtext(".//resultMsg") or "").strip().casefold()
-    category = (
-        FailureCategory.AUTH
-        if any(
-            token in message
-            for token in ("accesskey", "serviceid", "not registerd", "unauthorized")
+    category = _RESULT_CODE_CATEGORIES.get(code)
+    if category is None:
+        category = (
+            FailureCategory.AUTH
+            if any(
+                token in message
+                for token in ("accesskey", "serviceid", "not registerd", "unauthorized")
+            )
+            else FailureCategory.RATE_LIMITED
+            if "limited_number" in message or "exceeds" in message
+            else FailureCategory.UNAVAILABLE
         )
-        else FailureCategory.UNAVAILABLE
-    )
     raise ProviderFailureError(
         PROVIDER, category, f"KIPRIS rejected the request (resultCode={code})"
     )

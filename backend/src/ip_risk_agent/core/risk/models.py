@@ -60,6 +60,10 @@ class Risk:
     resolved_at: datetime | None = None
     latest_evidence_revision: str | None = None
     review_version: int = 0
+    #: 왜 이것이 risk 인지. 모델이 쓴 설명이며 판정이 아니다.
+    explanation_safe: str | None = None
+    #: 앞으로 무엇을 할지. 권고 수준이고 법적 결론이 아니다.
+    recommendation_safe: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (

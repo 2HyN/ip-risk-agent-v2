@@ -739,3 +739,44 @@ def test_a_block_without_sentence_breaks_is_still_bounded_and_uniquely_identifie
         )
     assert len(ledger) == len(segments)
     assert ledger.truncated_ids == frozenset()
+
+
+def test_a_quota_error_is_rate_limited_and_not_retried():
+    """호출 한도 초과를 재시도하면 한도를 한 번 더 쓸 뿐이다.
+
+    실측 응답은 resultCode=22 / LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR 다.
+    이것이 UNAVAILABLE 로 분류되면 재시도 대상에 들어가 상황을 악화시킨다.
+    """
+    import httpx
+
+    from ip_risk_agent.intelligence.common.errors import (
+        FailureCategory,
+        ProviderFailureError,
+    )
+    from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+
+    body = (
+        b"<response><header><resultCode>22</resultCode>"
+        b"<resultMsg>LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR</resultMsg>"
+        b"</header><body><items/></body></response>"
+    )
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=body)
+
+    client = KiprisClient(
+        "unused-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        retry_backoff_seconds=0.0,
+    )
+
+    async def scenario():
+        with pytest.raises(ProviderFailureError) as failure:
+            await client.search("음성")
+        assert failure.value.category is FailureCategory.RATE_LIMITED
+        assert len(calls) == 1, "한도 초과는 다시 걸지 않는다"
+        await client.aclose()
+
+    asyncio.run(scenario())
