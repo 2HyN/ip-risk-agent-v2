@@ -59,6 +59,12 @@ from ip_risk_agent.core.mounts import (
     SourceWorkspaceStatus,
     WorkspaceMount,
 )
+from ip_risk_agent.core.risk import (
+    RiskEvent,
+    RiskEventType,
+    RiskLifecycleState,
+    risk_event_id_for,
+)
 from ip_risk_agent.core.workspaces import RiskWorkspaceStatus
 
 from .models import (
@@ -583,6 +589,58 @@ class ControlPlaneFacade:
                     )
                 )
             if created_mount:
+                # 같은 대상을 다시 연결했다. "감시 중단으로" 해소된 위험은
+                # 분석이 여전히 유효하므로 재분석 없이 되살린다. 파일이 그대로면
+                # 변경 이벤트도 그대로(DUPLICATE_DONE)라, 여기서 되살리지 않으면
+                # 재연결해도 위험이 영영 돌아오지 않는다. 분석이 "위험 없음"으로
+                # 해소한 것은 건드리지 않는다 — 그건 사실이 바뀐 것이다.
+                for risk in await uow.risks.list_for_workspace(
+                    command.risk_workspace_id
+                ):
+                    if risk.lifecycle_state is not RiskLifecycleState.RESOLVED:
+                        continue
+                    risk_artifact = await uow.artifacts.get(risk.artifact_id)
+                    if risk_artifact is None or risk_artifact.mount_id != mount_id:
+                        continue
+                    resolutions = [
+                        event
+                        for event in await uow.risks.list_events(risk.id)
+                        if event.event_type is RiskEventType.RESOLVED
+                    ]
+                    if not resolutions:
+                        continue
+                    last = max(resolutions, key=lambda event: event.occurred_at)
+                    if last.reason_safe != "source mount removed":
+                        continue
+                    reopened = replace(
+                        risk,
+                        lifecycle_state=RiskLifecycleState.EXISTING,
+                        resolved_at=None,
+                        updated_at=occurred_at,
+                    )
+                    await uow.risks.save(reopened)
+                    await uow.risks.append_event(
+                        RiskEvent(
+                            id=risk_event_id_for(
+                                risk.id,
+                                f"mount-restored:{occurred_at.isoformat()}",
+                                RiskEventType.REOPENED.value,
+                            ),
+                            risk_id=risk.id,
+                            event_type=RiskEventType.REOPENED,
+                            actor_type=ActorType.USER,
+                            actor_user_id=command.actor_user_id,
+                            occurred_at=occurred_at,
+                            previous_state_safe={
+                                "lifecycle_state": RiskLifecycleState.RESOLVED.value
+                            },
+                            new_state_safe={
+                                "lifecycle_state": RiskLifecycleState.EXISTING.value
+                            },
+                            analysis_job_id=risk.latest_analysis_job_id,
+                            reason_safe="source mount restored",
+                        )
+                    )
                 await uow.audit.append(
                     AuditEvent(
                         id=self._id_factory("audit"),

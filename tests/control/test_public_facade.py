@@ -438,3 +438,115 @@ def test_reconnecting_a_provider_rotates_the_stored_credential() -> None:
         assert context.credential_ref == "secret-ref:rotated"
 
     run(scenario())
+
+
+def test_removing_and_reconnecting_a_mount_round_trips_its_risks() -> None:
+    """감시 중단 → 위험 해소, 같은 대상 재연결 → 위험 부활.
+
+    파일이 그대로면 변경 이벤트도 그대로(DUPLICATE_DONE)라 재분석이 돌지
+    않는다. 재연결 시 위험을 직접 되살리지 않으면 "재선택했는데 위험이 안
+    돌아오는" 상태가 된다 — 운영에서 실제로 그렇게 됐다. 분석이 "위험
+    없음"으로 해소한 것은 되살리면 안 된다.
+    """
+    from ip_risk_agent.application.workspace_admin import (
+        WorkspaceAdministrationService,
+    )
+    from ip_risk_agent.core.artifacts import (
+        Artifact,
+        ArtifactAvailability,
+        ArtifactState,
+        ArtifactStatus,
+    )
+    from ip_risk_agent.core.risk import (
+        ReviewDisposition,
+        ReviewPriority,
+        Risk,
+        RiskEventType,
+    )
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        queue = InMemoryTaskEnqueuer()
+        clock = MutableClock()
+        await seed_workspace(store)
+        facade = make_facade(store, queue, clock)
+
+        registered = await facade.register_source_metadata(source_command())
+        mount_id = registered.mount_id
+
+        async with store() as uow:
+            await uow.artifacts.add(
+                Artifact(
+                    id="art-1",
+                    risk_workspace_id="vws-1",
+                    mount_id=mount_id,
+                    source_workspace_id=registered.source_workspace_id,
+                    source_type=SourceType.GITHUB,
+                    source_artifact_id="repo:src/main.py",
+                    display_name="main.py",
+                    logical_path="src/main.py",
+                    status=ArtifactStatus.ACTIVE,
+                    first_seen_at=NOW,
+                    last_seen_at=NOW,
+                ),
+                ArtifactState(
+                    artifact_id="art-1",
+                    latest_revision="r1",
+                    latest_checksum=None,
+                    availability_state=ArtifactAvailability.AVAILABLE,
+                    updated_at=NOW,
+                ),
+            )
+            await uow.risks.add(
+                Risk(
+                    id="risk-1",
+                    risk_workspace_id="vws-1",
+                    artifact_id="art-1",
+                    analysis_type=AnalysisType.LICENSE,
+                    risk_key="key-1",
+                    lifecycle_state=RiskLifecycleState.NEW,
+                    review_disposition=ReviewDisposition.MONITORING,
+                    review_priority=ReviewPriority.HIGH,
+                    summary="copyleft dependency",
+                    first_seen_at=NOW,
+                    last_seen_at=NOW,
+                    latest_analysis_job_id="job-1",
+                    updated_at=NOW,
+                )
+            )
+            await uow.commit()
+
+        admin = WorkspaceAdministrationService(
+            unit_of_work_factory=store,
+            clock=clock,
+            # facade 의 id 공급기와 겹치지 않게 접두사를 달리한다.
+            id_factory=lambda kind: f"admin-{kind}-1",
+        )
+        await admin.remove_mount(
+            risk_workspace_id="vws-1", actor_user_id="owner-1", mount_id=mount_id
+        )
+        async with store() as uow:
+            resolved = await uow.risks.get("risk-1")
+        assert resolved.lifecycle_state is RiskLifecycleState.RESOLVED
+
+        # 같은 대상을 다시 연결한다 — 같은 명령이 같은 mount 로 수렴한다.
+        again = await facade.register_source_metadata(
+            replace(source_command(), registration_key="registration-retry")
+        )
+        assert again.mount_id == mount_id
+        assert again.created_mount
+
+        async with store() as uow:
+            revived = await uow.risks.get("risk-1")
+            events = await uow.risks.list_events("risk-1")
+        assert revived.lifecycle_state is RiskLifecycleState.EXISTING
+        assert revived.resolved_at is None
+        # 사람의 검토 판단은 왕복 내내 그대로다.
+        assert revived.review_disposition is ReviewDisposition.MONITORING
+        assert any(
+            event.event_type is RiskEventType.REOPENED
+            and event.reason_safe == "source mount restored"
+            for event in events
+        )
+
+    run(scenario())
