@@ -454,12 +454,28 @@ class WorkspaceAdministrationService:
             actor, mount = await _membership_and_mount(
                 uow, risk_workspace_id, actor_user_id, mount_id
             )
+            occurred_at = self._clock()
             plan = plan_mount_removal(
                 actor_user_id=actor_user_id,
                 actor_membership=actor,
                 mount=mount,
-                occurred_at=self._clock(),
+                occurred_at=occurred_at,
                 audit_event_id=self._id_factory("audit"),
+            )
+            # 해제는 일시중지보다 **더** 최종적인데 정리는 덜 했다. 마운트 기록만
+            # 지우고 Risk 는 활성 목록에 남겨, 이미 없는 마운트의 파일이 아직 추적
+            # 중인 것처럼 읽혔다.
+            #
+            # 일시중지와 같은 처분을 쓴다 — 사용자의 판단이 아니라 외적 요인으로
+            # 관리가 끝난 것이다. 지우지 않으므로 "왜 그때 그렇게 판단했는가" 는
+            # 해제 뒤에도 답할 수 있다.
+            await exclude_mount_risks(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                mount_id=mount_id,
+                occurred_at=occurred_at,
+                reason_safe="mount was removed",
+                id_factory=self._id_factory,
             )
             await uow.mounts.remove(plan.mount_id)
             await uow.audit.append(plan.audit_event)
