@@ -58,6 +58,7 @@ from ip_risk_agent.intelligence.explain import GeminiRiskExplainer
 from ip_risk_agent.intelligence.license.package_metadata import HttpPackageMetadataProvider
 from ip_risk_agent.intelligence.patent.cache import CachingPatentSearchProvider
 from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+from ip_risk_agent.gcp.license_clause_cache import FirestoreClauseSearchCache
 from ip_risk_agent.gcp.patent_cache import FirestorePatentResponseCache
 from ip_risk_agent.intelligence.public import IntelligenceFacade, create_analyzer_registry
 from ip_risk_agent.intelligence.rag.engine import RagEngineConfig, RagEngineRetriever
@@ -391,6 +392,9 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
     # KIPRIS 무료 등급은 월 1,000 회다. 같은 특허를 재분석마다 다시 받으면 재검증
     # 자체가 불가능해지므로 프로세스 밖에 캐시를 둔다.
     patent_cache = FirestorePatentResponseCache(foundation.clients.firestore)
+    # 프로세스 안에만 두면 재분석 때마다 다시 검색한다 — 아끼려는 호출이
+    # 바로 그것이다 (§9.2).
+    clause_cache = FirestoreClauseSearchCache(foundation.clients.firestore)
     kipris = CachingPatentSearchProvider(
         KiprisClient(_secret(foundation, settings.kipris_api_key_secret_id)),
         patent_cache,
@@ -423,6 +427,7 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             # 분석기는 workspace 를 모른다. Control 이 배포 형태 축과 정책 표 판본을
             # 읽어 주는 **함수 하나**를 넘긴다 (§3 · §5.10).
             workspace_license_policy=context.control_facade.workspace_license_policy,
+            clause_cache=clause_cache,
             retriever=retriever,
         ),
         # 이미 판정이 끝난 Risk 에 설명과 권고를 붙인다. 저장된 근거만 보므로
