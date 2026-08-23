@@ -16,3 +16,6 @@ dist/
 *-env.local.yaml
 labels/
 .rag-corpus-cache/
+
+# electron-builder 산출물
+apps/desktop/release/

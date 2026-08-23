@@ -19,9 +19,16 @@ import { ElectronDirectoryPicker } from "./electron-directory-picker.js";
 import { HttpMountRegistrationClient } from "./mount-registration-client.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const runtimeProfile = process.env["APP_ENV"] ?? "local";
+// 배포된 운영 서비스. 포장된 앱은 아무 설정 없이 이곳에 붙는다 — 릴리스를 받은
+// 사람에게 환경변수를 요구할 수는 없다. 개발(포장 전)은 예전처럼 로컬 기본이고,
+// 두 경우 모두 환경변수가 이긴다.
+const PRODUCTION_SERVER_BASE_URL =
+  "https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app";
+const runtimeProfile =
+  process.env["APP_ENV"] ?? (app.isPackaged ? "production" : "local");
 const serverBaseUrl = trustedApplicationUrl(
-  process.env["IPRISK_SERVER_BASE_URL"] ?? "http://127.0.0.1:8000",
+  process.env["IPRISK_SERVER_BASE_URL"] ??
+    (app.isPackaged ? PRODUCTION_SERVER_BASE_URL : "http://127.0.0.1:8000"),
   runtimeProfile,
 );
 
