@@ -56,6 +56,47 @@ async def test_registry_fallback_recovers_a_license_deps_dev_cannot_map():
     assert evaluate_expression(fact.license_expression).value == "POLICY_CONFLICT"
 
 
+
+async def test_a_bundled_licence_text_does_not_become_a_false_high():
+    """``matplotlib`` 은 PSF 라이선스다. 한때 우리는 GPL 로 읽었다.
+
+    deps.dev 가 non-standard 로 답하면 PyPI 원문을 보는데, 그 ``license`` 필드에는
+    이름이 아니라 **라이선스 전문 6 만 자**가 들어 있고, 그 안에는 품고 있는
+    FreeType 이 "FTL OR GPL-2.0-or-later" 라고 적혀 있다. 이름을 훑는 방식은 그
+    GPL 을 matplotlib 의 것으로 읽었고, 그래서 파이썬 생태계에서 가장 널리
+    쓰이는 패키지 하나가 **최고 위험**으로 올라갔다.
+
+    상류가 바뀌면 다시 깨질 수 있으므로 실물로 지킨다.
+    """
+    async with HttpPackageMetadataProvider() as provider:
+        fact = await provider.get_license(Ecosystem.PYPI, "matplotlib", "3.11.1")
+    assert fact.license_expression == "PSF-2.0"
+    assert evaluate_expression(fact.license_expression).value != "POLICY_CONFLICT"
+
+
+async def test_a_package_that_bundles_apache_code_is_not_called_apache():
+    """``pandas`` 는 BSD-3-Clause 다. 품고 있는 Apache 코드가 그 패키지의 것은 아니다.
+
+    등급은 양쪽 다 허용적이라 같았지만, 이 제품이 파는 것은 등급이 아니라
+    **근거**다. 틀린 이름을 적어 두면 그 근거가 거짓말이 된다.
+    """
+    async with HttpPackageMetadataProvider() as provider:
+        fact = await provider.get_license(Ecosystem.PYPI, "pandas", "3.0.5")
+    assert fact.license_expression == "BSD-3-Clause"
+
+
+async def test_a_package_that_only_declares_a_classifier_is_still_read():
+    """``weasyprint`` 는 ``license`` 가 비어 있고 분류자에만 BSD 가 있다.
+
+    자유 서술 훑기를 거절하기로 한 이상 닫힌 어휘가 답해야 한다. 아니면
+    거절이 검토 필요를 늘리기만 한다.
+    """
+    async with HttpPackageMetadataProvider() as provider:
+        fact = await provider.get_license(Ecosystem.PYPI, "weasyprint", "69.0")
+    assert fact.license_expression == "BSD-3-Clause"
+    assert fact.inferred_from_free_text is True, "분류자는 판을 말하지 않는다"
+
+
 async def test_npm_metadata_lookup():
     async with HttpPackageMetadataProvider() as provider:
         fact = await provider.get_license(Ecosystem.NPM, "express", "4.19.2")

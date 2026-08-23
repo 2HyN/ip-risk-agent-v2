@@ -572,6 +572,215 @@ def test_not_knowing_the_version_is_said_out_loud():
     assert "VERSION_NOT_IN_REGISTRY" in result.candidates[0].uncertainty_flags
 
 
+
+# ----------------------------------------------------------------- PEP 639
+
+
+def _pypi_registry(info):
+    """PyPI 하나만 답하는 가짜 전송. deps.dev 는 모른다고 답한다."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "deps.dev" in str(request.url):
+            return httpx.Response(200, json={"licenses": ["non-standard"]})
+        return httpx.Response(200, json={"info": info})
+
+    return httpx.MockTransport(handler)
+
+
+def _pypi_license(info):
+    import httpx
+
+    from ip_risk_agent.intelligence.license.dependency_models import Ecosystem
+    from ip_risk_agent.intelligence.license.package_metadata import (
+        HttpPackageMetadataProvider,
+    )
+
+    async def scenario():
+        client = httpx.AsyncClient(transport=_pypi_registry(info))
+        provider = HttpPackageMetadataProvider(client=client)
+        try:
+            return await provider.get_license(Ecosystem.PYPI, "p", "1.0.0")
+        finally:
+            await client.aclose()
+
+    return run(scenario())
+
+
+def test_the_declared_spdx_expression_is_read_not_only_the_free_text_one():
+    """PyPI 가 SPDX 로 명시한 것을 "모른다" 로 내리지 않는다.
+
+    PEP 639 가 ``license_expression`` 을 들여오면서 ``license`` 는 폐기됐다. 옮긴
+    패키지는 ``license`` 가 빈문자열이 되는데, 예전에는 그쪽만 읽었다. 그래서
+    ``chardet==7.6.0`` (실제로 ``0BSD`` 를 명시한다) 이 검토 필요로 떨어졌다.
+
+    조회된 SPDX 는 **추정이 아니다.** 추정으로 표시하면 조회해 온 사실을 우리
+    짐작으로 낮춰 적는 것이 된다.
+    """
+    fact = _pypi_license({"license": "", "license_expression": "0BSD"})
+    assert fact.license_expression == "0BSD"
+    assert fact.inferred_from_free_text is False
+    assert fact.is_unknown is False
+
+
+def test_a_declared_copyleft_obligation_does_not_vanish():
+    """``paramiko==5.0.0`` 이 명시하는 ``LGPL-2.1`` 은 약한 반대급부다.
+
+    이것을 놓치면 등급이 하나 낮아지는 것이 아니라 **의무가 통째로 사라진다** —
+    검토 필요는 "무엇을 지켜야 하는지 모른다" 이지 "지킬 것이 있다" 가 아니다.
+    """
+    fact = _pypi_license({"license": "", "license_expression": "LGPL-2.1"})
+    assert fact.license_expression == "LGPL-2.1-only"
+    assert fact.inferred_from_free_text is False
+
+
+def test_the_free_text_field_still_answers_for_packages_that_never_moved():
+    """옛 필드만 있는 패키지는 그대로 읽고, 추정이라는 사실도 그대로 남긴다.
+
+    새 필드를 먼저 보는 것이 옛 경로를 막지 않아야 한다 — PyPI 에는 아직
+    옮기지 않은 패키지가 훨씬 많다.
+    """
+    fact = _pypi_license(
+        {
+            "license": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial",
+            "license_expression": "",
+        }
+    )
+    assert fact.license_expression == "AGPL-3.0-only"
+    assert fact.inferred_from_free_text is True, "짐작한 것은 짐작이라고 말한다"
+
+
+def test_a_declared_expression_wins_over_a_vaguer_free_text_one():
+    """둘 다 있으면 정규 표현식을 쓴다. ``license`` 는 버전을 흐린다.
+
+    ``LGPL`` 만 보고는 2.0 인지 2.1 인지 or-later 인지 알 수 없어 짐작해야 하는데,
+    옆에 ``LGPL-3.0-only`` 가 적혀 있으면 짐작할 이유가 없다.
+    """
+    fact = _pypi_license({"license": "LGPL", "license_expression": "LGPL-3.0-only"})
+    assert fact.license_expression == "LGPL-3.0-only"
+    assert fact.inferred_from_free_text is False
+
+
+def test_a_package_that_declares_nothing_anywhere_stays_unknown():
+    """``nvidia-cudnn-cu12`` 처럼 어디에도 SPDX 가 없으면 검토 필요가 맞다."""
+    from ip_risk_agent.intelligence.license import spdx as _spdx
+
+    fact = _pypi_license(
+        {"license": "NVIDIA Proprietary Software", "license_expression": ""}
+    )
+    assert fact.license_expression == _spdx.UNKNOWN_LICENSE
+    assert fact.is_unknown is True
+
+
+def test_a_bundled_licence_text_is_not_scanned_for_a_name():
+    """``license`` 에 전문이 실리면 훑지 않는다. 남의 라이선스가 나오기 때문이다.
+
+    matplotlib 의 합의문은 품고 있는 FreeType 이 "FTL OR GPL-2.0-or-later" 라고
+    적어 두었고, 예전 훑기는 그 GPL 을 matplotlib 의 것으로 읽었다. PSF 라이선스인
+    패키지가 **최고 위험**으로 올라갔다는 뜻이다 — 이 제품에서 가장 나쁜 종류의
+    오답이다. pandas 도 Apache 코드를 품고 있어 Apache 로 읽혔다.
+
+    라이선스 문서는 원래 다른 라이선스를 이름으로 언급한다. 훑어서 될 일이 아니다.
+    """
+    from ip_risk_agent.intelligence.license import spdx as _spdx
+
+    bundled = (
+        "License agreement for matplotlib. " + ("x" * 3000)
+        + " The FreeType 2 font engine is licensed FTL OR GPL-2.0-or-later."
+    )
+    assert _spdx.from_free_text(bundled) == _spdx.UNKNOWN_LICENSE
+    assert _spdx.is_name_like(bundled) is False
+    # 이름 길이면 지금도 훑는다 — 거절은 전문에만 걸린다.
+    assert _spdx.is_name_like("GPLv2-or-later with a special exception") is True
+
+
+def test_the_classifiers_answer_when_the_free_text_will_not():
+    """자유 서술을 거절하기로 한 이상 분류자가 있어야 한다.
+
+    ``weasyprint`` 는 ``license`` 가 비어 있고 분류자에만 BSD 가 있다. pandas 와
+    matplotlib 은 전문이 실려 거절되지만 분류자는 각각 BSD 와 PSF 를 정확히 말한다.
+    닫힌 어휘라 훑지 않고 맞춰 볼 수 있다.
+    """
+    from ip_risk_agent.intelligence.license.package_metadata import (
+        HttpPackageMetadataProvider,
+    )
+
+    resolve = HttpPackageMetadataProvider._resolve_declaration
+
+    # weasyprint: 자유 서술이 비어 있다.
+    assert resolve("", "", ["License :: OSI Approved :: BSD License"]) == (
+        "BSD-3-Clause",
+        True,
+    )
+    # matplotlib: 전문은 거절되고 분류자가 답한다. 1:1 이라 추정이 아니다.
+    assert resolve(
+        "", "y" * 3000, ["License :: OSI Approved :: Python Software Foundation License"]
+    ) == ("PSF-2.0", False)
+
+
+def test_a_classifier_that_says_nothing_does_not_veto_one_that_does():
+    """"License :: OSI Approved" 처럼 아무것도 말하지 않는 항목이 흔하다.
+
+    그것을 반대 의견으로 세면 옆에 있는 정확한 항목까지 무효가 된다. wxPython 이
+    실제로 이 둘을 함께 달고 있다.
+    """
+    from ip_risk_agent.intelligence.license import spdx as _spdx
+
+    found, narrowed = _spdx.from_trove_classifiers(
+        [
+            "License :: OSI Approved",
+            "License :: OSI Approved :: MIT License",
+            "Programming Language :: Python :: 3",
+        ]
+    )
+    assert (found, narrowed) == ("MIT", False)
+
+
+def test_classifiers_that_disagree_are_not_resolved_for_the_user():
+    """대개 이중 라이선스다. 어느 쪽을 고를지는 우리가 정할 일이 아니다."""
+    from ip_risk_agent.intelligence.license import spdx as _spdx
+
+    found, _ = _spdx.from_trove_classifiers(
+        [
+            "License :: OSI Approved :: MIT License",
+            "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        ]
+    )
+    assert found == _spdx.UNKNOWN_LICENSE
+
+
+def test_an_exact_declaration_is_never_downgraded_to_a_guess():
+    """조회해 온 SPDX 를 추정으로 표시하면 사실을 짐작으로 낮춰 적는 것이 된다."""
+    from ip_risk_agent.intelligence.license.package_metadata import (
+        HttpPackageMetadataProvider,
+    )
+
+    resolve = HttpPackageMetadataProvider._resolve_declaration
+    # 흐린 분류자가 옆에 있어도 명시된 표현식이 이긴다.
+    assert resolve(
+        "MPL-2.0", "", ["License :: OSI Approved :: BSD License"]
+    ) == ("MPL-2.0", False)
+    # 자유 서술이 그대로 표현식이면 그것도 사실이다.
+    assert resolve("", "BSD-2-Clause", []) == ("BSD-2-Clause", False)
+
+
+def test_a_vaguer_free_text_loses_to_a_precise_classifier():
+    """``LGPL`` 로는 판을 알 수 없다. 분류자가 "v2 or later" 라고 적어 둔다."""
+    from ip_risk_agent.intelligence.license.package_metadata import (
+        HttpPackageMetadataProvider,
+    )
+
+    found, inferred = HttpPackageMetadataProvider._resolve_declaration(
+        "",
+        "LGPL",
+        [
+            "License :: OSI Approved :: GNU Lesser General Public License v2 or later"
+            " (LGPLv2+)"
+        ],
+    )
+    assert found == "LGPL-2.0-or-later"
+    assert inferred is False, "닫힌 어휘가 판까지 말했으면 짐작이 아니다"
+
 # ----------------------------------------------------------------- 0-H
 
 

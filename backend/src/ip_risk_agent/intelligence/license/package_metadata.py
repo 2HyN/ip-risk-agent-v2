@@ -132,10 +132,21 @@ class HttpPackageMetadataProvider:
     async def _from_registry(
         self, ecosystem: Ecosystem, package: str, version: str | None
     ) -> PackageLicenseFact | None:
+        declared = ""
         if ecosystem is Ecosystem.PYPI:
             path = f"{package}/{version}" if version else package
             payload = await self._get(f"{self._pypi}/{path}/json", "PYPI")
-            raw = str((payload or {}).get("info", {}).get("license") or "")
+            info = (payload or {}).get("info", {})
+            # PEP 639 이 들여온 **정규 SPDX 표현식** 필드다. 예전에는 이것을
+            # 읽지 않고 자유 서술인 ``license`` 만 봤다. 그러는 동안 PyPI 는
+            # ``license`` 를 폐기하고 이쪽으로 옮겼고, 옮긴 패키지는 ``license`` 가
+            # 빈문자열이 된다. 그래서 ``chardet==7.6.0`` 은 PyPI 가 ``0BSD`` 를
+            # 명시하는데도 우리는 "모른다" 를 냈고, ``paramiko==5.0.0`` 은
+            # ``LGPL-2.1`` 을 명시하는데도 **약한 반대급부 의무가 통째로
+            # 사라졌다.** 패키지가 PEP 639 로 옮길수록 더 나빠진다.
+            declared = str(info.get("license_expression") or "")
+            raw = str(info.get("license") or "")
+            classifiers = info.get("classifiers") or ()
             source = "pypi.org"
         else:
             payload = await self._get(f"{self._npm}/{package}", "NPM")
@@ -159,21 +170,17 @@ class HttpPackageMetadataProvider:
                     )
                 info = found
             raw = str(info.get("license") or "")
+            classifiers = ()
             source = "registry.npmjs.org"
 
         if payload is None:
             return None
 
-        # 레지스트리 값은 표현식이 아니라 설명문인 경우가 많다.
-        # 표현식으로 읽히면 그대로 쓰고, 아니면 추정한 뒤 그 사실을 남긴다.
-        # 추정임을 밝히지 않으면 사용자가 조회된 값과 구분할 수 없다.
-        parsed = spdx.try_parse_expression(raw)
-        inferred = False
-        if parsed is not None and not spdx.is_all_unknown(parsed):
-            expression = str(parsed)
-        else:
-            expression = spdx.from_free_text(raw)
-            inferred = expression != spdx.UNKNOWN_LICENSE
+        # 순서가 중요하다. 먼저 **명시된 표현식**을 본다 — 그것은 이미 SPDX 이므로
+        # 추정이 아니다. 추정으로 표시하면 조회해 온 사실을 우리 짐작으로 낮춰 적는 것이 된다.
+        # 그다음이 자유 서술 ``license`` 이고, 거기서 나온 것은 추정으로 남긴다 —
+        # 밝히지 않으면 사용자가 조회된 값과 구분할 수 없다.
+        expression, inferred = self._resolve_declaration(declared, raw, classifiers)
         return PackageLicenseFact(
             ecosystem=ecosystem,
             package=package,
@@ -182,6 +189,44 @@ class HttpPackageMetadataProvider:
             source=source,
             inferred_from_free_text=inferred,
         )
+
+    @staticmethod
+    def _resolve_declaration(
+        declared: str, raw: str, classifiers: object
+    ) -> tuple[str, bool]:
+        """레지스트리가 말한 것들에서 식별자 하나를 고른다. ``(식별식, 추정인가)``.
+
+        순서가 곧 신뢰도다.
+
+        1. **명시된 SPDX 표현식** (PEP 639 ``license_expression``). 이미 표현식이므로
+           추정이 아니다. 추정으로 표시하면 조회해 온 사실을 우리 짐작으로 낮춰 적는 셈이다.
+        2. **자유 서술이 그대로 표현식으로 읽히는 경우** (``license: "BSD-3-Clause"``).
+           흔하고, 역시 짐작이 아니다. 다만 이름 길이일 때만 본다 — 전문을 표현식으로
+           파싱해 볼 이유가 없다.
+        3. **trove 분류자.** 닫힌 어휘라 훑지 않아도 되고, 자유 서술을 거절하기로 한
+           이상 이것이 있어야 한다. 판을 말하지 않는 항목은 좁혀 적으므로 추정으로 남긴다.
+        4. **자유 서술 훑기.** 마지막이고, 이름 길이일 때만 한다.
+
+        분류자를 자유 서술보다 앞에 두는 이유는 분류자가 더 정확할 때가 있어서다.
+        ``license: "LGPL"`` 로는 2.0 인지 2.1 인지 or-later 인지 알 수 없어 짐작해야
+        하는데, 옆의 분류자가 "v2 or later (LGPLv2+)" 라고 적어 둔다.
+        """
+        parsed = spdx.try_parse_expression(declared) if declared else None
+        if parsed is not None and not spdx.is_all_unknown(parsed):
+            return str(parsed), False
+
+        if spdx.is_declared_expression(raw):
+            parsed = spdx.try_parse_expression(raw)
+            if parsed is not None and not spdx.is_all_unknown(parsed):
+                return str(parsed), False
+
+        if isinstance(classifiers, (list, tuple)):
+            found, narrowed = spdx.from_trove_classifiers(classifiers)
+            if found != spdx.UNKNOWN_LICENSE:
+                return found, narrowed
+
+        guessed = spdx.from_free_text(raw)
+        return guessed, guessed != spdx.UNKNOWN_LICENSE
 
     # ------------------------------------------------------------ 공통
 

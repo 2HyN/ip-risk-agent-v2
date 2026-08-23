@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from . import spdx_data
@@ -44,6 +45,76 @@ _TEXT_ALIASES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bmit\b", re.I), "MIT"),
     (re.compile(r"\bunlicen[cs]e\b|public\s+domain", re.I), "Unlicense"),
     (re.compile(r"\bzlib\b", re.I), "Zlib"),
+)
+
+# 이름이 아니라 **문서**로 보이기 시작하는 길이.
+#
+# ``license`` 필드에는 이름이 오기도 하고 라이선스 전문이 통째로 오기도 한다. 전문에서
+# 이름을 찾으면 **남의 라이선스를 찾는다** — 라이선스 문서는 원래 다른 라이선스를
+# 언급하기 때문이다. matplotlib 의 합의문은 품고 있는 FreeType 이 "FTL OR
+# GPL-2.0-or-later" 라고 적어 두어서 우리가 GPL 로 읽었고, 그래서 PSF 라이선스인
+# 패키지가 **최고 위험**으로 올라갔다. pandas 는 Apache 코드를 품어서 Apache 로 읽혔다.
+#
+# 실측한 값이 갈라져 있어 경계를 고를 필요가 거의 없었다. 이름·설명문은 0–141 자였고
+# (가장 긴 것이 pyinstaller 의 예외 설명이다), 전문은 50,087 자와 59,523 자였다.
+# 350 배 사이의 아무 값이나 맞으므로 눈금을 맞추지 않고 넉넉히 잡는다.
+_NAME_LIKE_MAX_CHARS = 512
+
+# PyPI trove 분류자 -> SPDX.
+#
+# 자유 서술과 달리 **닫힌 어휘**라 훑지 않고 맞춰 볼 수 있다. 자유 서술을 거절하기로
+# 한 이상 이쪽이 있어야 한다 — weasyprint 는 ``license`` 가 비어 있고 분류자에만
+# BSD 가 있으며, pandas 와 matplotlib 은 전문이 실려 있어 거절되지만 분류자는 각각
+# BSD 와 PSF 를 정확히 말한다.
+#
+# 값이 흐린 것들이 있다 ("BSD License" 는 2-Clause 일 수도 3-Clause 일 수도 있다).
+# 그런 항목은 좁혀 적되 호출부가 **추정으로 표시**한다.
+_TROVE_CLASSIFIERS: dict[str, str] = {
+    "license :: osi approved :: apache software license": "Apache-2.0",
+    "license :: osi approved :: mit license": "MIT",
+    "license :: osi approved :: mit no attribution license (mit-0)": "MIT-0",
+    "license :: osi approved :: bsd license": "BSD-3-Clause",
+    "license :: osi approved :: isc license (iscl)": "ISC",
+    "license :: osi approved :: gnu general public license v2 (gplv2)": "GPL-2.0-only",
+    "license :: osi approved :: gnu general public license v2 or later (gplv2+)": "GPL-2.0-or-later",
+    "license :: osi approved :: gnu general public license v3 (gplv3)": "GPL-3.0-only",
+    "license :: osi approved :: gnu general public license v3 or later (gplv3+)": "GPL-3.0-or-later",
+    "license :: osi approved :: gnu lesser general public license v2 (lgplv2)": "LGPL-2.0-only",
+    "license :: osi approved :: gnu lesser general public license v2 or later (lgplv2+)": "LGPL-2.0-or-later",
+    "license :: osi approved :: gnu lesser general public license v3 (lgplv3)": "LGPL-3.0-only",
+    "license :: osi approved :: gnu lesser general public license v3 or later (lgplv3+)": "LGPL-3.0-or-later",
+    "license :: osi approved :: gnu library or lesser general public license (lgpl)": "LGPL-2.1-only",
+    "license :: osi approved :: gnu affero general public license v3": "AGPL-3.0-only",
+    "license :: osi approved :: gnu affero general public license v3 or later (agpl v3+)": "AGPL-3.0-or-later",
+    "license :: osi approved :: mozilla public license 1.1 (mpl 1.1)": "MPL-1.1",
+    "license :: osi approved :: mozilla public license 2.0 (mpl 2.0)": "MPL-2.0",
+    "license :: osi approved :: eclipse public license 1.0 (epl-1.0)": "EPL-1.0",
+    "license :: osi approved :: eclipse public license 2.0 (epl-2.0)": "EPL-2.0",
+    "license :: osi approved :: python software foundation license": "PSF-2.0",
+    "license :: osi approved :: zope public license": "ZPL-2.1",
+    "license :: osi approved :: boost software license 1.0 (bsl-1.0)": "BSL-1.0",
+    "license :: osi approved :: common development and distribution license 1.0 (cddl-1.0)": "CDDL-1.0",
+    "license :: osi approved :: universal permissive license (upl)": "UPL-1.0",
+    "license :: osi approved :: the unlicense (unlicense)": "Unlicense",
+    "license :: osi approved :: zlib/libpng license": "Zlib",
+    "license :: osi approved :: postgresql license": "PostgreSQL",
+    "license :: osi approved :: open software license 3.0 (osl-3.0)": "OSL-3.0",
+    "license :: osi approved :: historical permission notice and disclaimer (hpnd)": "HPND",
+    "license :: osi approved :: artistic license": "Artistic-2.0",
+    "license :: osi approved :: sleepycat license": "Sleepycat",
+    "license :: osi approved :: nokia open source license": "Nokia",
+    "license :: cc0 1.0 universal (cc0 1.0) public domain dedication": "CC0-1.0",
+}
+
+#: 좁혀 적은 것들. 분류자가 판을 말하지 않아 우리가 골랐다는 뜻이다.
+_TROVE_NARROWED = frozenset(
+    {
+        "license :: osi approved :: bsd license",
+        "license :: osi approved :: apache software license",
+        "license :: osi approved :: gnu library or lesser general public license (lgpl)",
+        "license :: osi approved :: artistic license",
+        "license :: osi approved :: zope public license",
+    }
 )
 
 # 대소문자·구두점만 다른 표기. 등록된 식별자로 되돌린다.
@@ -84,6 +155,12 @@ _CANONICAL: tuple[str, ...] = spdx_data.LICENSE_IDS
 _CANONICAL_BY_LOWER = {name.lower(): name for name in _CANONICAL}
 
 _EXCEPTION_BY_LOWER = {name.lower(): name for name in spdx_data.EXCEPTION_IDS}
+
+#: 폐기된 것도 등록된 식별자다. 표기가 옜겨 갔다는 뜻이지 지어낸 값이라는 뜻이 아니다.
+_DEPRECATED_BY_LOWER = {
+    name.lower(): name
+    for name in spdx_data.DEPRECATED_LICENSE_IDS + spdx_data.DEPRECATED_EXCEPTION_IDS
+}
 
 #: ``LicenseRef-Acme-Internal`` 처럼 SPDX 목록 밖을 가리키는 사용자 정의 참조.
 #: ``DocumentRef-x:LicenseRef-y`` 형태도 문법상 허용된다.
@@ -197,18 +274,96 @@ def canonicalize(identifier: str) -> str:
     return _resolve(identifier)[0]
 
 
+_EXPRESSION_OPERATORS = frozenset({"and", "or", "with"})
+_EXPRESSION_TOKEN = re.compile(r"[^\s()]+")
+
+
+def is_declared_expression(text: str) -> bool:
+    """이 문자열이 **등록된 식별자만**으로 된 표현식인가.
+
+    :func:`try_parse_expression` 은 별칭도 받아 준다 — ``"LGPL"`` 을 넣으면
+    ``LGPL-2.1-only`` 이 나온다. 편한 동작이지만 그것은 **우리가 판을 고른 것**이지
+    레지스트리가 말한 것이 아니다. 그래서 "조회된 사실인가, 우리 짐작인가" 를 가르는
+    자리에서는 별칭을 사실로 세면 안 된다.
+
+    실제로 문제가 됐다. ``license: "LGPL"`` 옆에 분류자가 "v2 or later (LGPLv2+)" 라고
+    정확히 적어 두었는데, 별칭이 먼저 답해 버려서 더 정확한 쪽이 밀렸다.
+
+    폐기된 식별자도 등록된 것이다. 폐기는 표기가 옮겨 갔다는 뜻이지 지어낸 값이라는
+    뜻이 아니다.
+    """
+    stripped = text.strip()
+    if not stripped or not is_name_like(stripped):
+        return False
+    tokens = _EXPRESSION_TOKEN.findall(stripped)
+    if not tokens:
+        return False
+    for token in tokens:
+        low = token.lower()
+        if low in _EXPRESSION_OPERATORS:
+            continue
+        if _LICENSE_REF.match(token):
+            continue
+        bare = low[:-1] if low.endswith("+") else low
+        if (
+            bare in _CANONICAL_BY_LOWER
+            or bare in _DEPRECATED_BY_LOWER
+            or bare in _EXCEPTION_BY_LOWER
+        ):
+            continue
+        return False
+    return True
+
+
+def is_name_like(text: str) -> bool:
+    """이 문자열이 이름·설명문인가, 아니면 라이선스 전문인가.
+
+    :data:`_NAME_LIKE_MAX_CHARS` 를 보라 — 전문에서 이름을 훑으면 **남의 라이선스**를
+    찾는다.
+    """
+    return len(text.strip()) <= _NAME_LIKE_MAX_CHARS
+
+
+def from_trove_classifiers(classifiers: Iterable[str]) -> tuple[str, bool]:
+    """PyPI 분류자에서 식별자를 뽑는다. ``(식별자, 좁혀 적었는가)``.
+
+    닫힌 어휘라 훑지 않고 맞춰 본다. 알아보지 못한 분류자는 **의견 없음**으로 보고
+    지나간다 — "License :: OSI Approved" 처럼 아무것도 말하지 않는 항목이 흔하고,
+    그것을 반대 의견으로 세면 옆에 있는 정확한 항목까지 무효가 된다.
+
+    서로 다른 것을 가리키면 ``UNKNOWN`` 이다. 대개 이중 라이선스인데, 어느 쪽을
+    고를지는 우리가 정할 일이 아니다.
+    """
+    found: dict[str, bool] = {}
+    for raw in classifiers:
+        key = " ".join(str(raw).strip().lower().split())
+        identifier = _TROVE_CLASSIFIERS.get(key)
+        if identifier is not None:
+            found[identifier] = found.get(identifier, False) or key in _TROVE_NARROWED
+    if len(found) != 1:
+        return UNKNOWN_LICENSE, False
+    identifier, narrowed = next(iter(found.items()))
+    return identifier, narrowed
+
+
 def from_free_text(text: str) -> str:
     """레지스트리의 자유 서술 문자열에서 식별자를 추정한다.
 
     PyMuPDF 의 "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial" 처럼
     자동 매핑이 실패한 값을 되살리는 경로다. 추정이므로 호출부에서
     uncertainty 로 표시해야 한다.
+
+    **전문은 훑지 않는다.** 라이선스 문서는 품고 있는 것들의 라이선스를 이름으로
+    적어 두므로, 거기서 이름을 찾으면 그 패키지의 것이 아닌 이름이 나온다. 모른다고
+    답하는 편이 낫다 — 검토 필요는 답이지만, 자신 있는 오답은 답이 아니다.
     """
     if not text or text.strip().lower() in _NON_STANDARD:
         return UNKNOWN_LICENSE
     direct = canonicalize(text)
     if direct is not UNKNOWN_LICENSE and direct != UNKNOWN_LICENSE:
         return direct
+    if not is_name_like(text):
+        return UNKNOWN_LICENSE
     for pattern, identifier in _TEXT_ALIASES:
         if pattern.search(text):
             return identifier
