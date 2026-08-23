@@ -265,7 +265,10 @@ class GitHubAdapter:
         # 읽을 수 있는 이름만 의존성으로 본다. 예전에는 setup.py 를 의존성으로
         # 분류했는데 파서가 없어, License 도 Patent 도 맡지 못한 채 계약 위반으로
         # 실패했다. setup.py 는 아래에서 소스 코드로 분류된다.
-        found = dependency_format(name)
+        # 이름이 아니라 **경로**를 넘긴다. `requirements/base.txt` 처럼 폴더가 형식을
+        # 말해 주는 관행이 있어서, 이름만 떼면 `base.txt` 라 알아보지 못한다. Local 과
+        # Drive 는 표시 이름을 그대로 넘기므로 여기만 어긋나 있었다.
+        found = dependency_format(lowered)
         if found is not None:
             return ArtifactKind.LOCKFILE if found.is_lockfile else ArtifactKind.MANIFEST
         for ext in _CODE_EXTENSIONS:

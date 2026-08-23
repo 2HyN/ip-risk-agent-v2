@@ -23,6 +23,7 @@ from iprisk_contracts.common import (
 )
 
 from ip_risk_agent.core.artifacts.dependency_files import (
+    DEPENDENCY_KINDS,
     DependencyFormat,
     dependency_format,
 )
@@ -95,12 +96,17 @@ def _log_analysis(
         )
     )
 
-# 파일명 -> 매니페스트 파서. 잠금 파일은 lockfiles.parser_for 가 맡는다.
+def _parse_requirements_lock(text: str, source_path: str | None = None):
+    """``requirements.lock`` — 문법은 같고 신뢰도만 다르다."""
+    return manifests.parse_requirements_txt(text, source_path, lockfile=True)
+
+
 #: 형식마다 파서 하나. 어떤 이름이 어떤 형식인지는 커넥터와 함께 쓰는 표가 정한다
 #: (``core.artifacts.dependency_files``). 표와 파서가 따로 놀면 커넥터가 의존성으로
 #: 분류한 파일을 분석기가 읽지 못해 **어느 분석기도 맡지 못하는 파일**이 생긴다.
 _PARSERS = {
     DependencyFormat.REQUIREMENTS_TXT: manifests.parse_requirements_txt,
+    DependencyFormat.REQUIREMENTS_LOCK: _parse_requirements_lock,
     DependencyFormat.PYPROJECT_TOML: manifests.parse_pyproject_toml,
     DependencyFormat.SETUP_CFG: manifests.parse_setup_cfg,
     DependencyFormat.PACKAGE_JSON: manifests.parse_package_json,
@@ -108,9 +114,6 @@ _PARSERS = {
     DependencyFormat.UV_LOCK: lockfiles.parse_uv_lock,
     DependencyFormat.POETRY_LOCK: lockfiles.parse_poetry_lock,
 }
-
-_DEPENDENCY_KINDS = frozenset({ArtifactKind.MANIFEST, ArtifactKind.LOCKFILE})
-
 
 def _select_parser(logical_path: str):
     """파일 이름으로 파서를 고른다. 읽을 수 없으면 ``None``."""
@@ -152,7 +155,7 @@ class LicenseAnalyzer:
     def supports(self, artifact: AnalysisArtifact) -> bool:
         """의존성 파일만 본다. 소스 코드에는 의존성 선언이 없다."""
         return (
-            artifact.artifact_kind in _DEPENDENCY_KINDS
+            artifact.artifact_kind in DEPENDENCY_KINDS
             and _select_parser(artifact.logical_path) is not None
         )
 

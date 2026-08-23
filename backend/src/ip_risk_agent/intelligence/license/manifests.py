@@ -47,8 +47,20 @@ def _classify_spec(spec: str) -> tuple[str | None, ResolutionKind]:
     return None, ResolutionKind.RANGE
 
 
-def parse_requirements_txt(text: str, source_path: str | None = None) -> list[DependencyDeclaration]:
-    """pip requirements 형식."""
+def parse_requirements_txt(
+    text: str, source_path: str | None = None, *, lockfile: bool = False
+) -> list[DependencyDeclaration]:
+    """pip requirements 형식.
+
+    ``lockfile=True`` 는 ``requirements.lock`` 처럼 **문법은 같은데 잠금 파일**인 경우다.
+    문법으로는 ``==`` 를 보고 ``EXACT_PIN`` 이라 부르게 되는데, 잠금 파일은 그보다 강한
+    사실이다 — 도구가 해석을 끝내고 적어 둔 값이기 때문이다.
+
+    이 구분이 중복 제거에서 갈린다. ``DependencySet`` 은 같은 패키지를 **가장 신뢰도 높은
+    선언**만 남기는데(``LOCKFILE`` > ``EXACT_PIN`` > ``RANGE``), 잠금 파일이 ``EXACT_PIN``
+    으로 들어오면 매니페스트의 ``==`` 와 값이 같아져 **먼저 온 쪽이 이긴다.** 어느 쪽이
+    이길지가 파일을 읽는 순서에 달리게 된다.
+    """
     found: list[DependencyDeclaration] = []
     for raw_line in text.splitlines():
         line = raw_line.split("#", 1)[0].strip()
@@ -58,6 +70,8 @@ def parse_requirements_txt(text: str, source_path: str | None = None) -> list[De
         if not match:
             continue
         version, resolution = _classify_spec(match.group("spec"))
+        if lockfile and resolution is ResolutionKind.EXACT_PIN:
+            resolution = ResolutionKind.LOCKFILE
         found.append(
             DependencyDeclaration(
                 ecosystem=Ecosystem.PYPI,

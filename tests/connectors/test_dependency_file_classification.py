@@ -24,6 +24,10 @@ from ip_risk_agent.intelligence.license.analyzer import _select_parser
 
 READABLE = (
     "requirements.txt",
+    "requirements.lock",
+    "constraints.txt",
+    "requirements/base.txt",
+    "requirements/dev.in",
     "requirements-dev.txt",
     "requirements.in",
     "pyproject.toml",
@@ -256,3 +260,59 @@ def test_a_manifest_survives_the_round_trip_that_used_to_lose_it() -> None:
 
     assert whole > through_segments, "재현 조건이 사라졌다면 이 시험은 뜻이 없다"
     assert now == whole
+
+
+# --------------------------------------------------------------------- 0-J
+
+
+def test_a_lockfile_that_reads_like_a_manifest_is_still_a_lockfile() -> None:
+    """``requirements.lock`` 은 문법이 ``requirements.txt`` 와 같다.
+
+    그래서 같은 파서로 읽히는데, **신뢰도는 다르다.** 잠금 파일은 도구가 해석을 끝내고
+    적어 둔 값이라 매니페스트의 ``==`` 보다 강하다. 같은 값으로 두면 중복 제거에서
+    **먼저 온 쪽이 이겨** 결과가 파일 읽는 순서에 달린다.
+    """
+    from ip_risk_agent.core.artifacts.dependency_files import DependencyFormat
+    from ip_risk_agent.intelligence.license.analyzer import _select_parser
+    from ip_risk_agent.intelligence.license.dependency_models import ResolutionKind
+
+    assert dependency_format("requirements.lock") is DependencyFormat.REQUIREMENTS_LOCK
+    assert dependency_format("requirements.lock").is_lockfile
+
+    text = "requests==2.32.3\nflask==3.0.0\n"
+    locked = _select_parser("requirements.lock")(text, "requirements.lock")
+    plain = _select_parser("requirements.txt")(text, "requirements.txt")
+
+    assert [d.resolution for d in locked] == [ResolutionKind.LOCKFILE] * 2
+    assert [d.resolution for d in plain] == [ResolutionKind.EXACT_PIN] * 2
+
+
+def test_the_requirements_folder_convention_is_recognised() -> None:
+    """``requirements/base.txt`` 는 이름만 보면 ``base.txt`` 라 알아볼 수 없다.
+
+    폴더로 나누는 관행이 넓어서 부모 폴더 하나만 함께 본다. 이 규칙은 알아보는 것을
+    늘릴 뿐 줄이지 않는다 — 아래 시험이 그것을 고정한다.
+    """
+    assert dependency_format("requirements/base.txt") is not None
+    assert dependency_format("requirements/dev.in") is not None
+    # 폴더 안이어도 읽을 수 있는 형식이어야 한다.
+    assert dependency_format("requirements/README.md") is None
+    # 폴더 이름이 다르면 걸리지 않는다.
+    assert dependency_format("docs/notes.txt") is None
+
+
+def test_this_repository_s_own_lockfile_is_no_longer_invisible() -> None:
+    """실종된 68 건이 이 저장소 자신의 파일이었다."""
+    from pathlib import Path
+
+    from ip_risk_agent.intelligence.license.analyzer import _select_parser
+
+    root = Path(__file__).resolve().parents[2]
+    lock = root / "requirements.lock"
+    if not lock.is_file():  # pragma: no cover - 저장소 구성이 바뀌면
+        return
+
+    parser = _select_parser("requirements.lock")
+    assert parser is not None, "인식 목록에 없으면 아무 분석기도 맡지 않는다"
+    found = parser(lock.read_text(encoding="utf-8"), "requirements.lock")
+    assert len(found) > 50
