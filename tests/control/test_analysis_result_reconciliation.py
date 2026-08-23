@@ -583,7 +583,10 @@ def test_multi_analyzer_job_waits_for_all_results_and_aggregates_inconclusive() 
                 AnalysisType.LICENSE,
             }
             assert event is not None and event.status is ChangeEventStatus.DONE
-            assert license_risks == ()
+            # 부분적으로 본 결과도 **본 것은 적는다.** 예전에는 여기가 비어 있었고,
+            # 그래서 한 패키지 조회 실패가 그 파일 전체를 없던 일로 만들었다.
+            assert len(license_risks) == 1
+            assert license_risks[0].lifecycle_state is RiskLifecycleState.NEW
 
     run(scenario())
 
@@ -1194,7 +1197,7 @@ def test_a_document_no_analyzer_handles_finishes_rather_than_looking_unfinished(
 # --------------------------------------------------------------------- 0-L
 
 
-def test_zero_declarations_cannot_resolve_a_dependency_files_risks() -> None:
+def test_a_broken_read_cannot_resolve_a_dependency_files_risks() -> None:
     """읽기가 망가진 결과가 위험을 "해소" 로 바꾸지 못한다.
 
     의존성 파일을 읽다가 망가지면 결과가 **선언 0 건**으로 나온다. 조각화도, redaction
@@ -1223,7 +1226,8 @@ def test_zero_declarations_cannot_resolve_a_dependency_files_risks() -> None:
             assert len(risks) == 1
             assert risks[0].lifecycle_state is RiskLifecycleState.NEW
 
-        # 판본이 달라졌고 coverage 도 COMPLETE 다. 그래도 선언이 0 건이면 권위가 없다.
+        # 읽기가 망가진 결과다. 네 손실 경로가 전부 여기로 온다 — 못 읽었거나 잘렸으면
+        # coverage 가 PARTIAL 이고, 그 0 건은 "없다" 가 아니라 "모른다" 다.
         job2, started2 = await add_running_job(
             store,
             suffix="zero-2",
@@ -1231,11 +1235,10 @@ def test_zero_declarations_cannot_resolve_a_dependency_files_risks() -> None:
             requested=(AnalysisType.LICENSE,),
             offset_seconds=10,
         )
-        emptied = license_result(job2, "revision-2", started2).model_copy(
-            update={"candidates": [], "evidence": []}
-        )
+        emptied = license_result(
+            job2, "revision-2", started2, coverage=AnalysisCoverage.PARTIAL
+        ).model_copy(update={"candidates": [], "evidence": []})
         assert emptied.status is AnalysisStatus.SUCCEEDED
-        assert emptied.coverage is AnalysisCoverage.COMPLETE
 
         acceptance = await service.accept_analysis_result(emptied)
         assert not acceptance.resolved_risk_ids
@@ -1323,6 +1326,132 @@ def test_a_patent_document_with_no_candidates_still_resolves() -> None:
             update={"candidates": [], "evidence": []}
         )
         acceptance = await service.accept_analysis_result(emptied)
+        assert len(acceptance.resolved_risk_ids) == 1
+
+    run(scenario())
+
+
+# --------------------------------------------------------------------- 0-E
+
+
+def test_a_partial_result_records_risks_but_cannot_close_them() -> None:
+    """`PARTIAL` 이 막는 것은 **해소 하나**다.
+
+    예전에는 하나였다 — `PARTIAL` 이면 reconcile 전체가 건너뛰어져 Risk 생성도 근거도
+    이력도 없었다. 그래서 스무 개를 읽고 그중 한 패키지의 조회가 실패하면 스무 개가
+    전부 버려졌다. RAG 가 죽었을 때도 같아서, **검색 장애가 정책 표의 판정까지 버렸다.**
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        # 온전한 결과로 Risk 를 만든다.
+        job1, started1 = await add_running_job(
+            store,
+            suffix="partial-1",
+            revision="revision-1",
+            requested=(AnalysisType.LICENSE,),
+        )
+        first = license_result(job1, "revision-1", started1)
+        second_candidate = first.candidates[0].model_copy(
+            update={"normalized_package_name": "Other-Package"}
+        )
+        await service.accept_analysis_result(
+            first.model_copy(update={"candidates": [*first.candidates, second_candidate]})
+        )
+        async with store() as uow:
+            assert (
+                len(await uow.risks.list_for_artifact("artifact-1", AnalysisType.LICENSE))
+                == 2
+            )
+
+        # 다음 실행은 하나만 보고 부분적으로 끝났다.
+        job2, started2 = await add_running_job(
+            store,
+            suffix="partial-2",
+            revision="revision-2",
+            requested=(AnalysisType.LICENSE,),
+            offset_seconds=10,
+        )
+        acceptance = await service.accept_analysis_result(
+            license_result(
+                job2, "revision-2", started2, coverage=AnalysisCoverage.PARTIAL
+            )
+        )
+
+        # 본 것은 적혔다.
+        assert acceptance.affected_risk_ids
+        # 못 본 것은 닫지 못한다 — 사라진 쪽은 그대로 열려 있다.
+        assert not acceptance.resolved_risk_ids
+        async with store() as uow:
+            risks = await uow.risks.list_for_artifact("artifact-1", AnalysisType.LICENSE)
+            assert len(risks) == 2
+            assert all(
+                risk.lifecycle_state is not RiskLifecycleState.RESOLVED for risk in risks
+            )
+
+    run(scenario())
+
+
+def test_a_partial_result_does_not_count_as_having_analysed_the_revision() -> None:
+    """부분적으로 본 것을 성공한 분석으로 적으면 다시 볼 이유가 사라진다."""
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        job_id, started_at = await add_running_job(
+            store,
+            suffix="partial-rev",
+            revision="revision-1",
+            requested=(AnalysisType.LICENSE,),
+        )
+        await make_service(store).accept_analysis_result(
+            license_result(
+                job_id, "revision-1", started_at, coverage=AnalysisCoverage.PARTIAL
+            )
+        )
+        async with store() as uow:
+            state = await uow.artifacts.get_state("artifact-1")
+            assert AnalysisType.LICENSE not in (
+                state.latest_successful_analysis_revision_by_type
+            )
+
+    run(scenario())
+
+
+def test_a_manifest_emptied_on_purpose_does_resolve() -> None:
+    """사람이 의존성을 전부 지웠다면 해소되는 것이 맞다.
+
+    ``COMPLETE`` + 0 건은 이제 "온전히 읽었고 정말 아무것도 선언하지 않았다" 를 뜻한다 —
+    네 손실 경로가 모두 ``PARTIAL`` 로 가게 된 뒤에 성립하는 구분이다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(
+            store,
+            suffix="emptied-1",
+            revision="revision-1",
+            requested=(AnalysisType.LICENSE,),
+        )
+        await service.accept_analysis_result(
+            license_result(job1, "revision-1", started1)
+        )
+
+        job2, started2 = await add_running_job(
+            store,
+            suffix="emptied-2",
+            revision="revision-2",
+            requested=(AnalysisType.LICENSE,),
+            offset_seconds=10,
+        )
+        acceptance = await service.accept_analysis_result(
+            license_result(job2, "revision-2", started2).model_copy(
+                update={"candidates": [], "evidence": []}
+            )
+        )
         assert len(acceptance.resolved_risk_ids) == 1
 
     run(scenario())

@@ -623,3 +623,59 @@ def test_missing_policy_is_retryable_failed_state_and_idempotent_on_redelivery()
             assert len(await uow.audit.list_source_access("vws-1")) == 1
 
     run(scenario())
+
+
+# --------------------------------------------------------------------- 0-B
+
+
+def test_a_package_name_is_not_mistaken_for_a_secret():
+    """마스킹이 패키지 이름에 걸려 선언을 망가뜨렸다.
+
+    ``tokenizers`` 는 HuggingFace 를 쓰는 거의 모든 프로젝트에 있고 ``secretstorage`` 는
+    ``keyring`` 의 의존성이다. 드문 경우가 아니다.
+    """
+    from ip_risk_agent.application.security_gate.redaction import redact_text
+
+    for line in ("tokenizers==0.15.0", "secretstorage==3.3.3"):
+        assert redact_text(line, keyword_patterns=False)[0] == line
+        # 설정 파일이었다면 가려지는 것이 맞다 — 끄는 것은 의존성 파일에서만이다.
+        assert redact_text(line)[0] != line
+
+
+def test_masking_a_manifest_leaves_it_parseable():
+    """구조가 있는 형식은 따옴표 하나가 먹히면 **파일 전체가 0 건**이 된다."""
+    from ip_risk_agent.application.security_gate.redaction import redact_text
+    from ip_risk_agent.intelligence.license import manifests
+
+    toml = (
+        "[project]\n"
+        'dependencies = ["httpx==0.28.1", "secret==1.0.0", "pydantic==2.13.4"]\n'
+    )
+    assert len(manifests.parse_pyproject_toml(toml, "pyproject.toml")) == 3
+
+    safe = redact_text(toml, keyword_patterns=False)[0]
+    assert len(manifests.parse_pyproject_toml(safe, "pyproject.toml")) == 3
+
+
+def test_secrets_that_look_like_secrets_are_still_masked():
+    """이름으로 찾는 것만 끈다. 생김새로 찾는 것은 의존성 파일에서도 돈다.
+
+    의존성 명세에 자격증명이 박힌 URL 이 들어올 수 있다.
+    """
+    from ip_risk_agent.application.security_gate.redaction import (
+        REDACTION_PLACEHOLDER,
+        redact_text,
+    )
+
+    token = "ghp_" + "a" * 24
+    masked, count = redact_text(
+        f"pkg @ https://x.example/a.whl?token={token}", keyword_patterns=False
+    )
+    assert token not in masked
+    assert REDACTION_PLACEHOLDER in masked
+    assert count == 1
+
+    bearer, _ = redact_text(
+        "Authorization: Bearer abcdefghijklmnop", keyword_patterns=False
+    )
+    assert REDACTION_PLACEHOLDER in bearer

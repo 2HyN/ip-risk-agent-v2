@@ -49,10 +49,54 @@ class ReviewDecision:
 
 
 def analysis_is_authoritative(status: AnalysisStatus, coverage: AnalysisCoverage) -> bool:
+    """**없다고 말할** 권한이 있는가.
+
+    후보가 안 보인다는 사실을 근거로 기존 Risk 를 닫으려면 파일을 온전히 봤어야 한다.
+    일부만 본 결과는 "없다" 가 아니라 "이 부분에는 없다" 이고, 그것으로는 닫지 못한다.
+    """
     return status is AnalysisStatus.SUCCEEDED and coverage is AnalysisCoverage.COMPLETE
 
 
-def absence_can_resolve(analysis_type: AnalysisType, candidate_count: int) -> bool:
+def analysis_can_record(status: AnalysisStatus, coverage: AnalysisCoverage) -> bool:
+    """**본 것을 적을** 권한이 있는가.
+
+    ## 왜 나누는가
+
+    예전에는 권한이 하나였다. ``PARTIAL`` 이면 :func:`analysis_is_authoritative` 가 거짓이
+    되고, 그 하나가 reconcile 전체를 막았다 — Risk 생성도, 근거 저장도, 이력 기록도, 등급
+    변경도 전부.
+
+    그래서 이런 일이 일어났다. 선언 스무 개를 다 읽었는데 그중 **한 패키지**의 라이선스를
+    레지스트리가 못 알려줬다. 나머지 열아홉은 확정됐고 그 안에 AGPL 이 있다. 그런데
+    ``degraded`` 하나 때문에 coverage 가 ``PARTIAL`` 이 되고, **스무 개가 전부 버려졌다.**
+    화면에는 아무것도 뜨지 않는다.
+
+    "다 못 봤다" 가 "아무것도 못 봤다" 로 취급된 것이다. RAG 가 죽었을 때도 같았다 —
+    검색 장애가 정책 표의 판정까지 함께 버렸다.
+
+    ## 무엇을 가르는가
+
+    본 것은 부분적이어도 **사실**이다. 못 본 것을 "없다" 로 바꾸는 것만 주장이다.
+    그래서 권한을 둘로 나눈다.
+
+    ==================  ==========  ==========
+    coverage            적을 수 있나  닫을 수 있나
+    ==================  ==========  ==========
+    ``COMPLETE``        예           예
+    ``PARTIAL``         **예**       아니오
+    ``NONE``            아니오       아니오
+    ==================  ==========  ==========
+
+    ``NONE`` 은 아무것도 못 본 것이라 적을 것도 없다.
+    """
+    return status is AnalysisStatus.SUCCEEDED and coverage is not AnalysisCoverage.NONE
+
+
+def absence_can_resolve(
+    analysis_type: AnalysisType,
+    candidate_count: int,
+    coverage: AnalysisCoverage,
+) -> bool:
     """후보가 없다는 사실만으로 기존 Risk 를 해소해도 되는가.
 
     ## 왜 이 규칙이 필요한가
@@ -78,19 +122,31 @@ def absence_can_resolve(analysis_type: AnalysisType, candidate_count: int) -> bo
     **사람이 실제로 의존성을 지운 것**이다. 그건 정상적인 해소이므로 그대로 둔다. 막는 것은
     "통째로 0 건" 이라는 전이 하나뿐이다.
 
-    ## 지금은 예외를 두지 않는다
+    ## 이제 정상적인 제거는 다시 해소된다
 
-    사람이 의존성을 전부 지운 경우까지 함께 막히므로 해소되어야 할 Risk 가 열린 채 남는다.
-    그것은 화면에 보이는 과경보이지 조용한 유실이 아니다. 둘을 가르려면 파서가 "못 읽었다"
-    와 "선언 구역이 비어 있다" 를 구분해야 하는데, 지금은 구분하지 못한다. 구분이 생기면
-    그때 예외를 연다.
+    처음에는 예외 없이 막았다. "못 읽었다" 와 "선언 구역이 비어 있다" 를 가를 수 없었기
+    때문이다. 그 구분이 생겼다 — 네 경로가 전부 ``COMPLETE`` 를 못 내게 됐다.
+
+    * 조각화는 의존성 파일을 통짜로 넘긴다
+    * redaction 은 패키지 이름을 건드리지 않는다
+    * 파서는 못 읽으면 예외를 낸다 → ``PARTIAL``
+    * 게이트가 자르면 ``content_scope`` 로 드러난다 → ``PARTIAL``
+
+    그래서 **의존성 파일에서 ``COMPLETE`` + 0 건은 이제 "온전히 읽었고 정말 아무것도
+    선언하지 않았다" 를 뜻한다.** 사람이 의존성을 지운 경우이므로 해소되는 것이 맞다.
+
+    ``coverage`` 를 함께 받는 이유가 그것이다. 판단은 개수 하나로 되지 않는다 — 0 건이
+    무엇을 뜻하는지는 **어떻게 0 건이 되었는지**에 달려 있고, 그것을 들고 있는 것이
+    coverage 다.
 
     특허 경로에는 적용하지 않는다. 문서에서 후보가 사라지는 것은 파싱 손실이 아니라 판정
     변화이고, 그쪽은 애초에 선언을 세는 구조가 아니다.
     """
     if analysis_type is not AnalysisType.LICENSE:
         return True
-    return candidate_count > 0
+    if candidate_count > 0:
+        return True
+    return coverage is AnalysisCoverage.COMPLETE
 
 
 def decide_lifecycle(
@@ -100,9 +156,17 @@ def decide_lifecycle(
     status: AnalysisStatus,
     coverage: AnalysisCoverage,
 ) -> LifecycleDecision:
-    """Decide lifecycle without allowing incomplete analysis to change Risk truth."""
+    """부분적인 분석이 **본 것은 적되 못 본 것을 주장하지는** 못하게 한다.
 
-    authoritative = analysis_is_authoritative(status, coverage)
+    권한이 방향마다 다르다. 후보를 봤다면 그것은 부분적이어도 사실이므로 적는다. 후보가
+    안 보인다는 것은 온전히 봤을 때만 "없다" 가 된다.
+    """
+
+    authoritative = (
+        analysis_can_record(status, coverage)
+        if candidate_present
+        else analysis_is_authoritative(status, coverage)
+    )
     if not authoritative:
         return LifecycleDecision(previous_state, previous_state, None, False)
 

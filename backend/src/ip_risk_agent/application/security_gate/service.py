@@ -59,6 +59,8 @@ from ip_risk_agent.core.workspaces import RiskWorkspace, RiskWorkspaceStatus
 
 from .ignore import IgnorePolicyError, is_ignored, parse_ipriskignore
 from .minimization import minimize_segments
+from ip_risk_agent.core.artifacts.dependency_files import DEPENDENCY_KINDS
+
 from .policy import (
     SecurityGatePolicy,
     SecurityPolicyResolutionError,
@@ -266,7 +268,12 @@ class SecurityGateService:
         if input_bytes > policy.max_input_bytes:
             return SecurityGateDenialReason.CONTENT_TOO_LARGE, None
 
-        redacted, redaction_count = redact_segments(snapshot.text_segments)
+        redacted, redaction_count = redact_segments(
+            snapshot.text_segments,
+            # 매니페스트의 왼쪽은 설정 키가 아니라 패키지 이름이다. 낱말로 찾는 패턴은
+            # 거기서 이름을 비밀로 오인해 선언을 망가뜨린다.
+            keyword_patterns=snapshot.artifact_kind not in DEPENDENCY_KINDS,
+        )
         minimized, content_scope = minimize_segments(
             artifact_kind=snapshot.artifact_kind,
             content_scope=snapshot.content_scope,

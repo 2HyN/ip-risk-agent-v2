@@ -57,6 +57,7 @@ from ip_risk_agent.core.risk import (
     RiskEvidence,
     RiskLifecycleState,
     absence_can_resolve,
+    analysis_can_record,
     analysis_is_authoritative,
     decide_lifecycle,
     should_revive,
@@ -197,7 +198,9 @@ class AnalysisResultIntakeService:
                 job.started_at or job.created_at,
             )
 
-            if analysis_is_authoritative(result.status, result.coverage):
+            # 본 것은 부분적이어도 적는다. 못 본 것을 "없다" 로 바꾸는 권한만 따로
+            # 걸린다 — 그 판단은 decide_lifecycle 안에서 방향마다 갈린다.
+            if analysis_can_record(result.status, result.coverage):
                 affected, resolved, evidence_count = await self._reconcile(
                     uow,
                     result=result,
@@ -206,6 +209,10 @@ class AnalysisResultIntakeService:
                     occurred_at=occurred_at,
                     workspace_owner=workspace_owner,
                 )
+
+            # 다만 "이 판본을 온전히 분석했다" 는 기록은 COMPLETE 일 때만 남긴다.
+            # 부분적으로 본 것을 성공한 분석으로 적으면 다시 볼 이유가 사라진다.
+            if analysis_is_authoritative(result.status, result.coverage):
                 revisions = dict(
                     artifact_state.latest_successful_analysis_revision_by_type
                 )
@@ -439,7 +446,9 @@ class AnalysisResultIntakeService:
         # 0-L — 의존성 파일에서 선언이 통째로 사라진 결과는 해소 권한이 없다.
         # 읽기가 망가진 것과 사람이 다 지운 것을 지금은 가르지 못하므로, 가르지 못하는
         # 동안에는 막는 쪽을 고른다. 과경보는 화면에 보이지만 잘못된 해소는 조용하다.
-        if not absence_can_resolve(result.analysis_type, len(result.candidates)):
+        if not absence_can_resolve(
+            result.analysis_type, len(result.candidates), result.coverage
+        ):
             if existing_by_key:
                 logger.warning(
                     json.dumps(
