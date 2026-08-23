@@ -16,7 +16,7 @@ import {
 } from "../shared/ui";
 import { useWorkspace } from "../workspace/workspace-context";
 
-type HistoryKind = "activity" | "audit" | "source-access";
+type HistoryKind = "activity" | "risk-events" | "audit" | "source-access";
 
 // 사람이 읽어서 뜻이 없는 조각. 요약·파일 이름 등 본문이 된 것도 칩으로는
 // 다시 적지 않는다. 내보내기 JSON 에는 전부 그대로 남는다.
@@ -68,12 +68,22 @@ export function HistoryPage() {
   // 로그의 id 만으로는 사람이 사건을 되짚을 수 없다 — 어떤 소스의 어떤 파일인지를
   // 함께 보여 주려고 추적 목록을 한 번 읽어 id → 이름을 잇는다.
   const context = useResource(() => api.dataAccess(workspace.id), [api, workspace.id]);
+  // 행위자도 id 로만 오면 사람이 못 알아본다 — 멤버 목록으로 이름을 되짚는다.
+  const members = useResource(() => api.members(workspace.id), [api, workspace.id]);
   const artifactById = new Map(
     (context.data?.tracked_artifacts ?? []).map((item) => [item.artifact_id, item]),
   );
   const mountById = new Map(
     (context.data?.connected_sources ?? []).map((item) => [item.mount_id, item]),
   );
+  const memberById = new Map(
+    (members.data?.items ?? []).map((item) => [item.user_id, item]),
+  );
+  function actorLabel(userId: string | null): string {
+    if (userId === null) return "unknown user";
+    const member = memberById.get(userId);
+    return member?.user_display_name ?? member?.user_email ?? userId;
+  }
   return (
     <div className="content">
       <PageHeader
@@ -99,6 +109,13 @@ export function HistoryPage() {
           onClick={() => setKind("activity")}
         >
           All activity
+        </button>
+        <button
+          role="tab"
+          aria-selected={kind === "risk-events"}
+          onClick={() => setKind("risk-events")}
+        >
+          Risk
         </button>
         <button
           role="tab"
@@ -178,7 +195,7 @@ export function HistoryPage() {
                     )}
                     <p>
                       {entry.actor_type === "USER"
-                        ? `User ${entry.actor_user_id ?? "unknown"}`
+                        ? actorLabel(entry.actor_user_id)
                         : "System"}
                     </p>
                     {pairs.length === 0 ? null : (

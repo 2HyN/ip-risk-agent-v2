@@ -36,9 +36,6 @@ export interface AddSourceChooserProps {
 export function AddSourceChooser({
   onSelect,
   isDesktop,
-  riskWorkspaceId,
-  connectionApiClient,
-  navigateExternal = (url) => window.location.assign(url),
   onUseExistingGithub = null,
 }: AddSourceChooserProps) {
   const [error, setError] = useState<string | null>(null);
@@ -54,22 +51,10 @@ export function AddSourceChooser({
     setError(null);
   };
 
-  /** GitHub 설치 화면으로 보낸다. 저장소를 설치에 **추가**하려면 이 길뿐이다. */
-  const startGithubInstall = async (): Promise<void> => {
-    onSelect("GITHUB");
-    setError(null);
-    try {
-      const { authorizeUrl } = await connectionApiClient.startGithubConnection(riskWorkspaceId);
-      navigateExternal(authorizeUrl);
-    } catch {
-      setError("GitHub 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-    }
-  };
-
   const handleGithubClick = (): void => {
     // 어느 경우든 **창부터** 연다. 설치가 없다고 바로 GitHub 으로 내보내면,
     // 사용자는 무엇을 하러 가는지 모른 채 redirect 를 겪는다. 설치로 나가는
-    // 것은 창 안의 "repo 추가" 버튼을 눌렀을 때뿐이다.
+    // 것은 창 안의 "GitHub App에 repo 추가" 버튼을 눌렀을 때뿐이다.
     onSelect("GITHUB");
     setError(null);
     onUseExistingGithub?.();
@@ -88,25 +73,12 @@ export function AddSourceChooser({
       <Button type="button" variant="secondary" onClick={handleGithubClick}>
         GitHub Repository
       </Button>
-      {onUseExistingGithub === null ? null : (
-        <>
-          <p className="source-hint">
-            이미 연결된 GitHub 설치가 있습니다. 접근 가능한 저장소는 위에서 바로
-            고를 수 있습니다.
-          </p>
-          {/*
-            설치에 없는 저장소를 붙이려면 GitHub 으로 가야 한다. App 이 스스로
-            저장소 접근 권한을 얻는 API 는 없기 때문이다.
-
-            이 길을 없애면 **설치에 없는 저장소는 영영 붙일 수 없다.** 실제로
-            그렇게 만들어 버린 적이 있다 — 기존 연결을 쓰게 하면서 GitHub 으로
-            나가는 유일한 버튼을 대체해 버렸다.
-          */}
-          <Button type="button" variant="secondary" onClick={() => void startGithubInstall()}>
-            GitHub 에서 저장소 추가
-          </Button>
-        </>
-      )}
+      {/*
+        "GitHub 에서 저장소 추가" 버튼은 chooser 에서 뺐다. GitHub 버튼이 둘이면
+        하나는 반드시 눌리고, 그 하나가 예고 없이 redirect 였다. GitHub 으로 나가는
+        길은 저장소 선택 창 안의 "GitHub App에 repo 추가" 하나뿐이다 — 설치에 없는
+        저장소를 붙이는 길이 사라지면 안 되므로 그 버튼은 창이 항상 들고 있다.
+      */}
       <Button type="button" variant="secondary" onClick={() => onSelect("LOCAL")} disabled={!isDesktop}>
         Local Folder{isDesktop ? "" : " (Desktop only)"}
       </Button>

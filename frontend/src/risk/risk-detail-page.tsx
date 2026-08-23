@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { formatDate, humanize, shortRevision } from "../shared/format";
@@ -12,7 +12,6 @@ import {
   Field,
   LoadingState,
   PageHeader,
-  Select,
   Textarea,
   toneFor,
 } from "../shared/ui";
@@ -30,14 +29,14 @@ export function RiskDetailPage() {
     () => api.risk(workspace.id, riskId),
     [api, workspace.id, riskId],
   );
-  const [disposition, setDisposition] =
-    useState<Risk["review_disposition"]>("UNREVIEWED");
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [mutationError, setMutationError] = useState<Error | null>(null);
+  const [openNotice, setOpenNotice] = useState<string | null>(null);
 
-  async function review(event: FormEvent) {
-    event.preventDefault();
+  // 처분은 버튼 하나로 끝난다 — 드롭다운에서 고르고 저장을 또 누르는 두 걸음은
+  // 검토 수십 건을 처리하는 손에 너무 느리다.
+  async function review(disposition: Risk["review_disposition"]) {
     if (resource.data === null) return;
     setBusy(true);
     setMutationError(null);
@@ -60,6 +59,30 @@ export function RiskDetailPage() {
     }
   }
 
+  function openOriginal(): void {
+    setOpenNotice(null);
+    const handler = integration.openOriginal;
+    if (handler === undefined || resource.data === null) return;
+    // 실패를 삼키면 버튼이 "안 눌리는" 것처럼 보인다 — Local 원문은 등록된
+    // 데스크톱에서만 열리므로, 웹에서는 그 사실을 말해 준다.
+    void Promise.resolve(
+      handler({
+        workspaceId: workspace.id,
+        artifactId: resource.data.open_original.artifact_id,
+        action: resource.data.open_original.action,
+        sourceType: resource.data.risk.source_type,
+      }),
+    ).catch((reason: unknown) => {
+      setOpenNotice(
+        resource.data?.risk.source_type === "LOCAL"
+          ? "Local 파일의 원문은 그 파일을 등록한 데스크톱 앱에서만 열 수 있습니다."
+          : reason instanceof Error
+            ? reason.message
+            : "원문을 여는 데 실패했습니다.",
+      );
+    });
+  }
+
   if (resource.loading) return <LoadingState label="Loading risk detail" />;
   if (resource.error !== null)
     return <ErrorState error={resource.error} retry={resource.reload} />;
@@ -75,7 +98,7 @@ export function RiskDetailPage() {
           ? "Open on owning desktop"
           : "Open original";
   return (
-    <div className="content">
+    <div className="content risk-detail">
       <PageHeader
         eyebrow={`${risk.analysis_type} · ${risk.artifact_display_name ?? risk.artifact_id}`}
         title={risk.summary}
@@ -90,14 +113,7 @@ export function RiskDetailPage() {
                   ? "Source resolver is connected by Integration"
                   : undefined
               }
-              onClick={() => {
-                void integration.openOriginal?.({
-                  workspaceId: workspace.id,
-                  artifactId: detail.open_original.artifact_id,
-                  action: detail.open_original.action,
-                  sourceType: risk.source_type,
-                });
-              }}
+              onClick={openOriginal}
             >
               {openLabel} ↗
             </Button>
@@ -110,6 +126,9 @@ export function RiskDetailPage() {
           </div>
         }
       />
+      {openNotice === null ? null : (
+        <p className="source-selection" role="status">{openNotice}</p>
+      )}
       {mutationError === null ? null : <ErrorState error={mutationError} />}
       <div className="detail-grid">
         <div className="detail-main">
@@ -127,14 +146,7 @@ export function RiskDetailPage() {
           <EvidenceComparison
             detail={detail}
             openLabel={openLabel}
-            onOpenOriginal={() => {
-              void integration.openOriginal?.({
-                workspaceId: workspace.id,
-                artifactId: detail.open_original.artifact_id,
-                action: detail.open_original.action,
-                sourceType: risk.source_type,
-              });
-            }}
+            onOpenOriginal={openOriginal}
           />
           {risk.explanation_safe === null && risk.recommendation_safe === null ? null : (
             <Card>
@@ -157,29 +169,8 @@ export function RiskDetailPage() {
               </p>
             </Card>
           )}
-          <Card>
-            <p className="eyebrow">Analysis metadata</p>
-            {/* 실행 id 같은 기계용 식별자는 여기 두지 않는다 — 사람이 판단에 쓸 수
-                있는 것(어느 파일의 어느 판본인가)만 남긴다. */}
-            <dl className="metadata-list">
-              <div>
-                <dt>Evidence revision</dt>
-                <dd>
-                  {risk.latest_evidence_revision === null
-                    ? "Not retained"
-                    : shortRevision(risk.latest_evidence_revision)}
-                </dd>
-              </div>
-              <div>
-                <dt>Artifact path</dt>
-                <dd>{risk.artifact_logical_path ?? "Not available"}</dd>
-              </div>
-              <div>
-                <dt>Source mount</dt>
-                <dd>{risk.mount_alias ?? "Not available"}</dd>
-              </div>
-            </dl>
-          </Card>
+          {/* Analysis metadata 카드는 뺐다 — 실행 id·판본은 사람의 판단에 쓰이지
+              않고, 경로는 이미 머리글에 있다. */}
         </div>
         <aside>
           {risk.review_disposition === "EXCLUDED" ? (
@@ -200,45 +191,44 @@ export function RiskDetailPage() {
             <Card className="review-card">
               <p className="eyebrow">Reviewer decision</p>
               <h2>Record disposition</h2>
-              <form
-                onSubmit={(event) => {
-                  void review(event);
-                }}
+              <Field
+                label="Comment"
+                hint="Optional · retained in append-only history"
               >
-                <Field label="Disposition">
-                  <Select
-                    value={disposition}
-                    onChange={(event) =>
-                      setDisposition(
-                        event.target.value as Risk["review_disposition"],
-                      )
+                <Textarea
+                  rows={4}
+                  maxLength={2000}
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                />
+              </Field>
+              {/*
+                버튼 하나가 처분 하나다. 지금 처분은 눌린 모양으로 보인다.
+                Excluded 는 여기에 없다 — 그것은 파일 추적 중단처럼 사용자 판단
+                밖의 요인으로 관리가 끝났다는 뜻이라 시스템만 붙인다. 스스로
+                감시를 그만두는 것은 Accepted risk 다.
+              */}
+              <div className="disposition-buttons">
+                {(
+                  [
+                    ["UNREVIEWED", "Unreviewed"],
+                    ["MONITORING", "Monitoring"],
+                    ["ACCEPTED_RISK", "Accept risk"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    variant={
+                      risk.review_disposition === value ? "primary" : "secondary"
                     }
+                    disabled={busy || risk.review_disposition === value}
+                    onClick={() => void review(value)}
                   >
-                    {/*
-                      Excluded 는 여기에 없다. 그것은 파일 추적 중단이나 mount
-                      일시중지처럼 사용자 판단 밖의 요인으로 관리가 끝났다는 뜻이라
-                      시스템만 붙인다. 스스로 감시를 그만두는 것은 Accepted risk 다.
-                    */}
-                    <option value="UNREVIEWED">Unreviewed</option>
-                    <option value="MONITORING">Monitoring</option>
-                    <option value="ACCEPTED_RISK">Accepted risk</option>
-                  </Select>
-                </Field>
-                <Field
-                  label="Comment"
-                  hint="Optional · retained in append-only history"
-                >
-                  <Textarea
-                    rows={5}
-                    maxLength={2000}
-                    value={comment}
-                    onChange={(event) => setComment(event.target.value)}
-                  />
-                </Field>
-                <Button disabled={busy}>
-                  {busy ? "Saving…" : "Save decision"}
-                </Button>
-              </form>
+                    {label}
+                  </Button>
+                ))}
+              </div>
               <p className="fine-print">
                 This changes human disposition only. Machine lifecycle is
                 controlled by authoritative analysis.

@@ -155,12 +155,18 @@ export function MembersPage() {
                       <strong>
                         {member.user_id === user?.id
                           ? `${user.display_name} (you)`
-                          : member.user_id}
+                          : member.user_display_name ??
+                            member.user_email ??
+                            "알 수 없는 사용자"}
                       </strong>
+                      {member.user_email === null ||
+                      member.user_email === undefined ? null : (
+                        <small>{member.user_email}</small>
+                      )}
                       <small>
                         {member.user_id === workspace.owner_user_id
                           ? "Workspace owner"
-                          : `Invited by ${member.invited_by}`}
+                          : `Invited by ${member.invited_by_email ?? "알 수 없음"}`}
                       </small>
                     </td>
                     <td>

@@ -82,6 +82,11 @@ class MembershipResponse(StrictApiModel):
     invited_by: str
     created_at: datetime
     updated_at: datetime
+    # id 만으로는 사람이 사람을 못 알아본다. 목록 라우트가 채워서 보낸다 —
+    # 다른 라우트(내 멤버십 등)는 안 채워도 되도록 선택 필드다.
+    user_email: str | None = None
+    user_display_name: str | None = None
+    invited_by_email: str | None = None
 
 
 class InvitationResponse(StrictApiModel):
@@ -125,6 +130,8 @@ class MountAliasUpdateRequest(StrictApiModel):
 class PendingInvitationResponse(InvitationResponse):
     workspace_name: str
     acceptance_available: bool
+    #: 초대한 사람의 이메일. id 는 화면에서 사람이 못 알아본다.
+    invited_by_email: str | None = None
 
 
 class InvitationAcceptanceResponse(StrictApiModel):
@@ -450,7 +457,28 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
             scope=f"members:{vws_id}",
             codec=deps.cursor_codec,
         )
-        return Page(items=list(selected), next_cursor=next_cursor)
+        # id 만으로는 사람이 사람을 못 알아본다 — 이 페이지에 나올 사용자만
+        # 이름과 이메일을 되짚어 함께 싣는다.
+        user_ids = {member.user_id for member in selected} | {
+            member.invited_by for member in selected
+        }
+        async with deps.unit_of_work_factory() as uow:
+            users = {user_id: await uow.users.get(user_id) for user_id in user_ids}
+        items = []
+        for member in selected:
+            user = users.get(member.user_id)
+            inviter = users.get(member.invited_by)
+            items.append(
+                MembershipResponse(
+                    **MembershipResponse.model_validate(member).model_dump(
+                        exclude={"user_email", "user_display_name", "invited_by_email"}
+                    ),
+                    user_email=None if user is None else user.email,
+                    user_display_name=None if user is None else user.display_name,
+                    invited_by_email=None if inviter is None else inviter.email,
+                )
+            )
+        return Page(items=items, next_cursor=next_cursor)
 
     @router.post(
         "/{vws_id}/members/invitations",
@@ -624,11 +652,15 @@ def create_invitations_router(deps: WorkspaceRouterDependencies) -> APIRouter:
                         invitation.expires_at is None
                         or invitation.expires_at > datetime.now(timezone.utc)
                     )
+                    inviter = await uow.users.get(invitation.invited_by)
                     values.append(
                         PendingInvitationResponse(
                             **InvitationResponse.model_validate(invitation).model_dump(),
                             workspace_name=workspace.name,
                             acceptance_available=acceptance_available,
+                            invited_by_email=(
+                                None if inviter is None else inviter.email
+                            ),
                         )
                     )
         selected, next_cursor = paginate(

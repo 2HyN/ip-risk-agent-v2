@@ -113,7 +113,7 @@ export class ControlApi {
     );
   history = (
     id: string,
-    kind: "activity" | "audit" | "source-access",
+    kind: "activity" | "risk-events" | "audit" | "source-access",
     cursor: string | null = null,
   ) =>
     this.client.request<Page<HistoryEntry>>(

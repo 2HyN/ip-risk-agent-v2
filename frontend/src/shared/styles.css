@@ -1534,3 +1534,60 @@ button.explorer-row__main:hover .explorer-row__name {
     width: 100%;
   }
 }
+
+/* Risk 상세 — 제목은 문장(요약)이라 화면 제목 크기로는 너무 크다. */
+.risk-detail .page-header h1 {
+  font-size: clamp(1.2rem, 2.2vw, 1.6rem);
+  line-height: 1.35;
+}
+
+/* Review 필터 — 왼쪽에 뭉치지 않고 줄을 고르게 나눠 쓴다. */
+.filter-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+/* 처분 버튼 — 버튼 하나가 처분 하나. 지금 처분은 primary 로 보인다. */
+.disposition-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.disposition-buttons .button {
+  flex: 1 1 auto;
+}
+/* 버튼 셋이 들어갈 만큼 오른쪽 판을 넓힌다. */
+.detail-grid {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+@media (max-width: 1000px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 알림 — 항목 전체가 입구다. */
+.notification-body {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.notification-body:hover strong {
+  color: var(--blue);
+}
+
+/* Security & data — 삭제 구역 */
+.danger-zone {
+  border-color: rgba(184, 56, 56, 0.4);
+}
+.danger-zone h2 {
+  color: var(--danger);
+}

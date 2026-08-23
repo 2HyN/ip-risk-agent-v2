@@ -91,6 +91,40 @@ class HistoryQueryService:
         )
         return WorkspaceActivity(risk_workspace_id, entries)
 
+    async def list_risk_events(
+        self,
+        *,
+        risk_workspace_id: str,
+        actor_user_id: str,
+        limit: int = 100,
+    ) -> WorkspaceActivity:
+        """Risk 생애 사건만. 전체 활동에서는 접근 기록에 묻힌다."""
+        _require_limit(limit)
+        async with self._unit_of_work_factory() as uow:
+            await _authorize(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                actor_user_id=actor_user_id,
+                action=VwsAction.AUDIT_VIEW,
+            )
+            risks = await uow.risks.list_for_workspace(risk_workspace_id)
+            risk_events = []
+            for risk in risks:
+                risk_events.extend(
+                    (risk, event) for event in await uow.risks.list_events(risk.id)
+                )
+        entries = tuple(
+            sorted(
+                (
+                    _risk_entry(risk, event, self._safety)
+                    for risk, event in risk_events
+                ),
+                key=lambda entry: (entry.occurred_at, entry.id),
+                reverse=True,
+            )[:limit]
+        )
+        return WorkspaceActivity(risk_workspace_id, entries)
+
     async def list_audit_events(
         self,
         *,

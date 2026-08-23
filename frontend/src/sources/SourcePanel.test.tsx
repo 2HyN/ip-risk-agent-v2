@@ -403,8 +403,13 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    // GitHub 으로 나가는 길은 저장소 선택 창 안의 버튼 하나뿐이다 — chooser 에
+    // 같은 버튼이 또 있으면 그쪽이 예고 없는 redirect 가 된다.
     await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
-    await userEvent.click(await screen.findByRole("button", { name: "GitHub 에서 저장소 추가" }));
+    await userEvent.click(await screen.findByRole("button", { name: "GitHub Repository" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "GitHub App에 repo 추가" }),
+    );
 
     await waitFor(() => expect(visited).toHaveLength(1));
   });

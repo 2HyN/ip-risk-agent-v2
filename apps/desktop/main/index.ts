@@ -251,7 +251,12 @@ function applyNavigationPolicy(
     const parsed = new URL(url);
     if (
       parsed.protocol === "https:" &&
-      ["drive.google.com", "github.com"].includes(parsed.hostname) &&
+      // 원문(drive·github)과 근거 특허(KIPRIS)로 나가는 링크만 기본 브라우저로
+      // 연다. 목록에 없는 링크는 조용히 버려진다 — KIPRIS 가 빠져 있던 동안
+      // 근거 링크가 "안 눌리는" 것처럼 보였다.
+      ["drive.google.com", "github.com", "www.kipris.or.kr", "kipris.or.kr"].includes(
+        parsed.hostname,
+      ) &&
       !parsed.username &&
       !parsed.password
     ) {

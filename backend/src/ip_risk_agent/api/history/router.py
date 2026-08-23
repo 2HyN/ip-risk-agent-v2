@@ -81,6 +81,23 @@ def create_history_router(deps: HistoryRouterDependencies) -> APIRouter:
             scope_name="activity",
         )
 
+    @router.get("/risk-events", response_model=Page[HistoryEntryResponse])
+    async def risk_events(
+        vws_id: str,
+        principal: CurrentPrincipal = Depends(current),
+        cursor: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    ):
+        """Risk 생애 사건만 — 전체 활동에서는 접근 기록에 묻힌다."""
+        return await _page(
+            loader=deps.history.list_risk_events,
+            vws_id=vws_id,
+            actor_user_id=principal.user.id,
+            cursor=cursor,
+            limit=limit,
+            scope_name="risk-events",
+        )
+
     @router.get("/audit", response_model=Page[HistoryEntryResponse])
     async def audit(
         vws_id: str,

@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { formatBytes, formatDate, humanize, shortRevision } from "../shared/format";
 import { useResource } from "../shared/hooks/use-resource";
@@ -17,7 +18,29 @@ import { useWorkspace } from "../workspace/workspace-context";
 
 export function SecurityPage() {
   const { api } = useSession();
-  const { workspace, canManageSecurity } = useWorkspace();
+  const { workspace, role, canManageSecurity } = useWorkspace();
+  const navigate = useNavigate();
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<Error | null>(null);
+
+  async function deleteWorkspace(): Promise<void> {
+    const confirmed = window.confirm(
+      `"${workspace.name}" workspace를 삭제할까요?\n` +
+        "마운트, Risk, 근거, 이력이 모두 지워지며 되돌릴 수 없습니다.",
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteWorkspace(workspace.id);
+      navigate("/");
+    } catch (reason) {
+      setDeleteError(
+        reason instanceof Error ? reason : new Error("Workspace를 삭제하지 못했습니다."),
+      );
+      setDeleting(false);
+    }
+  }
   const settings = useResource(
     () => api.security(workspace.id),
     [api, workspace.id],
@@ -208,6 +231,24 @@ export function SecurityPage() {
           </Card>
         )}
       </section>
+      {role === "OWNER" ? (
+        <Card className="danger-zone">
+          <p className="eyebrow">Danger zone</p>
+          <h2>Workspace 삭제</h2>
+          <p>
+            이 workspace의 마운트, Risk, 근거, 이력이 모두 지워집니다. 되돌릴 수
+            없습니다.
+          </p>
+          {deleteError === null ? null : <ErrorState error={deleteError} />}
+          <Button
+            variant="danger"
+            disabled={deleting}
+            onClick={() => void deleteWorkspace()}
+          >
+            {deleting ? "Deleting…" : "Delete workspace"}
+          </Button>
+        </Card>
+      ) : null}
     </div>
   );
 }
