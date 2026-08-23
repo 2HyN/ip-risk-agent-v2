@@ -36,6 +36,7 @@ export function RiskDetailPage() {
     useState<Risk["review_disposition"]>("UNREVIEWED");
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [mutationError, setMutationError] = useState<Error | null>(null);
   const [openNotice, setOpenNotice] = useState<string | null>(null);
 
@@ -50,6 +51,7 @@ export function RiskDetailPage() {
         comment: comment.trim() === "" ? null : comment,
       });
       setComment("");
+      setReviewOpen(false);
       resource.reload();
     } catch (reason) {
       setMutationError(
@@ -108,18 +110,14 @@ export function RiskDetailPage() {
         description={`First detected ${formatDate(risk.first_seen_at)}`}
         actions={
           <div className="button-row">
-            <Button
-              variant="secondary"
-              disabled={integration.openOriginal === undefined}
-              title={
-                integration.openOriginal === undefined
-                  ? "Source resolver is connected by Integration"
-                  : undefined
-              }
-              onClick={openOriginal}
-            >
-              {openLabel} ↗
-            </Button>
+            {/* 원본 열기 버튼은 여기서 뺐다 — 원본 ↔ 근거 대조 아래에 이미 있다.
+                그 자리에 처분 버튼을 둔다. 처분 폼은 Add source 처럼 작은 창으로
+                띄워, 옆 판을 상시 점유하지 않는다 — 좌우 대조에 전체 폭을 쓴다. */}
+            {canReview && risk.review_disposition !== "EXCLUDED" ? (
+              <Button onClick={() => setReviewOpen(true)}>
+                Reviewer decision
+              </Button>
+            ) : null}
             <Link
               className="button button--secondary"
               to={`/w/${workspace.id}/risks/${risk.id}/timeline`}
@@ -133,123 +131,129 @@ export function RiskDetailPage() {
         <p className="source-selection" role="status">{openNotice}</p>
       )}
       {mutationError === null ? null : <ErrorState error={mutationError} />}
-      <div className="detail-grid">
-        <div className="detail-main">
+      <div className="detail-main">
+        <Card>
+          <div className="status-grid">
+            <Status label="Priority" value={risk.review_priority} />
+            <Status label="Machine lifecycle" value={risk.lifecycle_state} />
+            <Status
+              label="Reviewer decision"
+              value={risk.review_disposition}
+            />
+            <Status label="Last seen" value={formatDate(risk.last_seen_at)} />
+          </div>
+        </Card>
+        {risk.review_disposition === "EXCLUDED" ? (
           <Card>
-            <div className="status-grid">
-              <Status label="Priority" value={risk.review_priority} />
-              <Status label="Machine lifecycle" value={risk.lifecycle_state} />
-              <Status
-                label="Reviewer decision"
-                value={risk.review_disposition}
-              />
-              <Status label="Last seen" value={formatDate(risk.last_seen_at)} />
-            </div>
+            <p className="eyebrow">Excluded</p>
+            <h2>추적이 끝난 Risk</h2>
+            <p>
+              이 Risk 가 나온 파일은 더 이상 추적되지 않습니다. 파일 추적을 끊었거나
+              소스 연결을 일시중지했을 때 이렇게 됩니다. 근거와 이력은 그대로 남아
+              있어 언제든 다시 볼 수 있습니다. 다시 검토하려면 그 파일을 다시
+              추적하세요 — 이 Risk 가 미검토 상태로 되살아납니다.
+            </p>
           </Card>
-          <EvidenceComparison
-            detail={detail}
-            openLabel={openLabel}
-            onOpenOriginal={openOriginal}
-          />
-          {risk.explanation_safe === null && risk.recommendation_safe === null ? null : (
-            <Card>
-              <p className="eyebrow">설명 · 권고</p>
-              {risk.explanation_safe === null ? null : (
-                <>
-                  <h2>왜 검토가 필요한가</h2>
-                  <p>{risk.explanation_safe}</p>
-                </>
-              )}
-              {risk.recommendation_safe === null ? null : (
-                <>
-                  <h2>무엇을 하면 되는가</h2>
-                  <p>{risk.recommendation_safe}</p>
-                </>
-              )}
-              <p className="fine-print">
-                모델이 근거를 읽고 쓴 설명입니다. 판정을 바꾸지 않으며 법적 결론이
-                아닙니다. 실제 판단은 사람과 전문가의 검토가 필요합니다.
-              </p>
-            </Card>
-          )}
-          {/* Analysis metadata 카드는 뺐다 — 실행 id·판본은 사람의 판단에 쓰이지
-              않고, 경로는 이미 머리글에 있다. */}
-        </div>
-        <aside>
-          {risk.review_disposition === "EXCLUDED" ? (
-            <Card>
-              <p className="eyebrow">Excluded</p>
-              <h2>추적이 끝난 Risk</h2>
-              <p>
-                이 Risk 가 나온 파일은 더 이상 추적되지 않습니다. 파일 추적을 끊었거나
-                소스 연결을 일시중지했을 때 이렇게 됩니다. 근거와 이력은 그대로 남아
-                있어 언제든 다시 볼 수 있습니다.
-              </p>
-              <p className="fine-print">
-                다시 검토하려면 그 파일을 다시 추적하세요. 그러면 이 Risk 가 미검토
-                상태로 되살아납니다.
-              </p>
-            </Card>
-          ) : canReview ? (
-            <Card className="review-card">
-              <p className="eyebrow">Reviewer decision</p>
-              <h2>Record disposition</h2>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void review(disposition);
-                }}
-              >
-                <Field label="Disposition">
-                  <Select
-                    value={disposition}
-                    onChange={(event) =>
-                      setDisposition(
-                        event.target.value as Risk["review_disposition"],
-                      )
-                    }
-                  >
-                    {/*
-                      Excluded 는 여기에 없다. 파일 추적 중단처럼 사용자 판단 밖의
-                      요인으로 관리가 끝났다는 뜻이라 시스템만 붙인다. 스스로
-                      감시를 그만두는 것은 Accepted risk 다.
-                    */}
-                    <option value="UNREVIEWED">Unreviewed</option>
-                    <option value="MONITORING">Monitoring</option>
-                    <option value="ACCEPTED_RISK">Accepted risk</option>
-                  </Select>
-                </Field>
-                <Field
-                  label="Comment"
-                  hint="Optional · retained in append-only history"
-                >
-                  <Textarea
-                    rows={5}
-                    maxLength={2000}
-                    value={comment}
-                    onChange={(event) => setComment(event.target.value)}
-                  />
-                </Field>
-                <Button disabled={busy}>
-                  {busy ? "Saving…" : "Save decision"}
-                </Button>
-              </form>
-              <p className="fine-print">
-                This changes human disposition only. Machine lifecycle is
-                controlled by authoritative analysis.
-              </p>
-            </Card>
-          ) : (
-            <Card>
-              <h2>Read-only access</h2>
-              <p>
-                Your role can inspect risk and evidence but cannot submit
-                reviewer decisions.
-              </p>
-            </Card>
-          )}
-        </aside>
+        ) : null}
+        <EvidenceComparison
+          detail={detail}
+          openLabel={openLabel}
+          onOpenOriginal={openOriginal}
+        />
+        {risk.explanation_safe === null && risk.recommendation_safe === null ? null : (
+          <Card>
+            <p className="eyebrow">설명 · 권고</p>
+            {risk.explanation_safe === null ? null : (
+              <>
+                <h2>왜 검토가 필요한가</h2>
+                <p>{risk.explanation_safe}</p>
+              </>
+            )}
+            {risk.recommendation_safe === null ? null : (
+              <>
+                <h2>무엇을 하면 되는가</h2>
+                <p>{risk.recommendation_safe}</p>
+              </>
+            )}
+            <p className="fine-print">
+              모델이 근거를 읽고 쓴 설명입니다. 판정을 바꾸지 않으며 법적 결론이
+              아닙니다. 실제 판단은 사람과 전문가의 검토가 필요합니다.
+            </p>
+          </Card>
+        )}
       </div>
+      {reviewOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setReviewOpen(false)}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Reviewer decision"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal__head">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setReviewOpen(false)}
+              >
+                닫기 ✕
+              </Button>
+            </div>
+            <p className="eyebrow">Reviewer decision</p>
+            <h2>Record disposition</h2>
+            {mutationError === null ? null : <ErrorState error={mutationError} />}
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void review(disposition);
+              }}
+            >
+              <Field label="Disposition">
+                <Select
+                  value={disposition}
+                  onChange={(event) =>
+                    setDisposition(
+                      event.target.value as Risk["review_disposition"],
+                    )
+                  }
+                >
+                  {/*
+                    Excluded 는 여기에 없다. 파일 추적 중단처럼 사용자 판단 밖의
+                    요인으로 관리가 끝났다는 뜻이라 시스템만 붙인다. 스스로
+                    감시를 그만두는 것은 Accepted risk 다.
+                  */}
+                  <option value="UNREVIEWED">Unreviewed</option>
+                  <option value="MONITORING">Monitoring</option>
+                  <option value="ACCEPTED_RISK">Accepted risk</option>
+                </Select>
+              </Field>
+              <Field
+                label="Comment"
+                hint="Optional · retained in append-only history"
+              >
+                <Textarea
+                  rows={5}
+                  maxLength={2000}
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                />
+              </Field>
+              <Button disabled={busy}>
+                {busy ? "Saving…" : "Save decision"}
+              </Button>
+            </form>
+            <p className="fine-print">
+              This changes human disposition only. Machine lifecycle is
+              controlled by authoritative analysis.
+            </p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

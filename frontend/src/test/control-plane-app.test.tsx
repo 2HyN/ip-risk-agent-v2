@@ -38,15 +38,16 @@ describe("ControlPlaneApp", () => {
       const path = String(input);
       if (path.endsWith("/auth/me")) return json(user);
       if (path.endsWith("/workspaces/vws-1/membership")) return json(membership);
-      if (path.endsWith("/workspaces/vws-1/risks/risk-1")) return json({ risk: { id: "risk-1", risk_workspace_id: "vws-1", artifact_id: "artifact-1", analysis_type: "PATENT", lifecycle_state: "NEW", review_disposition: "UNREVIEWED", review_priority: "HIGH", summary: "Potential claim overlap", first_seen_at: "2026-08-17T00:00:00Z", last_seen_at: "2026-08-17T00:00:00Z", updated_at: "2026-08-17T00:00:00Z", resolved_at: null, review_version: 0, latest_analysis_job_id: "job-1", latest_evidence_revision: "rev-1", artifact_display_name: "invention.md", artifact_logical_path: "/design/invention.md", mount_id: "mount-1", mount_alias: "Design", source_type: "GITHUB" }, evidence: [], open_original: { action: "SOURCE_OPEN_ORIGINAL", artifact_id: "artifact-1" } });
+      if (path.endsWith("/workspaces/vws-1/risks/risk-1")) return json({ risk: { id: "risk-1", risk_workspace_id: "vws-1", artifact_id: "artifact-1", analysis_type: "PATENT", lifecycle_state: "NEW", review_disposition: "UNREVIEWED", review_priority: "HIGH", summary: "Potential claim overlap", first_seen_at: "2026-08-17T00:00:00Z", last_seen_at: "2026-08-17T00:00:00Z", updated_at: "2026-08-17T00:00:00Z", resolved_at: null, review_version: 0, latest_analysis_job_id: "job-1", latest_evidence_revision: "rev-1", artifact_display_name: "invention.md", artifact_logical_path: "/design/invention.md", mount_id: "mount-1", mount_alias: "Design", source_type: "GITHUB" }, evidence: [{ id: "ev-1", evidence_type: "SOURCE_EXCERPT", excerpt: "retained claim excerpt only", reference: "design/invention.md#seg-1", source_revision: "rev-1", created_at: "2026-08-17T00:00:00Z", metadata_safe: {} }], open_original: { action: "SOURCE_OPEN_ORIGINAL", artifact_id: "artifact-1" } });
       if (path.endsWith("/workspaces/vws-1")) return json(workspace);
       return json({ code: "NOT_FOUND", message: "Not found" }, 404);
     }));
     render(<ControlPlaneApp router="hash" integration={{ openOriginal }} />);
+    // 원본으로 나가는 길은 대조 판 아래의 링크 하나다 — 머리글의 중복 버튼은 없앴다.
     await userEvent.click(await screen.findByRole("button", { name: /open on github/i }));
     expect(openOriginal).toHaveBeenCalledWith({ workspaceId: "vws-1", artifactId: "artifact-1", action: "SOURCE_OPEN_ORIGINAL", sourceType: "GITHUB" });
-    // 원문은 절대 그리지 않는다 — 남긴 발췌가 없으면 빈 상태만 보인다.
-    expect(screen.getByText("No retained excerpt")).toBeInTheDocument();
+    // 원문은 절대 그리지 않는다 — 남긴 발췌만 보인다.
+    expect(screen.getByText("retained claim excerpt only")).toBeInTheDocument();
   });
 
   it.each([

@@ -405,19 +405,16 @@ export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
                 }}
               />
             ) : selected === "GITHUB" ? (
-              // 설치가 없어도 창부터 보인다 — redirect 는 버튼을 눌렀을 때뿐이다.
-              <div className="source-completion">
-                <p className="eyebrow">GitHub App</p>
-                <h2>Select repository and branch</h2>
-                <p>
-                  아직 이 계정에 연결된 GitHub App 설치가 없습니다. 아래 버튼으로
-                  GitHub 에서 App 을 설치하고 저장소를 고르면, 다음부터는 이 창에서
-                  redirect 없이 바로 연결됩니다.
-                </p>
-                <Button type="button" onClick={() => void startInstall()}>
-                  GitHub App에 repo 추가
-                </Button>
-              </div>
+              // 설치가 없어도 **같은 창**이다 — 목록이 비어 있고 "repo 추가" 만
+              // 살아 있을 뿐, 안내문이 다른 별도 화면을 두지 않는다.
+              <GitHubCompletion
+                sourceApi={sourceApi}
+                riskWorkspaceId={workspace.id}
+                onComplete={() => complete("GitHub repository가 연결되었습니다.")}
+                onInstallMore={() => {
+                  void startInstall();
+                }}
+              />
             ) : selected === "GOOGLE_DRIVE" || (completion && provider === "GOOGLE_DRIVE") ? (
               <DriveFolderShare
                 sourceApi={sourceApi}
@@ -656,6 +653,12 @@ function GitHubCompletion({
 
   useEffect(() => {
     let active = true;
+    if (connectionId === undefined && mountId === undefined) {
+      // 아직 설치도 연결도 없다. 목록은 비어 있고 "repo 추가" 만 살아 있다 —
+      // 부를 곳이 없는데 부르면 오류 문구만 띄우게 된다.
+      setBusy(false);
+      return () => { active = false; };
+    }
     const load = mountId === undefined
       ? sourceApi.githubRepositories(connectionId ?? "")
       : sourceApi.githubRepositoriesForMount(mountId);
@@ -709,6 +712,11 @@ function GitHubCompletion({
             if (next !== undefined) setBranch(next.defaultBranch);
           }}
         >
+          {repositories.length === 0 ? (
+            <option value="">
+              설치에 저장소가 없습니다 — 아래 repo 추가로 넣어 주세요
+            </option>
+          ) : null}
           {repositories.map((item) => <option key={item.id} value={item.id}>{item.fullName}{item.private ? " · private" : ""}</option>)}
         </Select>
       </Field>
