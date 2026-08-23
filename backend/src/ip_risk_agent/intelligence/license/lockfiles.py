@@ -10,6 +10,7 @@ import json
 import re
 import tomllib
 
+from .manifests import _strip_byte_order_mark
 from .dependency_models import (
     DependencyParseError,
     DependencyDeclaration,
@@ -34,6 +35,7 @@ def _npm_name_from_path(path: str) -> str | None:
 
 def parse_package_lock_json(text: str, source_path: str | None = None) -> list[DependencyDeclaration]:
     """npm ``package-lock.json``. v2/v3 의 ``packages`` 와 v1 의 ``dependencies``."""
+    text = _strip_byte_order_mark(text)
     try:
         document = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -85,6 +87,7 @@ def parse_package_lock_json(text: str, source_path: str | None = None) -> list[D
 
 def parse_uv_lock(text: str, source_path: str | None = None) -> list[DependencyDeclaration]:
     """uv ``uv.lock``. ``[[package]]`` 마다 name 과 version 이 온다."""
+    text = _strip_byte_order_mark(text)
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:

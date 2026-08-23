@@ -781,6 +781,102 @@ def test_a_vaguer_free_text_loses_to_a_precise_classifier():
     assert found == "LGPL-2.0-or-later"
     assert inferred is False, "닫힌 어휘가 판까지 말했으면 짐작이 아니다"
 
+
+# ----------------------------------------------------------------- BOM · 건너뛴 줄
+
+
+def test_a_byte_order_mark_does_not_erase_the_first_dependency():
+    """윈도우가 붙이는 BOM 하나가 파일을 "선언 없음" 으로 만들었다.
+
+    ``\ufeffrequests==2.31.0`` 은 이름 패턴에 걸리지 않아 **조용히** 건너뛰어졌고,
+    결과는 `SUCCEEDED` + `COMPLETE` + 0 건이었다. 그것은 해소 권한을 가지므로
+    **지우지도 않은 의존성의 Risk 가 해소됐다.** 운영에서 실제로 일어났다.
+
+    BOM 은 인코딩 표시이지 내용이 아니다. 메모장도 PowerShell 의
+    ``Set-Content -Encoding utf8`` 도 붙이므로 드문 일이 아니다.
+    """
+    from ip_risk_agent.intelligence.license import lockfiles as _lockfiles
+    from ip_risk_agent.intelligence.license import manifests as _manifests
+
+    found = _manifests.parse_requirements_txt("\ufeffrequests==2.31.0\n", "r.txt")
+    assert [item.name for item in found] == ["requests"]
+
+    # 다른 형식도 같다. 이쪽은 예외를 던져 시끄럽게 죽었지만, 죽을 이유가 없다.
+    assert _manifests.parse_package_json(
+        '\ufeff{"dependencies": {"chalk": "5.3.0"}}', "package.json"
+    )
+    assert _manifests.parse_pyproject_toml(
+        '\ufeff[project]\ndependencies = ["requests==2.31.0"]', "pyproject.toml"
+    )
+    assert _manifests.parse_setup_cfg(
+        "\ufeff[options]\ninstall_requires =\n    requests==2.31.0", "setup.cfg"
+    )
+    assert _lockfiles.parse_uv_lock(
+        '\ufeff[[package]]\nname = "x"\nversion = "1.0"', "uv.lock"
+    )
+    assert _lockfiles.parse_package_lock_json(
+        '\ufeff{"packages": {"node_modules/chalk": {"version": "5.3.0"}}}',
+        "package-lock.json",
+    )
+
+
+def test_a_line_we_could_not_read_is_reported_not_swallowed():
+    """관대한 것과 조용한 것은 다르다.
+
+    한 줄이 깨졌다고 파일을 버리면 나머지 의존성을 놓치므로 넘어가는 것은 맞다.
+    그런데 넘어간 사실을 말하지 않으면 그 결과가 `COMPLETE` 로 올라가고, `COMPLETE`
+    에는 **해소 권한**이 있다. 읽지 못한 것은 "없다" 가 아니다.
+    """
+    from ip_risk_agent.intelligence.license import manifests as _manifests
+
+    text = "requests==2.31.0\n!!! 이건 무엇도 아니다\n# 주석\n-r other.txt\n"
+    found = _manifests.parse_requirements_txt(text, "r.txt")
+    assert [item.name for item in found] == ["requests"], "읽은 것은 그대로 남는다"
+
+    skipped = _manifests.unreadable_requirement_lines(text)
+    assert skipped == ("!!! 이건 무엇도 아니다",)
+    assert "# 주석" not in skipped and "-r other.txt" not in skipped, (
+        "주석과 지시자는 못 읽은 것이 아니다"
+    )
+
+
+def test_a_file_with_an_unreadable_line_cannot_claim_to_be_complete():
+    """`COMPLETE` 는 해소 권한이다. 다 읽지 못했으면 줄 수 없다."""
+    result = run(
+        LicenseAnalyzer(PROVIDER).analyze(
+            make_artifact("requests==2.31.0\n!!! 무엇도 아니다\n", "requirements.txt")
+        )
+    )
+    assert result.coverage is AnalysisCoverage.PARTIAL
+    assert [c.normalized_package_name for c in result.candidates] == ["requests"], (
+        "읽어 낸 것은 버리지 않는다"
+    )
+
+
+def test_a_file_whose_every_line_was_skipped_is_not_an_empty_file():
+    """0 건과 "한 줄도 못 읽었다" 를 가른다.
+
+    예전에는 둘 다 `SUCCEEDED` + `COMPLETE` + 0 건이었다.
+    """
+    result = run(
+        LicenseAnalyzer(PROVIDER).analyze(
+            make_artifact("!!! 무엇도 아니다\n@@@ 이것도\n", "requirements.txt")
+        )
+    )
+    assert result.coverage is AnalysisCoverage.PARTIAL
+    assert not result.candidates
+
+
+def test_a_genuinely_empty_requirements_file_still_reads_as_complete():
+    """거절이 지나치면 정상적인 빈 파일까지 미결로 만든다."""
+    result = run(
+        LicenseAnalyzer(PROVIDER).analyze(
+            make_artifact("# 아직 의존성이 없다\n\n", "requirements.txt")
+        )
+    )
+    assert result.coverage is AnalysisCoverage.COMPLETE
+    assert not result.candidates
+
 # ----------------------------------------------------------------- 0-H
 
 

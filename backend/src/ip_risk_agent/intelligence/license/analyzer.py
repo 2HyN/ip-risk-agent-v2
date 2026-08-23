@@ -168,8 +168,17 @@ class LicenseAnalyzer:
         if parser is None:
             return builder.skipped(**versions)
 
+        # 줄 단위 형식은 못 읽은 줄을 **건너뛴다.** JSON·TOML 처럼 예외를 던지지
+        # 않으므로 따로 물어야 한다. 묻지 않으면 BOM 하나가 파일 전체를 "선언 없음"
+        # 으로 만들고, 그것이 `COMPLETE` 로 올라가 Risk 를 해소한다. 실제로 그랬다.
+        line_based = dependency_format(artifact.logical_path) in {
+            DependencyFormat.REQUIREMENTS_TXT,
+            DependencyFormat.REQUIREMENTS_LOCK,
+        }
+
         dependencies = DependencySet()
         unreadable = False
+        skipped_lines = 0
         for segment in artifact.text_segments:
             try:
                 dependencies.extend(parser(segment.text, artifact.logical_path))
@@ -177,6 +186,11 @@ class LicenseAnalyzer:
                 # 못 읽은 것은 "선언이 없다" 가 아니다. 여기서 삼키면 결과가
                 # SUCCEEDED + COMPLETE 로 올라가 그 파일의 Risk 를 전부 해소한다.
                 unreadable = True
+            else:
+                if line_based:
+                    skipped_lines += len(
+                        manifests.unreadable_requirement_lines(segment.text)
+                    )
 
         if unreadable:
             # 일부라도 못 읽었으면 이 결과는 파일을 설명하지 못한다. PARTIAL 은
@@ -195,8 +209,14 @@ class LicenseAnalyzer:
             # 파일은 맞지만 선언이 없다. 여기가 조용한 오보가 시작되는 자리다 —
             # 읽기가 망가져도 결과는 똑같이 "0 건" 이고 SUCCEEDED 로 올라간다.
             # 그래서 나가기 전에 반드시 남긴다. 해소를 막는 것은 Control 쪽 0-L 이다.
-            _log_analysis(artifact, declarations=0, candidates=0, coverage=None)
-            return builder.succeeded([], **versions)
+            #
+            # 건너뛴 줄이 있으면 0 건이 아니라 **모른다**. `COMPLETE` 로 내보내면
+            # 해소 권한이 붙는다.
+            coverage = AnalysisCoverage.PARTIAL if skipped_lines else None
+            _log_analysis(artifact, declarations=0, candidates=0, coverage=coverage)
+            if coverage is None:
+                return builder.succeeded([], **versions)
+            return builder.succeeded([], coverage=coverage, **versions)
 
         candidates: list[LicenseCandidate] = []
         partial = False
@@ -208,7 +228,10 @@ class LicenseAnalyzer:
 
         coverage = (
             AnalysisCoverage.PARTIAL
-            if partial or builder.has_failures or _input_was_cut(artifact)
+            if partial
+            or skipped_lines
+            or builder.has_failures
+            or _input_was_cut(artifact)
             else AnalysisCoverage.COMPLETE
         )
         _log_analysis(
