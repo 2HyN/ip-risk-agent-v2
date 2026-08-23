@@ -97,8 +97,9 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
-    expect(await screen.findByText("1 folder tracked")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Add files" }));
+    expect(await screen.findByText("Google Drive a1b2c3d4")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add source" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
     await userEvent.type(
       await screen.findByLabelText("Drive folder link"),
       "https://drive.google.com/drive/folders/folder-2",
@@ -117,7 +118,10 @@ describe("SourcePanel product integration", () => {
     expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary"))).toHaveLength(2);
   });
 
-  it("renders provider-neutral artifact, analysis, and risk state with detail navigation", async () => {
+  it("shows mounted folders as a navigable directory tree", async () => {
+    // Files 는 통합 디렉토리다 — 마운트한 폴더가 뿌리에 붙고, 안의 구조는 실제
+    // 소스를 그대로 따른다. logical_path 의 첫 칸은 mount 별칭이라 화면의
+    // 뿌리와 같은 것이므로 경로에서 걷어낸다.
     window.location.hash = "#/w/vws-1/sources";
     const summary = {
       ...connectedDriveSummary,
@@ -129,7 +133,7 @@ describe("SourcePanel product integration", () => {
           source_type: "GOOGLE_DRIVE",
           source_context: "Google Drive a1b2c3d4",
           display_name: "Claims.txt",
-          logical_path: "Claims.txt",
+          logical_path: "Google Drive a1b2c3d4/Claims.txt",
           availability: "AVAILABLE",
           latest_revision: "rev-2",
           change_status: "DONE",
@@ -141,15 +145,15 @@ describe("SourcePanel product integration", () => {
           updated_at: "2026-08-21T00:00:00Z",
         },
         {
-          artifact_id: "artifact-local-1",
-          change_event_id: "change-artifact-local-1",
-          mount_id: "mount-local-1",
-          source_type: "LOCAL",
-          source_context: "Desktop project",
-          display_name: "package.json",
-          logical_path: "web/package.json",
+          artifact_id: "artifact-drive-2",
+          change_event_id: "change-artifact-drive-2",
+          mount_id: "mount-drive-1",
+          source_type: "GOOGLE_DRIVE",
+          source_context: "Google Drive a1b2c3d4",
+          display_name: "notes.md",
+          logical_path: "Google Drive a1b2c3d4/drafts/notes.md",
           availability: "AVAILABLE",
-          latest_revision: "sha-1",
+          latest_revision: "rev-1",
           change_status: "PROCESSING",
           analysis_status: "RUNNING",
           risk_count: 0,
@@ -170,21 +174,22 @@ describe("SourcePanel product integration", () => {
 
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
-    expect(await screen.findByRole("heading", { name: "Tracked artifacts" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Claims.txt" })).toBeInTheDocument();
-    expect(screen.getByText("Change: DONE · Analysis: SUCCEEDED")).toBeInTheDocument();
-    expect(screen.getByText("1 active · 2 total risks")).toBeInTheDocument();
-    expect(screen.getByText("package.json")).toBeInTheDocument();
-    expect(screen.getByText("No risk has been produced for the latest analyzed state.")).toBeInTheDocument();
-    const artifactLinks = screen.getAllByRole("link", { name: "View artifact analysis" });
-    expect(artifactLinks[0]!).toHaveAttribute("href", "#/w/vws-1/sources/artifacts/artifact-drive-1");
-    expect(screen.getByRole("heading", { name: "Add Source" })).toBeInTheDocument();
+    // 뿌리 — 마운트가 폴더로 보인다. 이름은 고른 폴더 이름(별칭)이다.
+    const mountRow = await screen.findByRole("button", { name: /Google Drive a1b2c3d4/ });
+    expect(mountRow).toHaveTextContent("Google Drive · 파일 2개");
 
-    await userEvent.click(artifactLinks[0]!);
-    expect(await screen.findByText("Latest revision")).toBeInTheDocument();
-    expect(screen.getByText("rev-2")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open risk findings and evidence" }))
+    await userEvent.click(mountRow);
+    // 폴더 안 — 실제 구조 그대로: 파일 하나, 하위 폴더 하나.
+    expect(await screen.findByText("Claims.txt")).toBeInTheDocument();
+    expect(screen.getByText("Analysis: SUCCEEDED · Risk 1/2")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review →" }))
       .toHaveAttribute("href", "#/w/vws-1/risks/risk-7");
+
+    await userEvent.click(screen.getByRole("button", { name: /drafts/ }));
+    expect(await screen.findByText("notes.md")).toBeInTheDocument();
+    expect(screen.getByText("Analysis: RUNNING")).toBeInTheDocument();
+    // "View artifact analysis" 상세 화면은 없앴다 — 탐색기가 그 자리를 맡는다.
+    expect(screen.queryByRole("link", { name: "View artifact analysis" })).toBeNull();
   });
 
   it("says the folder is already tracked instead of mounting it twice", async () => {
@@ -201,7 +206,8 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Add files" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
     await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-1");
     await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
 
@@ -229,6 +235,7 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
     await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
     expect(await screen.findByText(SHARING_ADDRESS)).toBeInTheDocument();
     await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-7");
@@ -257,6 +264,7 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
     await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
     await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-8");
     await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
@@ -286,6 +294,7 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
     await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
     await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-9");
     await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
@@ -314,6 +323,7 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
     await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
     await userEvent.type(await screen.findByLabelText("Drive folder link"), "doc-1");
     await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
@@ -366,6 +376,7 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
     await userEvent.click(await screen.findByRole("button", { name: "GitHub Repository" }));
 
     expect(await screen.findByText("Add another repository")).toBeInTheDocument();
@@ -388,6 +399,7 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
     await userEvent.click(await screen.findByRole("button", { name: "GitHub 에서 저장소 추가" }));
 
     await waitFor(() => expect(visited).toHaveLength(1));
@@ -405,6 +417,7 @@ describe("SourcePanel product integration", () => {
     const platform = new FakePlatform();
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={platform} /> }} />);
 
+    await userEvent.click(await screen.findByRole("button", { name: "Add source" }));
     await userEvent.click(await screen.findByRole("button", { name: "Local Folder" }));
     await userEvent.click(await screen.findByRole("button", { name: "Enroll this desktop" }));
     await userEvent.click(await screen.findByRole("button", { name: "Choose Folder" }));
@@ -443,7 +456,7 @@ describe("SourcePanel product integration", () => {
               source_type: "GOOGLE_DRIVE",
               source_context: "Google Drive a1b2c3d4",
               display_name: "Claims.txt",
-              logical_path: "Claims.txt",
+              logical_path: "Google Drive a1b2c3d4/Claims.txt",
               availability: "AVAILABLE",
               latest_revision: "rev-2",
               change_status: "DONE",
@@ -463,6 +476,9 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Google Drive a1b2c3d4/ }),
+    );
     const [button] = await screen.findAllByRole("button", { name: "다시 검사" });
     expect(button).toBeDefined();
     await userEvent.click(button as HTMLElement);
@@ -486,7 +502,7 @@ describe("SourcePanel product integration", () => {
     }));
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
-    expect(await screen.findByText("1 folder tracked")).toBeInTheDocument();
+    expect(await screen.findByText("Google Drive a1b2c3d4")).toBeInTheDocument();
 
     // 추적을 끊는 요청을 서버로 보내지 않는다. 보낼 곳이 없어졌다.
     expect(calls.some((path) => path.endsWith("/drive/untrack"))).toBe(false);

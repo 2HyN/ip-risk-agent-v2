@@ -713,3 +713,156 @@ def test_authenticated_user_explicitly_lists_and_accepts_email_invitation() -> N
         assert accepted.json()["membership"]["user_id"] == user_id
         assert accepted.json()["workspace"]["id"] == "invited-vws"
         assert client.get("/api/v1/invitations").json()["items"] == []
+
+
+def test_analysis_progress_counts_documents_not_runs() -> None:
+    """진행 바가 묻는 값 — 문서마다 지금 판본의 마지막 실행 하나만 센다.
+
+    밀려서 끝난 실행(FAILED · SUPERSEDED)은 실패로 세지 않는다. 실패로 세면
+    문서를 고칠 때마다 진행률이 뒤로 간다. 끝난 문서는 items 에 싣지 않는다 —
+    화면이 보여 줄 것은 "아직 안 끝난 것" 이다.
+    """
+    from ip_risk_agent.application.artifact_view import SUPERSEDED_FAILURE
+
+    app, store, _oidc = build_api()
+    with TestClient(app) as client:
+        _user_id, csrf = login(client)
+        created = client.post(
+            "/api/v1/workspaces",
+            headers={"X-CSRF-Token": csrf},
+            json={"name": "Workspace"},
+        )
+        vws_id = created.json()["id"]
+
+        empty = client.get(f"/api/v1/workspaces/{vws_id}/analyses/progress")
+        assert empty.status_code == 200
+        assert empty.json()["total"] == 0
+        assert empty.json()["items"] == []
+
+        async def seed() -> None:
+            async with store() as uow:
+                async def add_artifact(
+                    number: int,
+                    job_status: AnalysisJobStatus | None,
+                    failure_safe: str | None = None,
+                ) -> None:
+                    artifact = Artifact(
+                        id=f"artifact-{number}",
+                        risk_workspace_id=vws_id,
+                        mount_id="mount-1",
+                        source_workspace_id="source-1",
+                        source_type=SourceType.GOOGLE_DRIVE,
+                        source_artifact_id=f"file-{number}",
+                        display_name=f"doc-{number}.md",
+                        logical_path=f"drive/doc-{number}.md",
+                        status=ArtifactStatus.ACTIVE,
+                        first_seen_at=NOW,
+                        last_seen_at=NOW,
+                    )
+                    await uow.artifacts.add(
+                        artifact,
+                        ArtifactState(
+                            artifact_id=artifact.id,
+                            latest_revision="rev-1",
+                            latest_checksum=None,
+                            availability_state=ArtifactAvailability.AVAILABLE,
+                            updated_at=NOW,
+                        ),
+                    )
+                    source_change = SourceChange(
+                        contract_version="1",
+                        event_id=f"provider-event-{number}",
+                        event_fingerprint=f"fingerprint-{number}",
+                        risk_workspace_id=vws_id,
+                        mount_id="mount-1",
+                        source_workspace_id="source-1",
+                        source_type=SourceType.GOOGLE_DRIVE,
+                        artifact=SourceArtifactRef(
+                            source_artifact_id=f"file-{number}",
+                            display_name=f"doc-{number}.md",
+                        ),
+                        change_type=ChangeType.CREATE,
+                        revision="rev-1",
+                        observed_at=NOW,
+                        safe_metadata={},
+                    )
+                    await uow.change_events.add(
+                        ChangeEvent(
+                            id=f"change-{number}",
+                            event_fingerprint=f"fingerprint-{number}",
+                            risk_workspace_id=vws_id,
+                            mount_id="mount-1",
+                            source_workspace_id="source-1",
+                            source_artifact_id=f"file-{number}",
+                            source_type=SourceType.GOOGLE_DRIVE,
+                            change_type=ChangeType.CREATE,
+                            revision="rev-1",
+                            previous_revision=None,
+                            observed_at=NOW,
+                            status=ChangeEventStatus.PENDING,
+                            attempts=0,
+                            created_at=NOW,
+                            updated_at=NOW,
+                            source_change=source_change,
+                            artifact_id=artifact.id,
+                        )
+                    )
+                    if job_status is not None:
+                        started = (
+                            None
+                            if job_status is AnalysisJobStatus.QUEUED
+                            else NOW + timedelta(seconds=1)
+                        )
+                        completed = (
+                            NOW + timedelta(seconds=2)
+                            if job_status
+                            in {AnalysisJobStatus.SUCCEEDED, AnalysisJobStatus.FAILED}
+                            else None
+                        )
+                        await uow.analysis_jobs.add(
+                            AnalysisJob(
+                                id=f"job-{number}",
+                                change_event_id=f"change-{number}",
+                                artifact_id=artifact.id,
+                                revision="rev-1",
+                                requested_analysis_types=(AnalysisType.PATENT,),
+                                status=job_status,
+                                created_at=NOW,
+                                started_at=started,
+                                completed_at=completed,
+                                failure_safe=failure_safe,
+                            )
+                        )
+
+                await add_artifact(1, AnalysisJobStatus.QUEUED)
+                await add_artifact(2, AnalysisJobStatus.RUNNING)
+                await add_artifact(3, AnalysisJobStatus.SUCCEEDED)
+                await add_artifact(4, AnalysisJobStatus.FAILED, "PROVIDER:RATE_LIMITED")
+                await add_artifact(5, AnalysisJobStatus.FAILED, SUPERSEDED_FAILURE)
+                await add_artifact(6, None)
+                await uow.commit()
+
+        import asyncio
+
+        asyncio.run(seed())
+
+        progress = client.get(f"/api/v1/workspaces/{vws_id}/analyses/progress")
+        assert progress.status_code == 200
+        body = progress.json()
+        assert body["total"] == 6
+        assert body["queued"] == 1
+        assert body["running"] == 1
+        assert body["succeeded"] == 1
+        assert body["failed"] == 1
+        # 밀려서 끝난 실행과 실행이 아직 없는 문서는 "기다리는 중" 이다.
+        assert body["waiting"] == 2
+        statuses = {item["artifact_id"]: item["status"] for item in body["items"]}
+        assert statuses == {
+            "artifact-1": "QUEUED",
+            "artifact-2": "RUNNING",
+            "artifact-4": "FAILED",
+            "artifact-5": "WAITING",
+            "artifact-6": "WAITING",
+        }
+        failed_item = next(i for i in body["items"] if i["artifact_id"] == "artifact-4")
+        assert failed_item["failure_safe"] is not None

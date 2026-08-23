@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Button, Field, Textarea } from "../shared/ui/index.js";
+import { Button } from "../shared/ui/index.js";
 import type {
   DesktopConnectionStatus,
   LocalMountConnection,
@@ -27,8 +27,6 @@ export function ConnectLocalSource({
     selectionId: string;
     displayName: string;
   } | null>(null);
-  const [includeText, setIncludeText] = useState("");
-  const [excludeText, setExcludeText] = useState("node_modules/**\n.git/**");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,11 +80,13 @@ export function ConnectLocalSource({
     setBusy(true);
     setError(null);
     try {
+      // 패턴 입력은 화면에서 뺐다 — 마운트는 폴더 단위이고, 추적할 것을 고르는
+      // 방법은 폴더에 무엇을 넣는가다. 빌드 산출물만 기본으로 거른다.
       const mount = await platform.connectLocalMount({
         selectionId: selection.selectionId,
         riskWorkspaceId,
-        includePatterns: patterns(includeText),
-        excludePatterns: patterns(excludeText),
+        includePatterns: [],
+        excludePatterns: ["node_modules/**", ".git/**"],
       });
       setSelection(null);
       setDevice(await platform.getDesktopConnectionStatus());
@@ -137,20 +137,10 @@ export function ConnectLocalSource({
       {selection === null ? null : (
         <div className="source-selection">
           <strong>{selection.displayName}</strong>
-          <Field label="Include patterns" hint="한 줄에 하나 · 비워두면 허용 확장자 전체">
-            <Textarea
-              rows={3}
-              value={includeText}
-              onChange={(event) => setIncludeText(event.target.value)}
-            />
-          </Field>
-          <Field label="Exclude patterns" hint="한 줄에 하나">
-            <Textarea
-              rows={3}
-              value={excludeText}
-              onChange={(event) => setExcludeText(event.target.value)}
-            />
-          </Field>
+          <p>
+            이 폴더가 통째로 마운트됩니다 (파일 단위 선택이 아닙니다). 빌드
+            산출물(node_modules, .git)은 자동으로 제외됩니다.
+          </p>
           <Button type="button" disabled={busy} onClick={() => void connect()}>
             {busy ? "Connecting…" : "Connect selected folder"}
           </Button>
@@ -159,11 +149,4 @@ export function ConnectLocalSource({
       {error === null ? null : <p className="source-error" role="alert">{error}</p>}
     </div>
   );
-}
-
-function patterns(value: string): string[] {
-  return value
-    .split(/\r?\n/u)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }

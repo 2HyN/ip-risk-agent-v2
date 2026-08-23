@@ -68,7 +68,9 @@ describe("ControlPlaneApp", () => {
     expect(screen.queryByRole("link", { name: /members & roles/i }) !== null).toBe(ownerActions);
     expect(screen.queryByRole("link", { name: /activity & audit/i }) !== null).toBe(ownerActions);
     expect(screen.getByRole("link", { name: /security & data/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /^risks$/i })).toBeInTheDocument();
+    // 왼쪽 탭 — Files(구 Sources) · Review(구 Risks) 순서의 새 이름.
+    expect(screen.getByRole("link", { name: /^files$/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^review$/i })).toBeInTheDocument();
   });
 
   it("redirects a direct audit route when the membership cannot view audit", async () => {

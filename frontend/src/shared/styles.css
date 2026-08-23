@@ -1119,3 +1119,325 @@ td small {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- UI 대개편 (5단계) ---------- */
+
+/* 안 읽은 알림 배지 — 모바일 앱 배지처럼 숫자만 작게. */
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* 진행 바 */
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.progress__bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--blue), var(--aqua));
+  transition: width 0.6s ease;
+}
+.progress__caption {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.progress-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.progress-strip .progress__caption {
+  margin-top: 6px;
+}
+.progress-items {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.progress-items li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+.progress-items__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.progress-items__more {
+  color: var(--muted);
+}
+
+/* Files 탐색기 */
+.explorer {
+  padding: 0;
+  overflow: hidden;
+}
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--soft);
+  font-size: 0.9rem;
+}
+.breadcrumbs button {
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  border-radius: 6px;
+  color: var(--blue);
+  cursor: pointer;
+}
+.breadcrumbs button:disabled {
+  color: var(--ink);
+  font-weight: 600;
+  cursor: default;
+}
+.breadcrumbs button:not(:disabled):hover {
+  background: rgba(38, 103, 216, 0.08);
+}
+.breadcrumbs__part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.explorer-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.explorer-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.explorer-row:last-child {
+  border-bottom: 0;
+}
+.explorer-row__main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 320px;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 4px 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+button.explorer-row__main {
+  cursor: pointer;
+}
+button.explorer-row__main:hover .explorer-row__name {
+  color: var(--blue);
+}
+.explorer-icon {
+  flex: none;
+}
+.explorer-row__name {
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorer-row__meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorer-row__side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.explorer-row .analysis-notice {
+  flex-basis: 100%;
+  margin: 0 0 4px 30px;
+}
+
+/* 모달 — Add source 와 그 하위 흐름 */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh 16px 16px;
+  background: rgba(16, 24, 37, 0.45);
+  overflow-y: auto;
+}
+.modal {
+  width: min(560px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(16, 24, 37, 0.25);
+  padding: 16px 20px 20px;
+}
+.modal__head {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+/* Review — 파일 단위 묶음 */
+.review-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.review-group__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.review-group__head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  font-size: 1.15rem;
+}
+.review-group__path {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Risk 상세 — 원본 ↔ 근거 대조 */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.compare-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.compare-pane {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--soft);
+  min-width: 0;
+}
+.compare-pane h3 {
+  margin-bottom: 10px;
+  font-size: 0.95rem;
+  letter-spacing: 0;
+}
+.compare-pane__link {
+  margin: 10px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+.compare-pane__link .text-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+.evidence-block {
+  margin-bottom: 12px;
+}
+.evidence-block:last-child {
+  margin-bottom: 0;
+}
+.evidence-block blockquote {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--blue);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.9rem;
+}
+.evidence-block__reference {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.license-text {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+@media (max-width: 900px) {
+  .compare-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Activity & audit — 로그 문맥 */
+.activity-context {
+  margin: 2px 0;
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+.activity-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0;
+}
+.activity-metadata__pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--soft);
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+.activity-metadata__key {
+  color: var(--muted);
+}

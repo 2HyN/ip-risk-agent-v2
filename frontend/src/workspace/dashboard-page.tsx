@@ -1,6 +1,8 @@
+import { useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { useResource } from "../shared/hooks/use-resource";
+import { useAnalysisProgress } from "../shared/hooks/use-analysis-progress";
 import {
   Badge,
   Card,
@@ -105,22 +107,88 @@ export function DashboardPage() {
             View source and data access details →
           </Link>
         </Card>
-        <Card className="assurance-card">
-          <p className="eyebrow">Protection posture</p>
-          <h2>Source stays at the source</h2>
-          <p>
-            The Control Plane stores approved analysis artifacts and minimal
-            evidence—not raw source snapshots. Original files open through
-            provider or owning-device authorization.
-          </p>
-          <ul className="check-list">
-            <li>Global ignore policy applied before analysis</li>
-            <li>Secret filtering and minimization enabled</li>
-            <li>Reference knowledge only for external RAG</li>
-          </ul>
-        </Card>
+        <AnalysisMonitorCard workspaceId={workspace.id} />
       </div>
     </div>
+  );
+}
+
+/**
+ * 작업 현황 — 지금 몇 개가 검사 중이고 몇 개가 끝났는가.
+ *
+ * 분석은 worker 에서 돌므로 이 카드가 주기적으로 묻는다. 문서 단위로 센다 —
+ * 실행 기록을 세면 파일을 고칠 때마다 진행률이 뒤로 간다.
+ */
+export function AnalysisMonitorCard({ workspaceId }: { workspaceId: string }) {
+  const { api } = useSession();
+  const load = useCallback(
+    () => api.analysesProgress(workspaceId),
+    [api, workspaceId],
+  );
+  const progress = useAnalysisProgress(load);
+  if (progress === null) {
+    return (
+      <Card>
+        <p className="eyebrow">Analysis monitor</p>
+        <h2>작업 현황</h2>
+        <LoadingState label="Checking analysis activity" />
+      </Card>
+    );
+  }
+  const done = progress.succeeded + progress.inconclusive + progress.failed;
+  const active = progress.queued + progress.running;
+  const percent =
+    progress.total === 0 ? 100 : Math.round((done / progress.total) * 100);
+  return (
+    <Card>
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Analysis monitor</p>
+          <h2>작업 현황</h2>
+        </div>
+        <Badge tone={progress.failed > 0 ? "warning" : active > 0 ? "info" : "success"}>
+          {active > 0 ? `${active} in progress` : "Idle"}
+        </Badge>
+      </div>
+      <div
+        className="progress"
+        role="progressbar"
+        aria-valuenow={percent}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Analysis progress"
+      >
+        <div className="progress__bar" style={{ width: `${percent}%` }} />
+      </div>
+      <p className="progress__caption">
+        {progress.total === 0
+          ? "추적 중인 파일이 아직 없습니다."
+          : `${done} / ${progress.total} 문서 검사 완료 (${percent}%)`}
+      </p>
+      <div className="health-bars">
+        <Health label="Running" value={progress.running} tone="healthy" />
+        <Health label="Queued" value={progress.queued} tone="muted" />
+        <Health label="Waiting" value={progress.waiting} tone="muted" />
+        <Health label="Failed" value={progress.failed} tone="danger" />
+      </div>
+      {progress.items.length === 0 ? null : (
+        <ul className="progress-items">
+          {progress.items.slice(0, 5).map((item) => (
+            <li key={item.artifact_id}>
+              <span className="progress-items__name">{item.display_name}</span>
+              <Badge tone={item.status === "FAILED" ? "danger" : "info"}>
+                {item.status}
+              </Badge>
+            </li>
+          ))}
+          {progress.items.length > 5 ? (
+            <li className="progress-items__more">
+              +{progress.items.length - 5} more
+            </li>
+          ) : null}
+        </ul>
+      )}
+    </Card>
   );
 }
 

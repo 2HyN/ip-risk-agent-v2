@@ -16,7 +16,7 @@ import {
   Textarea,
   toneFor,
 } from "../shared/ui";
-import type { Risk } from "../shared/api/types";
+import type { Evidence, Risk, RiskDetail } from "../shared/api/types";
 import { EvidenceExcerpt } from "./evidence-highlight.js";
 import { useWorkspace } from "../workspace/workspace-context";
 import { useIntegration } from "../app/integration-context";
@@ -124,8 +124,19 @@ export function RiskDetailPage() {
               <Status label="Last seen" value={formatDate(risk.last_seen_at)} />
             </div>
           </Card>
+          <EvidenceComparison
+            detail={detail}
+            openLabel={openLabel}
+            onOpenOriginal={() => {
+              void integration.openOriginal?.({
+                workspaceId: workspace.id,
+                artifactId: detail.open_original.artifact_id,
+                action: detail.open_original.action,
+                sourceType: risk.source_type,
+              });
+            }}
+          />
           {risk.explanation_safe === null && risk.recommendation_safe === null ? null : (
-            /* UI 대개편에서 자리를 다시 잡는다. 지금은 값이 보이는 것이 목표다. */
             <Card>
               <p className="eyebrow">설명 · 권고</p>
               {risk.explanation_safe === null ? null : (
@@ -146,41 +157,6 @@ export function RiskDetailPage() {
               </p>
             </Card>
           )}
-          <Card>
-            <p className="eyebrow">Why this risk</p>
-            <h2>Minimal retained evidence</h2>
-            {detail.evidence.length === 0 ? (
-              <EmptyState
-                title="No retained excerpt"
-                description="The risk remains canonical, but no safe evidence excerpt is available."
-              />
-            ) : (
-              <div className="evidence-list">
-                {detail.evidence.map((evidence) => (
-                  <article key={evidence.id}>
-                    <div className="card-row">
-                      <Badge tone="info">{evidence.evidence_type}</Badge>
-                      <small>Revision {evidence.source_revision}</small>
-                    </div>
-                    <EvidenceExcerpt
-                      excerpt={evidence.excerpt}
-                      metadata={evidence.metadata_safe}
-                    />
-                    <p>
-                      <strong>Reference:</strong> {evidence.reference}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            )}
-            <div className="source-assurance">
-              <strong>No raw source preview</strong>
-              <span>
-                Use “{openLabel}” to continue through provider or owning-device
-                authorization.
-              </span>
-            </div>
-          </Card>
           <Card>
             <p className="eyebrow">Analysis metadata</p>
             <dl className="metadata-list">
@@ -277,6 +253,181 @@ export function RiskDetailPage() {
           )}
         </aside>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 원본 ↔ 근거 대조.
+ *
+ * 특허는 **좌우**다 — 내 문서의 어느 문장이 어느 청구항·초록과 겹치는지를 나란히
+ * 놓고 본다. 라이선스는 **상하**다 — 패키지 정보는 짧고 라이선스 전문은 길어서,
+ * 옆에 붙이면 한쪽이 짜부라진다. 문제가 된 구간은 두 쪽 모두 하이라이트로 짚는다
+ * (EvidenceExcerpt). 원문 전체는 여기 없다 — 남긴 발췌만 보여 주고, 실제 원본과
+ * 근거 문서는 아래 링크로 나간다.
+ */
+function EvidenceComparison({
+  detail,
+  openLabel,
+  onOpenOriginal,
+}: {
+  detail: RiskDetail;
+  openLabel: string;
+  onOpenOriginal: () => void;
+}) {
+  const risk = detail.risk;
+  const source = detail.evidence.filter(
+    (item) => item.evidence_type === "SOURCE_EXCERPT",
+  );
+  const patent = detail.evidence.filter((item) =>
+    ["PATENT_CLAIM", "PATENT_ABSTRACT"].includes(item.evidence_type),
+  );
+  const license = detail.evidence.filter(
+    (item) => item.evidence_type === "LICENSE_REFERENCE",
+  );
+  const packageMetadata = detail.evidence.filter(
+    (item) => item.evidence_type === "PACKAGE_METADATA",
+  );
+  const references = detail.evidence.filter(
+    (item) => item.evidence_type === "RAG_REFERENCE",
+  );
+
+  if (detail.evidence.length === 0) {
+    return (
+      <Card>
+        <p className="eyebrow">Why this risk</p>
+        <h2>Minimal retained evidence</h2>
+        <EmptyState
+          title="No retained excerpt"
+          description="The risk remains canonical, but no safe evidence excerpt is available."
+        />
+        <NoPreviewAssurance openLabel={openLabel} />
+      </Card>
+    );
+  }
+
+  const originalColumn = (
+    <section className="compare-pane">
+      <h3>원본 문서</h3>
+      {[...source, ...(risk.analysis_type === "LICENSE" ? packageMetadata : [])].map(
+        (evidence) => (
+          <EvidenceBlock key={evidence.id} evidence={evidence} />
+        ),
+      )}
+      {source.length === 0 && (risk.analysis_type !== "LICENSE" || packageMetadata.length === 0) ? (
+        <p className="fine-print">원본 쪽 발췌가 남아 있지 않습니다.</p>
+      ) : null}
+      <p className="compare-pane__link">
+        <button type="button" className="text-link" onClick={onOpenOriginal}>
+          {openLabel} ↗
+        </button>
+      </p>
+    </section>
+  );
+
+  if (risk.analysis_type === "PATENT") {
+    return (
+      <Card>
+        <p className="eyebrow">Why this risk</p>
+        <h2>원본 ↔ 근거 대조</h2>
+        <div className="compare-grid">
+          {originalColumn}
+          <section className="compare-pane">
+            <h3>근거 문서 (특허)</h3>
+            {patent.map((evidence) => (
+              <EvidenceBlock key={evidence.id} evidence={evidence} />
+            ))}
+            {patent.length === 0 ? (
+              <p className="fine-print">특허 쪽 발췌가 남아 있지 않습니다.</p>
+            ) : null}
+            <PatentReferenceLinks evidence={patent} />
+          </section>
+        </div>
+        <NoPreviewAssurance openLabel={openLabel} />
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <p className="eyebrow">Why this risk</p>
+      <h2>원본 · 근거 라이선스 대조</h2>
+      <div className="compare-stack">
+        {originalColumn}
+        <section className="compare-pane">
+          <h3>근거 라이선스 전문</h3>
+          {/* 전문은 길다 — 스크롤 상자에 가두고 문제가 된 조항만 하이라이트로 짚는다. */}
+          <div className="license-text">
+            {license.map((evidence) => (
+              <EvidenceBlock key={evidence.id} evidence={evidence} />
+            ))}
+            {license.length === 0 ? (
+              <p className="fine-print">라이선스 전문 발췌가 남아 있지 않습니다.</p>
+            ) : null}
+          </div>
+          {references.length === 0 ? null : (
+            <p className="fine-print">
+              참고 근거: {references.map((item) => item.reference).join(" · ")}
+            </p>
+          )}
+        </section>
+      </div>
+      <NoPreviewAssurance openLabel={openLabel} />
+    </Card>
+  );
+}
+
+function EvidenceBlock({ evidence }: { evidence: Evidence }) {
+  return (
+    <article className="evidence-block">
+      <div className="card-row">
+        <Badge tone="info">{evidence.evidence_type}</Badge>
+        <small>Revision {evidence.source_revision}</small>
+      </div>
+      <EvidenceExcerpt excerpt={evidence.excerpt} metadata={evidence.metadata_safe} />
+      <p className="evidence-block__reference">{evidence.reference}</p>
+    </article>
+  );
+}
+
+/**
+ * 근거 특허로 나가는 링크. reference 는 "KIPRIS Plus 출원번호 …" 형식이다.
+ * 출원번호를 읽지 못하면 링크를 지어내지 않는다.
+ */
+function PatentReferenceLinks({ evidence }: { evidence: Evidence[] }) {
+  const numbers = [
+    ...new Set(
+      evidence
+        .map((item) => /출원번호\s*([0-9][0-9-]*)/u.exec(item.reference)?.[1])
+        .filter((value): value is string => value !== undefined),
+    ),
+  ];
+  if (numbers.length === 0) return null;
+  return (
+    <p className="compare-pane__link">
+      {numbers.map((number) => (
+        <a
+          key={number}
+          className="text-link"
+          href={`https://www.kipris.or.kr/khome/search/searchResult.do?searchWord=${encodeURIComponent(number)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          KIPRIS 출원번호 {number} ↗
+        </a>
+      ))}
+    </p>
+  );
+}
+
+function NoPreviewAssurance({ openLabel }: { openLabel: string }) {
+  return (
+    <div className="source-assurance">
+      <strong>No raw source preview</strong>
+      <span>
+        Use “{openLabel}” to continue through provider or owning-device
+        authorization.
+      </span>
     </div>
   );
 }

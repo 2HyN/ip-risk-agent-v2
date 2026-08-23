@@ -14,6 +14,7 @@ import {
   Select,
   toneFor,
 } from "../shared/ui";
+import type { Risk } from "../shared/api/types";
 import { useWorkspace } from "../workspace/workspace-context";
 
 type Filters = {
@@ -24,6 +25,56 @@ type Filters = {
   mount_id: string;
   source_type: string;
 };
+type ArtifactGroup = {
+  artifactId: string;
+  displayName: string;
+  logicalPath: string | null;
+  sourceLabel: string | null;
+  openCount: number;
+  risks: Risk[];
+};
+
+/**
+ * 한 파일에서 나온 Risk 를 한 묶음으로 (3-C).
+ *
+ * Risk 는 파일에서 나온다 — 파일 하나에 특허 · 라이선스 Risk 가 여럿 걸리는 것이
+ * 보통이라, 평평한 목록은 같은 파일이 몇 번이고 흩어져 나온다. 묶음 순서는 받은
+ * 순서(우선순위·최근성은 서버 정렬)를 따르되 같은 파일은 처음 나온 자리에 모은다.
+ */
+function groupByArtifact(risks: Risk[]): ArtifactGroup[] {
+  const groups = new Map<string, ArtifactGroup>();
+  for (const risk of risks) {
+    let group = groups.get(risk.artifact_id);
+    if (group === undefined) {
+      group = {
+        artifactId: risk.artifact_id,
+        displayName: risk.artifact_display_name ?? risk.artifact_id,
+        logicalPath: risk.artifact_logical_path,
+        sourceLabel:
+          risk.mount_alias === null && risk.source_type === null
+            ? null
+            : [
+                risk.source_type === null ? null : humanize(risk.source_type),
+                risk.mount_alias,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+        openCount: 0,
+        risks: [],
+      };
+      groups.set(risk.artifact_id, group);
+    }
+    group.risks.push(risk);
+    if (
+      risk.lifecycle_state !== "RESOLVED" &&
+      risk.review_disposition === "UNREVIEWED"
+    ) {
+      group.openCount += 1;
+    }
+  }
+  return [...groups.values()];
+}
+
 const initialFilters: Filters = {
   lifecycle_state: "",
   analysis_type: "",
@@ -58,8 +109,8 @@ export function RiskListPage() {
     <div className="content">
       <PageHeader
         eyebrow="Canonical risk register"
-        title="Risks"
-        description="Machine lifecycle and reviewer disposition remain separate, so analysis updates never overwrite human decisions."
+        title="Review"
+        description="한 파일에서 나온 Risk를 모아서 봅니다. Machine lifecycle과 reviewer disposition은 분리되어 있어 분석 갱신이 사람의 판단을 덮지 않습니다."
       />
       <Card className="filter-bar" aria-label="Risk filters">
         <Select
@@ -151,66 +202,69 @@ export function RiskListPage() {
           }
         />
       ) : (
-        <Card className="table-card">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Risk</th>
-                  <th>Artifact</th>
-                  <th>Priority</th>
-                  <th>Lifecycle</th>
-                  <th>Review</th>
-                  <th>Last seen</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resource.data?.items.map((risk) => (
-                  <tr key={risk.id}>
-                    <td>
-                      <Link
-                        className="risk-link"
-                        to={`/w/${workspace.id}/risks/${risk.id}`}
-                      >
-                        <Badge tone="info">{risk.analysis_type}</Badge>
-                        <strong>{risk.summary}</strong>
-                      </Link>
-                    </td>
-                    <td>
-                      <strong>
-                        {risk.artifact_display_name ?? risk.artifact_id}
-                      </strong>
-                      <small>
-                        {risk.artifact_logical_path ?? "Canonical artifact"}
-                      </small>
-                    </td>
-                    <td>
-                      <Badge tone={toneFor(risk.review_priority)}>
-                        {risk.review_priority}
-                      </Badge>
-                    </td>
-                    <td>
-                      <Badge tone={toneFor(risk.lifecycle_state)}>
-                        {risk.lifecycle_state}
-                      </Badge>
-                    </td>
-                    <td>{humanize(risk.review_disposition)}</td>
-                    <td>{formatDate(risk.last_seen_at)}</td>
-                    <td>
-                      {risk.mount_alias ?? "—"}
-                      <small>
-                        {risk.source_type === null
-                          ? ""
-                          : humanize(risk.source_type)}
-                      </small>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <div className="review-groups">
+          {groupByArtifact(resource.data?.items ?? []).map((group) => (
+            <Card key={group.artifactId} className="review-group">
+              <div className="review-group__head">
+                <div>
+                  <h2>
+                    <span className="explorer-icon" aria-hidden="true">📄</span>
+                    {group.displayName}
+                  </h2>
+                  <p className="review-group__path">
+                    {group.logicalPath ?? "Canonical artifact"}
+                    {group.sourceLabel === null ? "" : ` · ${group.sourceLabel}`}
+                  </p>
+                </div>
+                <Badge tone={group.openCount > 0 ? "warning" : "success"}>
+                  {group.openCount > 0
+                    ? `검토 대기 ${group.openCount}`
+                    : "모두 검토됨"}
+                </Badge>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Risk</th>
+                      <th>Priority</th>
+                      <th>Lifecycle</th>
+                      <th>Review</th>
+                      <th>Last seen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.risks.map((risk) => (
+                      <tr key={risk.id}>
+                        <td>
+                          <Link
+                            className="risk-link"
+                            to={`/w/${workspace.id}/risks/${risk.id}`}
+                          >
+                            <Badge tone="info">{risk.analysis_type}</Badge>
+                            <strong>{risk.summary}</strong>
+                          </Link>
+                        </td>
+                        <td>
+                          <Badge tone={toneFor(risk.review_priority)}>
+                            {risk.review_priority}
+                          </Badge>
+                        </td>
+                        <td>
+                          <Badge tone={toneFor(risk.lifecycle_state)}>
+                            {risk.lifecycle_state}
+                          </Badge>
+                        </td>
+                        <td>{humanize(risk.review_disposition)}</td>
+                        <td>{formatDate(risk.last_seen_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ))}
+        </div>
       )}
       {resource.data?.next_cursor === null || resource.data === null ? null : (
         <div className="pagination-actions">

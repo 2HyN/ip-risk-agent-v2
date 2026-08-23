@@ -12,7 +12,6 @@ import {
   LoadingState,
   PageHeader,
   Textarea,
-  toneFor,
 } from "../shared/ui";
 import { useWorkspace } from "../workspace/workspace-context";
 
@@ -75,58 +74,9 @@ export function SecurityPage() {
         description="Connected scope, protection policy, retention, and actual source reads are shown separately."
       />
       {error === null ? null : <ErrorState error={error} />}
-      <section className="section">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Connected sources</p>
-            <h2>Authorized collection scope</h2>
-          </div>
-        </div>
-        {access.data.connected_sources.length === 0 ? (
-          <EmptyState
-            title="No connected sources"
-            description="A Source Manager can connect a provider through the Source Plane."
-          />
-        ) : (
-          <div className="card-grid">
-            {access.data.connected_sources.map((source) => (
-              <Card key={source.mount_id}>
-                <div className="card-row">
-                  <div>
-                    <h3>{source.alias}</h3>
-                    <p>
-                      {source.source_type === null
-                        ? "Unknown provider"
-                        : humanize(source.source_type)}
-                    </p>
-                  </div>
-                  <Badge tone={toneFor(source.status)}>
-                    {humanize(source.status)}
-                  </Badge>
-                </div>
-                <dl className="compact-dl">
-                  <div>
-                    <dt>Provider account</dt>
-                    <dd>{source.provider_account_label ?? "Not disclosed"}</dd>
-                  </div>
-                  <div>
-                    <dt>Mounted by</dt>
-                    <dd>{source.mounted_by_user_id}</dd>
-                  </div>
-                  <div>
-                    <dt>Tracking scope</dt>
-                    <dd>
-                      {Object.keys(source.tracking_scope_summary).length === 0
-                        ? "Provider-defined scope"
-                        : JSON.stringify(source.tracking_scope_summary)}
-                    </dd>
-                  </div>
-                </dl>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
+      {/* "Connected sources / Authorized collection scope" 섹션은 뺐다 —
+          연결과 범위는 Files 화면이 보여 주는 것이고, 여기 남겨 두면 같은 사실이
+          두 화면에서 다르게 늙는다. */}
       <div className="security-grid">
         <Card>
           <p className="eyebrow">Global protection</p>

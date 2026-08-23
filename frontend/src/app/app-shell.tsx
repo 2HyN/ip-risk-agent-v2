@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { Badge, Button, ErrorState, LoadingState } from "../shared/ui";
 import { useResource } from "../shared/hooks/use-resource";
@@ -21,7 +22,10 @@ export function AppShell() {
         </button>
         <nav className="topbar__nav" aria-label="Global navigation">
           <NavLink to="/">Workspaces</NavLink>
-          <NavLink to="/notifications">Notifications</NavLink>
+          <NavLink to="/notifications">
+            Notifications
+            <UnreadNotificationBadge />
+          </NavLink>
         </nav>
         <div className="account">
           <div className="account__avatar">
@@ -47,6 +51,43 @@ export function AppShell() {
       </header>
       <Outlet />
     </div>
+  );
+}
+
+/**
+ * 안 읽은 알림 수. 모바일 앱 배지처럼 붙는다.
+ *
+ * 페이지를 옮길 때마다, 그리고 주기적으로 다시 묻는다 — 알림 페이지에서 읽음
+ * 처리를 하고 나오면 배지가 그 자리에서 줄어야 한다.
+ */
+function UnreadNotificationBadge() {
+  const { api, user } = useSession();
+  const location = useLocation();
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (user === null) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    async function poll(): Promise<void> {
+      try {
+        const inbox = await api.notifications(true);
+        if (!cancelled) setCount(inbox.unread_count);
+      } catch {
+        // 배지 하나 때문에 화면을 흔들지 않는다. 다음 주기에 다시 묻는다.
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), 30_000);
+    }
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [api, user, location.pathname]);
+  if (count === 0) return null;
+  return (
+    <span className="nav-badge" aria-label={`안 읽은 알림 ${count}개`}>
+      {count > 99 ? "99+" : count}
+    </span>
   );
 }
 
@@ -110,8 +151,8 @@ function WorkspaceSidebar({
         <NavLink end to={base}>
           Overview
         </NavLink>
-        <NavLink to={`${base}/risks`}>Risks</NavLink>
-        <NavLink to={`${base}/sources`}>Sources</NavLink>
+        <NavLink to={`${base}/sources`}>Files</NavLink>
+        <NavLink to={`${base}/risks`}>Review</NavLink>
         {sourceNavigation}
         {canManageMembers ? (
           <NavLink to={`${base}/members`}>Members &amp; roles</NavLink>

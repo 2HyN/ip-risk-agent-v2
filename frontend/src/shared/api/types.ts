@@ -195,6 +195,25 @@ export type DataAccessSummary = {
   external_rag_reference_only: true;
 };
 
+export type AnalysisProgressItem = {
+  artifact_id: string;
+  display_name: string;
+  status: string;
+  failure_safe: string | null;
+};
+
+export type AnalysisProgress = {
+  total: number;
+  waiting: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  inconclusive: number;
+  items: AnalysisProgressItem[];
+  generated_at: string;
+};
+
 export type Notification = {
   id: string;
   user_id: string;

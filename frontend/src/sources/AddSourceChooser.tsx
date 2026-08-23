@@ -79,6 +79,10 @@ export function AddSourceChooser({
   return (
     <div className="source-provider-grid">
       <h2>Add Source</h2>
+      <p className="source-hint">
+        마운트는 파일이 아니라 <strong>폴더 단위</strong>입니다. 연결한 폴더가
+        Files 의 뿌리에 붙습니다.
+      </p>
       <Button type="button" variant="secondary" onClick={handleDriveClick}>
         Google Drive
       </Button>
