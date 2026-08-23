@@ -220,7 +220,12 @@ def test_the_connection_carries_no_credential_because_there_is_nothing_to_keep()
     _mount(client)
 
     assert connections.calls[0]["credential_ref"] is None
-    assert connections.calls[0]["provider_email"] == SHARING_ADDRESS
+    # 연결의 정체성은 **폴더**다. 서비스 계정 주소로 잡으면 한 워크스페이스의 모든
+    # Drive 폴더가 연결 하나로 접히고, 변경 커서를 나눠 쓰다 서로의 변경을 삼킨다.
+    assert connections.calls[0]["provider_subject"] == FOLDER_ID
+    # 화면에 보이는 것은 폴더 이름이다. 주소를 alias 로 쓰면 목록에 같은 긴 주소만
+    # 늘어서고 어느 폴더인지 알 수 없다.
+    assert connections.calls[0]["provider_email"] == "patent"
 
 
 def test_a_file_is_refused_instead_of_becoming_a_mount_that_tracks_nothing():
@@ -332,3 +337,24 @@ def test_a_pasted_drive_url_is_accepted_because_that_is_what_users_hold():
         == "abc123"
     )
     assert parse_folder_reference("  https://drive.google.com/drive/u/0/folders/xyz  ") == "xyz"
+
+
+def test_two_folders_in_one_workspace_are_two_connections_not_one():
+    """폴더마다 자기 연결을 갖는다.
+
+    D1 이 신원을 서비스 계정 하나로 바꾸면서, 예전에 마운트를 갈라 주던 값(연결된
+    Drive 계정)이 **모든 폴더에 대해 같아졌다.** 연결을 그 값으로 잡으면 한
+    워크스페이스의 Drive 폴더가 전부 하나로 접히고, 두 번째 폴더를 붙이는 순간
+    첫 폴더가 추적 범위에서 조용히 덮어써진다.
+    """
+    first = _folder("folder-1", "patent")
+    second = _folder("folder-2", "design")
+    provider = FakeDriveProvider(root=first)
+    client, _scopes, connections, _mounts, _sync = _setup(provider)
+
+    _mount(client, "folder-1")
+    provider._root = second
+    _mount(client, "folder-2")
+
+    assert [call["provider_subject"] for call in connections.calls] == ["folder-1", "folder-2"]
+    assert [call["provider_email"] for call in connections.calls] == ["patent", "design"]

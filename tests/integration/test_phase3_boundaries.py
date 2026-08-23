@@ -335,6 +335,52 @@ def test_pending_connection_is_idempotent_and_mounts_only_after_selection() -> N
     run(scenario())
 
 
+def test_a_drive_mount_resolves_without_a_stored_credential() -> None:
+    """D1 연결에는 보관한 자격증명이 없다. 그것이 고장이 아니다.
+
+    OAuth 시절에는 자격증명 없는 Drive 연결이 곧 고장이었고, 그래서
+    `DriveMountConnectionLookup` 이 `credential_ref is None` 을 거절 조건에 넣어
+    두었다. D1 은 그 전제를 뒤집는다 — 접근이 폴더 공유에서 오므로 보관할
+    자격증명이 **아예 생기지 않는다.**
+
+    남아 있던 그 조건 때문에 운영에서 D1 마운트가 전부 초기 훑기에서 502 로
+    떨어졌다. 라우터 시험은 가짜 조회를 쓰고 있어 이 경로를 보지 못했다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryPendingConnectionStore()
+        control = FakeControl()
+        service = SourceRegistrationService(
+            store=store,
+            control_facade=control,
+            principal_resolver=FakePrincipalResolver(principal()),
+            clock=Clock(),
+            ttl=timedelta(minutes=5),
+        )
+        connection_id = await service.create_drive_connection(
+            request("GET"),
+            risk_workspace_id="vws-1",
+            provider_subject="iprisk-v2-drive@example.iam.gserviceaccount.com",
+            provider_email="iprisk-v2-drive@example.iam.gserviceaccount.com",
+            credential_ref=None,
+        )
+        mount = await service.create_drive_mount(
+            request(),
+            connection_id=connection_id,
+            risk_workspace_id="vws-1",
+            selected_file_ids=["folder-1"],
+        )
+
+        resolved = await DriveMountConnectionLookup(store).resolve(mount.server_mount_id)
+
+        # 연결은 찾아진다 — 변경 커서를 이 id 로 보관하기 때문에 반드시 필요하다.
+        assert resolved.connection_id == "canonical-connection-1"
+        # 그리고 자격증명은 비어 있다. 그것이 D1 의 요점이다.
+        assert resolved.credential_ref is None
+
+    run(scenario())
+
+
 def test_device_enrollment_is_one_time_hashed_bound_and_revocable() -> None:
     async def scenario() -> None:
         clock = Clock()
@@ -524,12 +570,14 @@ def _drive_credential(key_id: str = "secret-version-1") -> CredentialRef:
     )
 
 
-def test_drive_source_workspace_is_stable_per_account_across_reconnect() -> None:
-    """Source workspace 는 연결된 Drive 계정이지 이번에 고른 파일 묶음이 아니다.
+def test_drive_source_workspace_is_stable_per_folder_across_reconnect() -> None:
+    """Source workspace 는 **공유받은 폴더**다 (D1).
 
-    운영에서 같은 Google 계정으로 다시 연결할 때마다 새 source workspace 가 생겨
-    같은 계정의 파일이 흩어졌다. 등록 키를 계정 기준으로 두면 pending 이 새로
-    발급돼도 같은 canonical source workspace 로 수렴해야 한다.
+    예전에는 연결된 Drive 계정이었다. 같은 계정으로 다시 연결할 때마다 새 source
+    workspace 가 생겨 같은 계정의 파일이 흩어졌기 때문이다. D1 이 신원을 서비스 계정
+    하나로 바꾸면서 계정 값이 모든 폴더에 대해 같아졌으므로, 그 자리를 폴더 id 가
+    맡는다. pending 이 새로 발급돼도 같은 폴더면 같은 canonical source workspace 로
+    수렴해야 한다.
     """
 
     async def scenario() -> None:
@@ -541,8 +589,8 @@ def test_drive_source_workspace_is_stable_per_account_across_reconnect() -> None
         first = await service.create_drive_connection(
             request("GET"),
             risk_workspace_id="vws-1",
-            provider_subject="google-subject-1",
-            provider_email="owner@example.com",
+            provider_subject="folder-1",
+            provider_email="patent",
             credential_ref=_drive_credential(),
         )
         initial = await service.create_drive_mount(
@@ -559,8 +607,8 @@ def test_drive_source_workspace_is_stable_per_account_across_reconnect() -> None
         second = await service.create_drive_connection(
             request("GET"),
             risk_workspace_id="vws-1",
-            provider_subject="google-subject-1",
-            provider_email="owner@example.com",
+            provider_subject="folder-1",
+            provider_email="patent",
             credential_ref=_drive_credential("secret-version-2"),
         )
         assert second != first
@@ -580,14 +628,19 @@ def test_drive_source_workspace_is_stable_per_account_across_reconnect() -> None
             "file-1",
             "file-2",
         )
-        assert latest.external_scope_id == "drive-account:google-subject-1"
+        assert latest.external_scope_id == "drive-folder:folder-1"
         assert latest.mount_alias == control.registration_calls[0].mount_alias
 
     run(scenario())
 
 
-def test_two_drive_accounts_stay_separate_source_workspaces() -> None:
-    """계정 단위로 안정화해도 서로 다른 계정은 섞이지 않아야 한다."""
+def test_two_drive_folders_stay_separate_source_workspaces() -> None:
+    """폴더 단위로 안정화해도 서로 다른 폴더는 섞이지 않아야 한다.
+
+    이것이 D1 에서 가장 중요한 성질이다. 신원이 서비스 계정 하나라, 정체성을 계정에
+    두면 한 워크스페이스의 Drive 폴더가 전부 마운트 하나로 접히고 두 번째 폴더가
+    첫 폴더의 추적 범위를 덮어쓴다.
+    """
 
     async def scenario() -> None:
         clock = Clock()
@@ -597,8 +650,8 @@ def test_two_drive_accounts_stay_separate_source_workspaces() -> None:
 
         ids = []
         for subject, email in (
-            ("google-subject-1", "owner@example.com"),
-            ("google-subject-2", "second@example.com"),
+            ("folder-1", "patent"),
+            ("folder-2", "design"),
         ):
             connection = await service.create_drive_connection(
                 request("GET"),

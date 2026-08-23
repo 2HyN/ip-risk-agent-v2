@@ -152,6 +152,10 @@ def create_drive_mounts_router(
                 status_code=503 if exc.retryable else 502,
                 detail={
                     "code": "DRIVE_INITIAL_SYNC_FAILED",
+                    "message": (
+                        "폴더는 붙었는데 안을 처음 훑는 데 실패했습니다. "
+                        "Sources 목록에서 이 폴더를 지우고 다시 붙여 주세요."
+                    ),
                     "operation": "drive_file_metadata",
                     "provider_error": exc.category.value,
                     "retryable": exc.retryable,
@@ -199,6 +203,10 @@ def create_drive_mounts_router(
                 status_code=503 if exc.retryable else 502,
                 detail={
                     "code": "DRIVE_FOLDER_LOOKUP_FAILED",
+                    "message": (
+                        "Drive 에서 폴더를 읽지 못했습니다. 주소는 맞을 수 있으니 "
+                        "잠시 후 다시 시도해 주세요."
+                    ),
                     "provider_error": exc.category.value,
                     "retryable": exc.retryable,
                 },
@@ -223,6 +231,10 @@ def create_drive_mounts_router(
                 status_code=503 if exc.retryable else 502,
                 detail={
                     "code": "DRIVE_FOLDER_LISTING_FAILED",
+                    "message": (
+                        "폴더는 찾았는데 안을 훑지 못했습니다. 잠시 후 다시 시도해 "
+                        "주세요."
+                    ),
                     "provider_error": exc.category.value,
                     "retryable": exc.retryable,
                 },
@@ -260,14 +272,19 @@ def create_drive_mounts_router(
 
         folder_id, metadata, listing = inspect_folder(body.folder_id)
 
-        # 연결을 마운트마다 새로 만든다. 변경 커서와 감시 채널이 연결 id 로 보관되고,
-        # 폴더마다 자기 커서를 가져야 한 폴더의 대조가 다른 폴더의 변경을 삼키지
-        # 않는다.
+        # 연결의 정체성도 **폴더**다.
+        #
+        # 변경 커서와 감시 채널이 연결 id 로 보관된다. 연결을 서비스 계정 주소로
+        # 잡으면 한 워크스페이스의 모든 Drive 폴더가 커서 하나를 나눠 쓰게 되고,
+        # 한 폴더의 대조가 커서를 넘겨 버리면 다른 폴더의 변경이 사라진다.
+        #
+        # 화면에 보이는 이름은 폴더 이름이다. 서비스 계정 주소를 alias 로 쓰면
+        # 목록에 같은 긴 주소만 늘어서고 어느 폴더인지 알 수 없다.
         connection_id = await connection_creation_callback.create_drive_connection(
             request,
             risk_workspace_id=body.risk_workspace_id,
-            provider_subject=sharing_address,
-            provider_email=sharing_address,
+            provider_subject=folder_id,
+            provider_email=metadata.name,
             credential_ref=None,
         )
 

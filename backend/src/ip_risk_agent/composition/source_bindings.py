@@ -20,11 +20,14 @@ class DriveMountConnectionLookup:
             if binding is None
             else await self._store.get_pending(binding.pending_connection_id)
         )
+        # `credential_ref` 가 없다고 거절하지 않는다. OAuth 시절에는 자격증명 없는
+        # Drive 연결이 곧 고장이었지만, D1 에서는 **없는 것이 정상**이다 — 접근이
+        # 폴더 공유에서 오므로 보관할 자격증명이 아예 생기지 않는다. 이 조건이
+        # 남아 있어 D1 마운트가 전부 초기 훑기에서 502 로 떨어졌다.
         if (
             binding is None
             or pending is None
             or pending.source_type is not SourceType.GOOGLE_DRIVE
-            or pending.credential_ref is None
         ):
             raise NotFoundError(
                 provider="google_drive",
