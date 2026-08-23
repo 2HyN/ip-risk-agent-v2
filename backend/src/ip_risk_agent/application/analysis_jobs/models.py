@@ -129,6 +129,16 @@ class AnalysisJob:
     analysis_outcomes: Mapping[AnalysisType, AnalysisOutcome] = field(
         default_factory=dict
     )
+    #: 이 작업이 **무엇을 보고** 판단했는가 (§7.4 · 3-B).
+    #:
+    #: 게이트가 승인하며 적는다. 파일 내용만이 아니라 redaction · 분석기 라우팅 ·
+    #: ``content_scope`` 까지 반영한 값이라, 같으면 **분석기가 본 것이 정말 같았다**
+    #: 는 뜻이다. 원본 체크섬(``ArtifactState.latest_checksum``)은 그 셋을 반영하지
+    #: 않아 이 물음에 답하지 못한다.
+    #:
+    #: 이 값이 없으면 §1.2 (A) 의 가운데 줄을 말할 수 없다 — "우리는 가만있었는데
+    #: 위험이 생겼다" 는 **입력이 그대로였음을 보여야** 성립한다.
+    analysis_input_checksum: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("id", "change_event_id", "artifact_id", "revision"):

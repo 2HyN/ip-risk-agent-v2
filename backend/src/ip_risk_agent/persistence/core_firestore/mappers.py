@@ -668,6 +668,7 @@ def analysis_job_to_document(value: AnalysisJob) -> Document:
             analysis_type.value: _analysis_outcome_to_value(outcome)
             for analysis_type, outcome in value.analysis_outcomes.items()
         },
+        analysis_input_checksum=value.analysis_input_checksum,
     )
 
 
@@ -688,6 +689,9 @@ def analysis_job_from_document(document: Mapping[str, object]) -> AnalysisJob:
             "failure_safe",
             "analysis_outcomes",
         ),
+        # 나중에 더한 필드다 (§7.4 · 3-B). 이미 저장된 작업 문서에는 없고, 없다는 것이
+        # "그때는 남기지 않았다" 를 정확히 뜻하므로 이행이 필요 없다.
+        optional_fields=("analysis_input_checksum",),
     )
     outcomes = _mapping(data["analysis_outcomes"])
     return AnalysisJob(
@@ -707,6 +711,7 @@ def analysis_job_from_document(document: Mapping[str, object]) -> AnalysisJob:
             AnalysisType(key): _analysis_outcome_from_value(value)
             for key, value in outcomes.items()
         },
+        analysis_input_checksum=_optional_str(data.get("analysis_input_checksum")),
     )
 
 

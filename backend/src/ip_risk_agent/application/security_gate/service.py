@@ -198,6 +198,12 @@ class SecurityGateService:
                         requested_analysis_types=tuple(
                             analysis_artifact.requested_analyzers
                         ),
+                        # 이 작업이 무엇을 보고 판단하는지를 여기서 남긴다 (§7.4 · 3-B).
+                        # 계약이 동결이라 결과에 실어 되돌려 받을 수 없고, 애초에
+                        # **입력의 성질**이므로 분석 전인 이 자리가 맞다.
+                        analysis_input_checksum=(
+                            analysis_artifact.security_context.analysis_input_checksum
+                        ),
                     )
                     await uow.analysis_jobs.save(routed_job)
                 state = replace(

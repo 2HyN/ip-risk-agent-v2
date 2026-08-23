@@ -67,6 +67,12 @@ from ip_risk_agent.core.risk import (
     risk_event_id_for,
     risk_id_for,
 )
+from ip_risk_agent.core.risk.attribution import (
+    CauseAttribution,
+    ChangeCause,
+    VerdictFingerprint,
+    attribute_change,
+)
 
 from .retention import (
     EvidenceRetentionPolicy,
@@ -302,10 +308,14 @@ class AnalysisResultIntakeService:
                 )
                 previous_state = None
                 previous_priority = None
+                previous_job_id = None
                 await uow.risks.add(risk)
             else:
                 previous_state = risk.lifecycle_state
                 previous_priority = risk.review_priority
+                # 직전 판정을 만든 작업. Risk 가 이미 가리키고 있으므로 새 조회가
+                # 필요 없다 — 아래에서 덮어쓰기 전에 잡아 둔다 (§7.4 · 3-B).
+                previous_job_id = risk.latest_analysis_job_id
                 risk_time = max(
                     occurred_at,
                     risk.last_seen_at,
@@ -394,6 +404,12 @@ class AnalysisResultIntakeService:
             # 같은 관측이라는 뜻이므로 이미 있으면 그대로 둔다. 지문이 다르면
             # ID 도 달라 새 이력이 남는다.
             recorded_event_ids = {item.id for item in await uow.risks.list_events(risk.id)}
+            attribution = await _attribute(
+                uow,
+                previous_job_id=previous_job_id,
+                current_job_id=result.analysis_job_id,
+                analysis_type=result.analysis_type,
+            )
             await _append_event_once(
                 uow,
                 recorded_event_ids,
@@ -405,6 +421,7 @@ class AnalysisResultIntakeService:
                     analysis_job_id=result.analysis_job_id,
                     previous_state=previous_state,
                     evidence_refs=tuple(evidence_refs),
+                    attribution=attribution,
                 )
             )
             if previous_priority is not None and previous_priority is not risk.review_priority:
@@ -417,6 +434,7 @@ class AnalysisResultIntakeService:
                         previous_priority=previous_priority,
                         occurred_at=risk_time,
                         analysis_job_id=result.analysis_job_id,
+                        attribution=attribution,
                     )
                 )
             if (
@@ -480,6 +498,14 @@ class AnalysisResultIntakeService:
             if decision.next_state is not RiskLifecycleState.RESOLVED or not decision.changed:
                 continue
             risk_time = max(occurred_at, risk.last_seen_at, risk.updated_at)
+            # 해소야말로 "왜" 가 중요하다. 우리가 판단 기준을 바꿔서 사라진 것과
+            # 사용자가 의존성을 지워서 사라진 것은 전혀 다른 사건이다 (§7.4).
+            resolve_attribution = await _attribute(
+                uow,
+                previous_job_id=risk.latest_analysis_job_id,
+                current_job_id=result.analysis_job_id,
+                analysis_type=result.analysis_type,
+            )
             updated = replace(
                 risk,
                 lifecycle_state=RiskLifecycleState.RESOLVED,
@@ -497,6 +523,7 @@ class AnalysisResultIntakeService:
                     analysis_job_id=result.analysis_job_id,
                     previous_state=risk.lifecycle_state,
                     evidence_refs=(),
+                    attribution=resolve_attribution,
                 )
             )
             affected.append(updated.id)
@@ -842,6 +869,53 @@ def _license_priority(outcome: LicensePolicyOutcome) -> ReviewPriority:
     }[outcome]
 
 
+async def _attribute(
+    uow,
+    *,
+    previous_job_id: str | None,
+    current_job_id: str,
+    analysis_type: AnalysisType,
+) -> CauseAttribution:
+    """판정이 왜 달라졌는가 (§7.4 · 3-B).
+
+    비교할 직전 판정이 없으면 ``UNKNOWN`` 이다. 없는 것을 "같다" 로 읽으면 그 위의
+    모든 판단이 근거를 잃는다 — 특히 "외부 사실이 바뀌었다" 가 거짓말이 된다.
+    """
+    if previous_job_id is None or previous_job_id == current_job_id:
+        # 같은 작업이 다시 돈 것은 새 관측이 아니다. 재분석이 정확히 이 경우다.
+        return CauseAttribution(ChangeCause.UNKNOWN)
+    previous_job = await uow.analysis_jobs.get(previous_job_id)
+    current_job = await uow.analysis_jobs.get(current_job_id)
+    if previous_job is None or current_job is None:
+        return CauseAttribution(ChangeCause.UNKNOWN)
+    return attribute_change(
+        _fingerprint(previous_job, analysis_type),
+        _fingerprint(current_job, analysis_type),
+    )
+
+
+def _fingerprint(job, analysis_type: AnalysisType) -> VerdictFingerprint | None:
+    outcome = job.analysis_outcomes.get(analysis_type)
+    if outcome is None:
+        return None
+    return VerdictFingerprint(
+        analysis_input_checksum=job.analysis_input_checksum,
+        policy_version=outcome.policy_version,
+        rag_corpus_version=outcome.rag_corpus_version,
+        model_id=outcome.model_id,
+        prompt_version=outcome.prompt_version,
+        result_fingerprint=outcome.result_fingerprint,
+    )
+
+
+def _cause_state(attribution: CauseAttribution) -> dict[str, object]:
+    """이력에 적을 모양. 값 자체는 안 담는다 — 지문은 우리 것이지만 굳이 늘리지 않는다."""
+    state: dict[str, object] = {"change_cause": attribution.cause.value}
+    if attribution.moved:
+        state["moved_fingerprints"] = list(attribution.moved)
+    return state
+
+
 def _risk_event(
     *,
     risk: Risk,
@@ -851,6 +925,7 @@ def _risk_event(
     analysis_job_id: str,
     previous_state: RiskLifecycleState | None,
     evidence_refs: tuple[str, ...],
+    attribution: CauseAttribution,
 ) -> RiskEvent:
     return RiskEvent(
         id=risk_event_id_for(risk.id, result_fingerprint, event_type.value),
@@ -864,6 +939,7 @@ def _risk_event(
         new_state_safe={
             "lifecycle_state": risk.lifecycle_state.value,
             "review_priority": risk.review_priority.value,
+            **_cause_state(attribution),
         },
         analysis_job_id=analysis_job_id,
         evidence_refs=evidence_refs,
@@ -877,6 +953,7 @@ def _priority_event(
     previous_priority: ReviewPriority,
     occurred_at: datetime,
     analysis_job_id: str,
+    attribution: CauseAttribution,
 ) -> RiskEvent:
     return RiskEvent(
         id=risk_event_id_for(
@@ -889,7 +966,11 @@ def _priority_event(
         actor_type=ActorType.SYSTEM,
         occurred_at=occurred_at,
         previous_state_safe={"review_priority": previous_priority.value},
-        new_state_safe={"review_priority": risk.review_priority.value},
+        # "등급이 바뀌었다" 는 값이 거의 없다. **왜 바뀌었는가** 가 값이다 (§7.4).
+        new_state_safe={
+            "review_priority": risk.review_priority.value,
+            **_cause_state(attribution),
+        },
         analysis_job_id=analysis_job_id,
     )
 
