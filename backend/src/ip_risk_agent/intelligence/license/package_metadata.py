@@ -36,6 +36,8 @@ class PackageLicenseFact:
     license_expression: str
     source: str
     inferred_from_free_text: bool = False
+    #: 요청한 버전이 레지스트리에 없었다. 최신 버전으로 **대체하지 않았다**는 표시다.
+    version_not_found: bool = False
 
     @property
     def is_unknown(self) -> bool:
@@ -139,7 +141,23 @@ class HttpPackageMetadataProvider:
             payload = await self._get(f"{self._npm}/{package}", "NPM")
             info = payload or {}
             if version and isinstance(info.get("versions"), dict):
-                info = info["versions"].get(version, info)
+                found = info["versions"].get(version)
+                if found is None:
+                    # 요청한 버전이 없다. 예전에는 문서 전체로 폴백해 **최신 버전의
+                    # 라이선스를 그 버전의 것으로 기록**했고, 표시조차 붙지 않았다.
+                    #
+                    # 라이선스는 버전마다 달라진다. 그리고 실제로 라이선스를 바꾼
+                    # 패키지들이 이 제품이 잡으려는 대상이다 — 그 순간에 최신 값으로
+                    # 덮으면 **바뀌었다는 사실 자체가 사라진다.**
+                    return PackageLicenseFact(
+                        ecosystem=ecosystem,
+                        package=package,
+                        version=version,
+                        license_expression=spdx.UNKNOWN_LICENSE,
+                        source="registry.npmjs.org",
+                        version_not_found=True,
+                    )
+                info = found
             raw = str(info.get("license") or "")
             source = "registry.npmjs.org"
 

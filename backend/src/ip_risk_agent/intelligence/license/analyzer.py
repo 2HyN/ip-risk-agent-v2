@@ -253,6 +253,10 @@ class LicenseAnalyzer:
 
         if fact.inferred_from_free_text:
             uncertainty.append("LICENSE_INFERRED_FROM_FREE_TEXT")
+        if fact.version_not_found:
+            # 요청한 버전이 레지스트리에 없었다. 최신 버전으로 대체하지 않았으므로
+            # 판정은 UNKNOWN 이고, 왜 모르는지가 여기에 남는다.
+            uncertainty.append("VERSION_NOT_IN_REGISTRY")
 
         outcome = policy.evaluate_expression(fact.license_expression)
 

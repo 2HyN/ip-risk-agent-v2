@@ -491,3 +491,82 @@ def test_a_dependency_file_gets_room_that_prose_does_not():
     )
     assert len(cut[0].text) < len(big), "산문에는 상한이 그대로 걸린다"
     assert cut_scope is not ContentScope.FULL_TEXT
+
+
+# ----------------------------------------------------------------- 0-K
+
+
+def _npm_registry(document):
+    """npm 레지스트리 하나만 답하는 가짜 전송."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "deps.dev" in str(request.url):
+            return httpx.Response(404)
+        return httpx.Response(200, json=document)
+
+    return httpx.MockTransport(handler)
+
+
+def test_a_version_the_registry_does_not_have_is_not_the_latest_one():
+    """예전에는 문서 전체로 폴백해 **최신 버전의 라이선스를 그 버전의 것으로 기록**했다.
+
+    라이선스는 버전마다 달라지고, **실제로 라이선스를 바꾼 패키지들이 이 제품이 잡으려는
+    대상**이다. 그 순간에 최신 값으로 덮으면 바뀌었다는 사실 자체가 사라진다.
+    """
+    import httpx
+
+    from ip_risk_agent.intelligence.license.dependency_models import Ecosystem
+    from ip_risk_agent.intelligence.license.package_metadata import (
+        HttpPackageMetadataProvider,
+    )
+    from ip_risk_agent.intelligence.license import spdx as _spdx
+
+    # 문서 전체는 최신이 MIT 라고 말하고, 2.0.0 만 BUSL-1.1 이다.
+    document = {"license": "MIT", "versions": {"2.0.0": {"license": "BUSL-1.1"}}}
+
+    async def scenario():
+        client = httpx.AsyncClient(transport=_npm_registry(document))
+        provider = HttpPackageMetadataProvider(client=client)
+        try:
+            present = await provider.get_license(Ecosystem.NPM, "x", "2.0.0")
+            missing = await provider.get_license(Ecosystem.NPM, "x", "9.9.9")
+        finally:
+            await client.aclose()
+        return present, missing
+
+    present, missing = run(scenario())
+
+    # 있는 버전은 그 버전의 값이다.
+    assert present.license_expression == "BUSL-1.1"
+    assert present.version_not_found is False
+
+    # 없는 버전은 최신으로 덮지 않는다.
+    assert missing.license_expression == _spdx.UNKNOWN_LICENSE
+    assert missing.version_not_found is True
+    assert missing.version == "9.9.9", "요청한 버전은 그대로 남는다"
+
+
+def test_not_knowing_the_version_is_said_out_loud():
+    """왜 모르는지가 후보에 남아야 사용자가 조회 실패와 구분한다."""
+    import httpx
+
+    from ip_risk_agent.intelligence.license.package_metadata import (
+        HttpPackageMetadataProvider,
+    )
+
+    document = {"license": "MIT", "versions": {"2.0.0": {"license": "MIT"}}}
+
+    async def scenario():
+        client = httpx.AsyncClient(transport=_npm_registry(document))
+        provider = HttpPackageMetadataProvider(client=client)
+        try:
+            return await LicenseAnalyzer(provider).analyze(
+                make_artifact('{"dependencies": {"x": "9.9.9"}}', "package.json")
+            )
+        finally:
+            await client.aclose()
+
+    result = run(scenario())
+    assert len(result.candidates) == 1
+    assert "VERSION_NOT_IN_REGISTRY" in result.candidates[0].uncertainty_flags
