@@ -105,33 +105,18 @@ def test_an_old_flat_policy_version_cannot_be_split() -> None:
     assert old.deployment_axes is None
 
 
-def test_the_checksum_is_actually_stored() -> None:
-    """§7.4 가 막혀 있던 이유가 이것이다 — 값이 계산만 되고 어디에도 안 남았다."""
-    from ip_risk_agent.application.analysis_jobs.models import AnalysisJob
-    from ip_risk_agent.application.security_gate import service as gate
+def test_the_wiring_is_covered_by_behaviour_not_by_reading_the_source() -> None:
+    """이 파일은 판별식만 잰다. 배선은 이력을 실제로 읽어 확인한다.
 
-    assert "analysis_input_checksum" in AnalysisJob.__dataclass_fields__
-    # 게이트가 승인하며 작업 문서에 적는다. 계약이 동결이라 결과에 실어 되돌려 받을
-    # 수 없고, 애초에 **입력의 성질**이라 분석 전인 그 자리가 맞다.
-    source = inspect.getsource(gate)
-    assert "analysis_input_checksum=(" in source
-    assert "await uow.analysis_jobs.save(routed_job)" in source
+    처음에는 여기서 `inspect.getsource` 로 소스에 문자열이 있는지 봤는데, 그것은
+    **배선이 어긋나도 통과한다.** 실제로 어긋나 있었다 — 현재 판정의 지문을 저장소에서
+    읽으려 했는데 이 실행의 판정은 아직 저장 전이라 `None` 이었고, 동작 시험을 쓰자마자
+    터졌다.
+    """
+    from pathlib import Path
 
-
-def test_the_ledger_records_the_cause() -> None:
-    """이력에 안 남으면 화면이 문장을 만들 재료가 없다."""
-    from ip_risk_agent.application.risk_reconcile import service as reconcile
-
-    assert "change_cause" in inspect.getsource(reconcile._cause_state)
-    for name in ("_risk_event", "_priority_event"):
-        assert "_cause_state(attribution)" in inspect.getsource(
-            getattr(reconcile, name)
-        )
-
-
-def test_a_rerun_of_the_same_job_is_not_a_new_observation() -> None:
-    """재분석은 같은 작업을 다시 돌린다. 그것을 원인 판별의 재료로 쓰면 안 된다."""
-    from ip_risk_agent.application.risk_reconcile import service as reconcile
-
-    source = inspect.getsource(reconcile._attribute)
-    assert "previous_job_id == current_job_id" in source
+    ledger = (
+        Path(__file__).with_name("test_attribution_ledger.py").read_text("utf-8")
+    )
+    assert "change_cause" in ledger
+    assert "accept_analysis_result" in ledger, "이력을 실제로 만들어 봐야 한다"

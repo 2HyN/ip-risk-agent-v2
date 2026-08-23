@@ -106,10 +106,10 @@ class CauseAttribution:
 
 def attribute_change(
     previous: VerdictFingerprint | None,
-    current: VerdictFingerprint,
+    current: VerdictFingerprint | None,
 ) -> CauseAttribution:
     """판정이 달라진 원인. 비교할 것이 없으면 ``UNKNOWN``."""
-    if previous is None:
+    if previous is None or current is None:
         return CauseAttribution(ChangeCause.UNKNOWN)
 
     # 입력이 없으면 같은지 다른지를 **모른다.** 모르는 것을 같다고 읽으면 그 위의

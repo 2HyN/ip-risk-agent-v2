@@ -405,10 +405,7 @@ class AnalysisResultIntakeService:
             # ID 도 달라 새 이력이 남는다.
             recorded_event_ids = {item.id for item in await uow.risks.list_events(risk.id)}
             attribution = await _attribute(
-                uow,
-                previous_job_id=previous_job_id,
-                current_job_id=result.analysis_job_id,
-                analysis_type=result.analysis_type,
+                uow, previous_job_id=previous_job_id, result=result
             )
             await _append_event_once(
                 uow,
@@ -501,10 +498,7 @@ class AnalysisResultIntakeService:
             # 해소야말로 "왜" 가 중요하다. 우리가 판단 기준을 바꿔서 사라진 것과
             # 사용자가 의존성을 지워서 사라진 것은 전혀 다른 사건이다 (§7.4).
             resolve_attribution = await _attribute(
-                uow,
-                previous_job_id=risk.latest_analysis_job_id,
-                current_job_id=result.analysis_job_id,
-                analysis_type=result.analysis_type,
+                uow, previous_job_id=risk.latest_analysis_job_id, result=result
             )
             updated = replace(
                 risk,
@@ -873,28 +867,40 @@ async def _attribute(
     uow,
     *,
     previous_job_id: str | None,
-    current_job_id: str,
-    analysis_type: AnalysisType,
+    result: AnalysisResult,
 ) -> CauseAttribution:
     """판정이 왜 달라졌는가 (§7.4 · 3-B).
+
+    **현재 지문은 지금 받은 결과에서 온다.** 이 실행의 판정은 아직 저장되지 않았으므로
+    저장소에서 읽으면 없다. 처음에 읽으려다 그대로 터졌다.
 
     비교할 직전 판정이 없으면 ``UNKNOWN`` 이다. 없는 것을 "같다" 로 읽으면 그 위의
     모든 판단이 근거를 잃는다 — 특히 "외부 사실이 바뀌었다" 가 거짓말이 된다.
     """
+    current_job_id = result.analysis_job_id
     if previous_job_id is None or previous_job_id == current_job_id:
         # 같은 작업이 다시 돈 것은 새 관측이 아니다. 재분석이 정확히 이 경우다.
         return CauseAttribution(ChangeCause.UNKNOWN)
+
     previous_job = await uow.analysis_jobs.get(previous_job_id)
     current_job = await uow.analysis_jobs.get(current_job_id)
     if previous_job is None or current_job is None:
         return CauseAttribution(ChangeCause.UNKNOWN)
+
     return attribute_change(
-        _fingerprint(previous_job, analysis_type),
-        _fingerprint(current_job, analysis_type),
+        _stored_fingerprint(previous_job, result.analysis_type),
+        VerdictFingerprint(
+            analysis_input_checksum=current_job.analysis_input_checksum,
+            policy_version=result.versions.policy_version,
+            rag_corpus_version=result.versions.rag_corpus_version,
+            model_id=result.versions.model_id,
+            prompt_version=result.versions.prompt_version,
+        ),
     )
 
 
-def _fingerprint(job, analysis_type: AnalysisType) -> VerdictFingerprint | None:
+def _stored_fingerprint(job, analysis_type: AnalysisType) -> VerdictFingerprint | None:
+    """이미 저장된 판정의 지문. 그 종류를 판정한 적이 없으면 ``None``."""
     outcome = job.analysis_outcomes.get(analysis_type)
     if outcome is None:
         return None
