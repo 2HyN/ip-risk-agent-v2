@@ -60,6 +60,10 @@ from ip_risk_agent.core.workspaces import RiskWorkspace, RiskWorkspaceStatus
 from .ignore import IgnorePolicyError, is_ignored, parse_ipriskignore
 from .minimization import minimize_segments
 from ip_risk_agent.core.artifacts.dependency_files import DEPENDENCY_KINDS
+from ip_risk_agent.core.artifacts.text_files import (
+    NON_COMMITTAL_MIME_TYPES,
+    is_text_like,
+)
 
 from .policy import (
     SecurityGatePolicy,
@@ -258,7 +262,14 @@ class SecurityGateService:
             ContentScope.UNSUPPORTED,
         } or not snapshot.text_segments:
             return SecurityGateDenialReason.UNSUPPORTED_CONTENT, None
-        if _mime_is_denied(snapshot.mime_type, snapshot.artifact_kind, policy):
+        if _mime_is_denied(
+            snapshot.mime_type,
+            snapshot.artifact_kind,
+            policy,
+            # 이름이 유일한 단서다. 경로 힌트가 있으면 그것을, 없으면 표시
+            # 이름을 본다 — 확장자만 보므로 둘 중 무엇이든 답은 같다.
+            logical_path=snapshot.logical_path_hint or snapshot.display_name,
+        ):
             return SecurityGateDenialReason.FILE_TYPE_DENIED, None
         input_bytes = max(
             snapshot.byte_size,
@@ -516,14 +527,32 @@ def _mime_is_denied(
     mime_type: str | None,
     artifact_kind: ArtifactKind,
     policy: SecurityGatePolicy,
+    *,
+    logical_path: str = "",
 ) -> bool:
     if mime_type is None:
         return False
     normalized = mime_type.split(";", 1)[0].strip().casefold()
+    if normalized in NON_COMMITTAL_MIME_TYPES and is_text_like(logical_path):
+        # 이 mime 은 "이것이 무엇인지 말하지 않겠다" 는 뜻이다. 그럴 때는 이름이
+        # 유일한 단서다.
+        #
+        # Drive 가 `.md` 를 `application/octet-stream` 으로 넘기는 일이 있고, 그것이
+        # 여기서 막혔다. GitHub 과 Local 은 mime 을 아예 넘기지 않아(`None`) 위에서
+        # 그냥 통과하므로 같은 파일이 **소스마다 다른 판정**을 받았다.
+        #
+        # 이름이 틀렸으면 내용이 잡는다. 확장자는 텍스트인데 알맹이가 바이너리면
+        # UTF-8 디코드가 실패하고, 그것이 정직한 "미지원" 이다 (§6.2).
+        #
+        # **적극적으로 무엇이라고 말하는 mime 은 뒤집지 않는다.** `image/png` 은
+        # 판단을 미룬 것이 아니라 이미지라고 주장하는 것이다. 그것을 파일 이름
+        # 추측으로 덮으면 확장자만 바꿔 게이트를 지나갈 수 있게 된다.
+        return False
     if normalized in policy.denied_mime_types or any(
         normalized.startswith(prefix) for prefix in policy.denied_mime_prefixes
     ):
         return True
+
     if normalized.startswith("text/"):
         return False
     textual_application_types = {

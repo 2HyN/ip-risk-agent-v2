@@ -27,6 +27,7 @@ from iprisk_contracts.common import (
 from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
 from ip_risk_agent.core.artifacts.dependency_files import dependency_format
+from ip_risk_agent.core.artifacts.text_files import text_kind
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
@@ -46,8 +47,6 @@ from .tracking_scope import GitHubTrackingScope
 
 MAX_FILE_BYTES = 1_000_000
 
-_CODE_EXTENSIONS = {".py", ".js", ".ts", ".java", ".go", ".c", ".h", ".cpp", ".rs"}
-_DOC_EXTENSIONS = {".md", ".txt", ".rst"}
 
 
 class GitHubProviderFactory(Protocol):
@@ -128,9 +127,17 @@ class GitHubAdapter:
         if change.change_type is ChangeType.DELETE:
             return self._unsupported_snapshot(change, resolved_revision=change.revision or "deleted")
 
-        file_content = await provider.get_file_content(
-            identity.owner, identity.repo, identity.path, identity.branch
-        )
+        try:
+            file_content = await provider.get_file_content(
+                identity.owner, identity.repo, identity.path, identity.branch
+            )
+        except UnicodeDecodeError:
+            # 이름은 텍스트라고 했는데 알맹이가 아니었다. 정직한 "미지원" 이다 —
+            # 예전에는 깨진 글자로 바꿔 통과시켜, 분석이 "읽었는데 아무것도 없다"
+            # 를 내놓았다 (§6.2).
+            return self._unsupported_snapshot(
+                change, resolved_revision=change.revision or "unreadable"
+            )
 
         if file_content.size > MAX_FILE_BYTES:
             return self._unsupported_snapshot(
@@ -271,13 +278,9 @@ class GitHubAdapter:
         found = dependency_format(lowered)
         if found is not None:
             return ArtifactKind.LOCKFILE if found.is_lockfile else ArtifactKind.MANIFEST
-        for ext in _CODE_EXTENSIONS:
-            if name.endswith(ext):
-                return ArtifactKind.SOURCE_CODE
-        for ext in _DOC_EXTENSIONS:
-            if name.endswith(ext):
-                return ArtifactKind.DOCUMENT_TEXT
-        return ArtifactKind.UNKNOWN
+        # 코드·문서 판정도 커넥터마다 다를 이유가 없다. GitHub 과 Local 이 같은 표를
+        # 각자 복사해 들고 있었고, Drive 에는 아예 없어 `.py` 도 문서로 봤다.
+        return text_kind(lowered) or ArtifactKind.UNKNOWN
 
     async def resolve_original(self, artifact: SourceArtifactRef) -> OriginalSourceLocator:
         try:

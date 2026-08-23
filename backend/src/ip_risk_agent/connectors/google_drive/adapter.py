@@ -32,6 +32,12 @@ from iprisk_contracts.common import (
 from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
 from ip_risk_agent.core.artifacts.dependency_files import dependency_format
+from ip_risk_agent.core.artifacts.text_files import (
+    NON_COMMITTAL_MIME_TYPES,
+    is_text_like,
+    mime_is_textual,
+    text_kind,
+)
 from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
@@ -52,6 +58,24 @@ from .tracking_scope import DriveTrackingScope
 
 class DriveProviderFactory(Protocol):
     def create(self, token: dict) -> DriveProvider: ...
+
+
+def _is_readable(mime_type: str, name: str) -> bool:
+    """이 Drive 파일을 읽어 볼 것인가.
+
+    예전에는 ``SELECTABLE_MIME_TYPES`` 네 가지만 통과했다. 그래서 ``.py`` 는
+    ``text/x-python`` 으로 와도 떨어졌고, ``.yaml`` · ``.csv`` 도 마찬가지였다.
+    GitHub 과 Local 은 이름만 보고 판단하므로 **같은 파일이 소스마다 다른 대접**을
+    받았고, 폴더 마운트가 열리면 (§6.1) 그 차이가 그대로 누락이 된다.
+
+    규칙은 게이트와 같다 (``security_gate.service._mime_is_denied``).
+    """
+    if mime_type in SELECTABLE_MIME_TYPES or mime_is_textual(mime_type):
+        return True
+    # mime 이 판단을 미뤘을 때만 이름이 대신한다. 이미지라고 주장하는 값은 뒤집지 않는다.
+    normalized = (mime_type or "").split(";", 1)[0].strip().casefold()
+    return normalized in NON_COMMITTAL_MIME_TYPES and is_text_like(name)
+
 
 
 class GoogleDriveAdapter:
@@ -183,16 +207,30 @@ class GoogleDriveAdapter:
 
         drive_file = provider.get_file(file_id)
 
-        if drive_file.mime_type not in SELECTABLE_MIME_TYPES:
+        # mime 이 통과시키는 것은 네 가지뿐이라 `.py`·`.yaml`·`.csv` 가 여기서
+        # 사라졌다. 그런데 **이름이 텍스트라고 말하면 읽어 볼 수 있다.** GitHub 과
+        # Local 은 이름만으로 판단하므로, 이 문만 좁으면 같은 파일이 소스에 따라
+        # 검사를 받기도 하고 안 받기도 한다. 폴더 마운트가 열리면 (§6.1) 그 차이가
+        # 그대로 누락이 된다.
+        if not _is_readable(drive_file.mime_type, drive_file.name):
             await self._persist_refreshed_token(connection, provider)
             return self._unsupported_snapshot(
                 change, resolved_revision=drive_file.revision_id or "unknown"
             )
 
-        text = provider.read_text(file_id, drive_file.mime_type)
+        try:
+            text = provider.read_text(file_id, drive_file.mime_type)
+        except UnicodeDecodeError:
+            # 이름이나 mime 은 텍스트라고 했는데 알맹이가 아니었다 (§6.2).
+            await self._persist_refreshed_token(connection, provider)
+            return self._unsupported_snapshot(
+                change, resolved_revision=drive_file.revision_id or "unreadable"
+            )
         await self._persist_refreshed_token(connection, provider)
 
-        segments = segments_for(text, self._infer_artifact_kind(drive_file.name))
+        segments = segments_for(
+            text, self._infer_artifact_kind(drive_file.name, drive_file.mime_type)
+        )
         checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
         receipt = build_access_receipt(
             SourceAccessType.FULL_CONTENT, content_bytes=bytes_of_text(text)
@@ -210,7 +248,7 @@ class GoogleDriveAdapter:
             display_name=drive_file.name,
             logical_path_hint=None,
             mime_type=drive_file.mime_type,
-            artifact_kind=self._infer_artifact_kind(drive_file.name),
+            artifact_kind=self._infer_artifact_kind(drive_file.name, drive_file.mime_type),
             content_scope=ContentScope.FULL_TEXT,
             text_segments=segments,
             checksum=checksum,
@@ -307,16 +345,25 @@ class GoogleDriveAdapter:
         )
 
     @staticmethod
-    def _infer_artifact_kind(name: str) -> ArtifactKind:
+    def _infer_artifact_kind(name: str, mime_type: str | None = None) -> ArtifactKind:
         # 의존성 판정은 커넥터마다 다를 이유가 없다. 세 커넥터가 각자 목록을 들고
         # 있어 같은 pyproject.toml 이 Drive 에서는 Patent, GitHub 에서는 License
         # 검사를 받았다.
         found = dependency_format(name)
         if found is not None:
             return ArtifactKind.LOCKFILE if found.is_lockfile else ArtifactKind.MANIFEST
-        # Drive 는 사용자가 파일을 하나씩 골라 붙인다. 고른 것은 보겠다는 뜻이므로
-        # 나머지는 문서로 본다 — 저장소를 통째로 훑는 쪽과 다른 점이다.
-        return ArtifactKind.DOCUMENT_TEXT
+        # 예전에는 나머지를 **전부 문서**로 봤다. 사용자가 하나씩 골라 붙이니 고른
+        # 것은 보겠다는 뜻이라는 논리였는데, 그 결과 같은 `main.py` 가 GitHub 에서는
+        # 소스 코드로, Drive 에서는 문서로 분석됐다. 폴더 마운트가 열리면 (§6.1)
+        # 고른다는 전제 자체가 없어진다.
+        kind = text_kind(name)
+        if kind is not None:
+            return kind
+        # 확장자로는 모르겠는데 mime 이 텍스트라고 말한다. Google 문서와
+        # `text/plain` 이 여기 해당한다 — 확장자가 없는 경우가 많다.
+        if mime_type in SELECTABLE_MIME_TYPES:
+            return ArtifactKind.DOCUMENT_TEXT
+        return ArtifactKind.UNKNOWN
 
     async def resolve_original(self, artifact: SourceArtifactRef) -> OriginalSourceLocator:
         provider_url = f"https://drive.google.com/file/d/{artifact.source_artifact_id}/view"

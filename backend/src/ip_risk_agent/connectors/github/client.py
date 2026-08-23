@@ -97,7 +97,18 @@ class GitHubAppProvider:
                 raise map_github_status_code(resp.status_code, "failed to fetch file content")
             data = resp.json()
             content_b64 = data.get("content", "")
-            text = base64.b64decode(content_b64).decode("utf-8", errors="replace") if content_b64 else ""
+            # `errors="replace"` 였다. 그러면 바이너리가 **깨진 글자로 통과**해서
+            # 분석까지 흘러가고, 결과는 "읽었는데 아무것도 없다" 처럼 보인다.
+            # 읽지 못한 것은 읽지 못했다고 해야 한다 (§6.2).
+            #
+            # `utf-8-sig` 는 맨 앞 BOM 을 뗀다. Drive 는 처음부터 이렇게 읽었는데
+            # GitHub 만 BOM 을 남겨, 윈도우에서 저장한 `requirements.txt` 의 첫 줄이
+            # 파서에서 사라졌다.
+            text = (
+                base64.b64decode(content_b64).decode("utf-8-sig")
+                if content_b64
+                else ""
+            )
             return GitHubFileContent(path=path, sha=data.get("sha", ""), text=text, size=data.get("size", 0))
 
         return await with_http_retry(_call, provider="github")
