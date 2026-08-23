@@ -140,7 +140,7 @@ Secret Manager 경유이며 서비스 계정 key 파일은 쓰지 않는다. 로
 |---|---|
 | `APP_ROLE` | `api` 또는 `worker` — 같은 이미지가 역할을 가른다 |
 | `APP_ENV` | `local` / `production` |
-| `SESSION_SECRET` | 세션 서명 키 |
+| `SESSION_SECRET` | 세션 서명 키 — **32자 이상, `APP_ROLE=api` 면 `APP_ENV=local` 에서도 필수** |
 | `GCP_PROJECT_ID` · `GCP_REGION` | GCP 프로젝트·리전 |
 | `FIRESTORE_DATABASE` | `ip-risk-agent-v2` (v1 의 `(default)` 와 격리) |
 | `GOOGLE_LOGIN_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` | Google OIDC 로그인 |
@@ -159,8 +159,9 @@ Secret Manager 경유이며 서비스 계정 key 파일은 쓰지 않는다. 로
 ## 실행
 
 ```bash
-# 백엔드 API (로컬, in-memory)
+# 백엔드 API (로컬, in-memory) — SESSION_SECRET 은 32자 이상이면 아무 값이나 된다
 APP_ROLE=api APP_ENV=local \
+SESSION_SECRET=$(python -c "import secrets;print(secrets.token_hex(32))") \
   .venv/Scripts/python -m uvicorn ip_risk_agent.main:create_app --factory --port 8000
 
 # 프런트엔드 개발 서버
@@ -171,8 +172,22 @@ pnpm --filter @iprisk/desktop build
 pnpm --filter @iprisk/desktop start
 ```
 
-로그인·Drive·GitHub 등 외부 연동 기능은 해당 환경 변수와 GCP 자원이 있어야
-동작한다. 전체 기능은 배포된 운영 서비스에서 확인하는 것이 가장 빠르다.
+**`.env` 파일은 자동으로 읽히지 않는다** — `main.py` 가
+`Settings.from_env(os.environ)` 으로 OS 환경변수만 보므로(`load_dotenv` 없음),
+파일로 관리하려면 셸에서 직접 export 한다:
+
+```bash
+cp .env.example .env        # SESSION_SECRET= 뒤에 32자 이상 값을 채운다
+set -a; source .env; set +a
+.venv/Scripts/python -m uvicorn ip_risk_agent.main:create_app --factory --port 8000
+```
+
+외부 연동 변수는 **묶음 단위 전부-또는-전무** 검사를 받는다(Google 로그인 ·
+Drive watch · GitHub App · Cloud Tasks · RAG). 일부만 채우면 기동 시
+`SettingsError` 가 나므로, 로컬은 `SESSION_SECRET` 만 넣고 나머지는 전부
+비워 두고 시작한다. 로그인·Drive·GitHub 등 외부 연동 기능은 해당 묶음과 GCP
+자원이 있어야 동작하며, 전체 기능은 배포된 운영 서비스에서 확인하는 것이 가장
+빠르다.
 
 ## 데이터 준비 (RAG corpus)
 
