@@ -72,12 +72,14 @@ export class GoogleDrivePickerAdapter implements DrivePickerAdapter {
     if (picker === undefined) throw new Error("Google Drive Picker failed to load");
     return new Promise((resolve, reject) => {
       try {
+        // **폴더 하나**를 고른다 (§6.1 · 1-F). 예전에는 파일을 여러 개 골랐고,
+        // 그러면 마운트한 뒤에 폴더에 넣은 파일이 영영 잡히지 않았다 — 이 서비스를
+        // 쓰는 방법이 바로 그 "넣는 것" 이다.
         const view = new picker.DocsView(picker.ViewId.DOCS)
           .setIncludeFolders(true)
-          .setSelectFolderEnabled(false);
+          .setSelectFolderEnabled(true);
         new picker.PickerBuilder()
           .addView(view)
-          .enableFeature(picker.Feature.MULTISELECT_ENABLED)
           .setOAuthToken(accessToken)
           .setDeveloperKey(config.browserApiKey!)
           .setAppId(config.cloudProjectNumber!)

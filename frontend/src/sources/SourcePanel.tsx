@@ -73,35 +73,15 @@ export function SourcePanel({
   }
 
   async function untrack(artifact: TrackedArtifact): Promise<void> {
-    // 지우는 것이 아니라 추적만 끊는다. Risk 와 근거는 남고 '제외됨' 으로 닫힌다.
-    // 같은 파일을 다시 고르면 그 Risk 가 미검토 상태로 되살아난다.
-    const confirmed = window.confirm(
-      `${artifact.display_name} 을(를) 더 이상 추적하지 않습니다.\n\n` +
-        "지금까지의 Risk 와 근거는 지워지지 않고 '제외됨' 으로 닫힙니다. " +
-        "나중에 같은 파일을 다시 고르면 미검토 상태로 되살아납니다.",
+    // 폴더를 보는 지금 "이 파일만 추적 해제" 는 성립하지 않는다 (§6.1 · 1-F).
+    // 범위에서 뺄 방법이 없고, Risk 만 닫아 두면 그 파일의 다음 변경에 되살아난다.
+    // 추적을 끊는 방법은 하나뿐이라 그것을 말해 준다.
+    window.alert(
+      `${artifact.display_name} 의 추적을 끊으려면 ` +
+        "공유 폴더 밖으로 옮기세요. " +
+        "옮기면 지금까지의 Risk 와 근거는 지워지지 않고 '제외됨' 으로 닫힙니다. " +
+        "다시 폴더에 넣으면 검토해 두신 판단 그대로 되살아납니다.",
     );
-    if (!confirmed) return;
-    setUntracking(artifact.artifact_id);
-    setNotice(null);
-    setMutationError(null);
-    try {
-      const result = await sourceApi.untrackDriveArtifact(
-        artifact.mount_id,
-        workspace.id,
-        artifact.artifact_id,
-      );
-      setNotice(
-        `${artifact.display_name} 추적을 끊었습니다. ` +
-          `Risk ${result.excluded_risk_ids.length}건이 제외됨으로 닫혔습니다.`,
-      );
-      sources.reload();
-    } catch (reason) {
-      setMutationError(
-        reason instanceof Error ? reason : new Error("추적을 끊지 못했습니다."),
-      );
-    } finally {
-      setUntracking(null);
-    }
   }
 
   function complete(message: string): void {
@@ -159,7 +139,7 @@ export function SourcePanel({
               />
             </Card>
           ) : connected.map((source) => {
-            const trackedFileIds = driveFileIds(source);
+            const trackedFolderId = driveFolderId(source);
             return (
             <Card key={source.mount_id} className="source-card">
               <div className="card-row">
@@ -169,10 +149,10 @@ export function SourcePanel({
                   <p>{source.provider_account_label ?? "Provider identity protected"}</p>
                   {source.source_type === "GOOGLE_DRIVE" ? (
                     <>
-                      <p>{trackedFileIds.length} {trackedFileIds.length === 1 ? "file" : "files"} tracked</p>
-                      {trackedFileIds.length === 0 ? null : (
-                        <ul aria-label="Tracked Google Drive files">
-                          {trackedFileIds.map((fileId) => <li key={fileId}>{fileId}</li>)}
+                      <p>{trackedFolderId === null ? "No folder tracked" : "1 folder tracked"}</p>
+                      {trackedFolderId === null ? null : (
+                        <ul aria-label="Tracked Google Drive folder">
+                          <li>{trackedFolderId}</li>
                         </ul>
                       )}
                     </>
@@ -332,8 +312,8 @@ export function SourcePanel({
               sourceApi={sourceApi}
               drivePicker={drivePicker}
               mountId={managedDrive.mount_id}
+              trackedFolderId={driveFolderId(managedDrive)}
               riskWorkspaceId={workspace.id}
-              existingFileIds={driveFileIds(managedDrive)}
               onComplete={() => complete("Additional Google Drive files are now tracked.")}
             />
           ) : completion && provider === "GOOGLE_DRIVE" ? (
@@ -426,7 +406,7 @@ function DriveCompletion({
   connectionId,
   mountId,
   riskWorkspaceId,
-  existingFileIds = [],
+  trackedFolderId = null,
   onComplete,
 }: {
   sourceApi: SourceApiClient;
@@ -434,7 +414,7 @@ function DriveCompletion({
   connectionId?: string;
   mountId?: string;
   riskWorkspaceId: string;
-  existingFileIds?: string[];
+  trackedFolderId?: string | null;
   onComplete: () => void;
 }) {
   const [files, setFiles] = useState<DrivePickerFile[]>([]);
@@ -450,15 +430,16 @@ function DriveCompletion({
   }
 
   async function createMount(selectedFiles: DrivePickerFile[]): Promise<void> {
-    const selectedFileIds = selectedFiles.map((file) => file.id);
-    const displayMetadata = Object.fromEntries(
-      selectedFiles.map((file) => [file.id, { name: file.name }]),
-    );
+    // 고른 것은 **폴더 하나**다 (§6.1 · 1-F). 그 안에 있는 것이 추적 대상이고,
+    // 나중에 넣는 파일도 함께 잡힌다.
+    const folder = selectedFiles[0];
+    if (folder === undefined) throw new Error("drive_folder_missing");
+    const displayMetadata = { [folder.id]: { name: folder.name } };
     if (mountId !== undefined) {
       await sourceApi.createAdditionalDriveMount(
         mountId,
         riskWorkspaceId,
-        selectedFileIds,
+        folder.id,
         displayMetadata,
       );
       return;
@@ -467,7 +448,7 @@ function DriveCompletion({
       await sourceApi.createDriveMount(
         connectionId,
         riskWorkspaceId,
-        selectedFileIds,
+        folder.id,
         displayMetadata,
       );
       return;
@@ -488,11 +469,12 @@ function DriveCompletion({
       setBusy(false);
       return;
     }
-    const tracked = new Set(existingFileIds);
-    const newFiles = selectedFiles.filter((file) => !tracked.has(file.id));
+    // 같은 폴더를 다시 고르면 마운트가 하나 더 생긴다. 아무것도 늘지 않고
+    // 목록만 둘로 보인다.
+    const newFiles = selectedFiles.filter((file) => file.id !== trackedFolderId);
     setFiles(newFiles);
     if (selectedFiles.length > 0 && newFiles.length === 0) {
-      setInfo("All selected files are already tracked in this workspace.");
+      setInfo("That folder is already tracked in this workspace.");
       setBusy(false);
       return;
     }
@@ -533,7 +515,7 @@ function DriveCompletion({
     <div className="source-completion">
       <p className="eyebrow">Google Drive connected</p>
       <h2>{addingFiles ? "Add files" : "Select files to track"}</h2>
-      {addingFiles ? <p>{existingFileIds.length} files are already tracked by this mount.</p> : null}
+      {addingFiles ? <p>Pick another shared folder to track alongside the current one.</p> : null}
       <p>Picker에서 Select하면 명시적으로 선택한 file ID만 즉시 tracking scope에 저장됩니다.</p>
       {!drivePicker.available ? <p className="source-error">Drive Picker runtime configuration is unavailable.</p> : null}
       <Button type="button" variant="secondary" disabled={!drivePicker.available || busy} onClick={() => void pick()}>
@@ -661,8 +643,8 @@ function safeOpaqueId(value: string | null): string | null {
   return value;
 }
 
-function driveFileIds(source: ConnectedSource): string[] {
-  const value = source.tracking_scope_summary.selected_file_ids;
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string");
+/** 이 마운트가 보는 폴더. 없으면 `null` (§6.1 · 1-F). */
+function driveFolderId(source: ConnectedSource): string | null {
+  const value = source.tracking_scope_summary.folder_id;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }

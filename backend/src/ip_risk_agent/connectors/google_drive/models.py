@@ -14,6 +14,15 @@ from typing import Protocol
 
 DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document"
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+
+#: 바로가기는 **따라가지 않는다** (§6.1).
+#:
+#: 공유받은 폴더 안에 바로가기를 하나 두면 그 대상은 폴더 밖에 있어도 읽히게 된다.
+#: 즉 바로가기를 따라가는 순간 "공유한 폴더만 본다" 가 깨진다. 지금까지는 통과
+#: 목록에 없어서 막혔는데, 그것은 규칙이 아니라 **우연**이었다 — 문서 종류를 넓힐 때
+#: 조용히 들어온다. 그래서 이름으로 막는다.
+SHORTCUT_MIME_TYPE = "application/vnd.google-apps.shortcut"
 SELECTABLE_MIME_TYPES = (
     GOOGLE_DOC_MIME_TYPE,
     "text/plain",
@@ -37,6 +46,14 @@ class DriveFile:
     #: 부모 폴더 id. Drive 는 여러 개를 허용하지만 우리는 첫 번째만 따라간다 —
     #: 경로가 하나여야 트리가 하나가 된다.
     parents: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DriveFolderPage:
+    """폴더 한 쪽. 페이지 토큰이 남아 있으면 더 있다."""
+
+    files: tuple[DriveFile, ...]
+    next_page_token: str | None
 
 
 @dataclass(frozen=True, slots=True)

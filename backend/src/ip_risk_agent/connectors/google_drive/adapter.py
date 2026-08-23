@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 from uuid import uuid4
@@ -54,7 +55,15 @@ from ..common.fingerprint import drive_change_fingerprint
 from ..common.runtime_store import DriveRuntime
 from .connection_lookup import DriveConnectionContext, DriveConnectionLookup
 from .models import SELECTABLE_MIME_TYPES, DriveProvider
+from .folders import (
+    MAX_FOLDER_DEPTH,
+    MAX_FOLDER_ITEMS,
+    is_inside_folder,
+    list_folder_files,
+)
 from .paths import resolve_path_hint
+
+logger = logging.getLogger(__name__)
 from .tracking_scope import DriveTrackingScope
 
 
@@ -195,13 +204,21 @@ class GoogleDriveAdapter:
         file_id = change.artifact.source_artifact_id
 
         scope: DriveTrackingScope | None = await self._tracking_scope_store.load(change.mount_id)
-        if scope is None or not scope.contains(file_id):
+        if scope is None:
             raise PermissionDeniedError(
                 provider="google_drive",
-                safe_message="artifact is outside the tracked Drive selection",
+                safe_message="Drive tracking scope is unavailable",
             )
 
         provider, connection = await self._provider_for_mount(change.mount_id)
+
+        # 명단이 아니라 **지금 어디에 있는지**를 묻는다. 그래서 폴더에 넣으면 잡히고
+        # 빼면 빠진다 (§6.1 · 1-F).
+        if not is_inside_folder(provider, file_id, scope.folder_id):
+            raise PermissionDeniedError(
+                provider="google_drive",
+                safe_message="artifact is outside the tracked Drive folder",
+            )
 
         if change.change_type is ChangeType.DELETE:
             await self._persist_refreshed_token(connection, provider)
@@ -266,7 +283,7 @@ class GoogleDriveAdapter:
     async def initial_changes(
         self,
         mount: MountRef,
-        selected_file_ids: list[str],
+        selected_file_ids: list[str] | None = None,
     ) -> tuple[SourceChange, ...]:
         """Materialize Picker selections into the canonical change pipeline.
 
@@ -290,14 +307,28 @@ class GoogleDriveAdapter:
         await self._ensure_change_cursor(connection, provider)
         now = datetime.now(timezone.utc)
         changes: list[SourceChange] = []
+        listing = list_folder_files(provider, scope.folder_id)
+        if listing.truncated:
+            # 조용히 자르면 "전부 검사했다" 로 읽힌다 (§6.1).
+            logger.warning(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "event": "drive_folder_listing_truncated",
+                        "mount_id": mount.mount_id,
+                        "item_count": len(listing.files),
+                        "max_items": MAX_FOLDER_ITEMS,
+                        "max_depth": MAX_FOLDER_DEPTH,
+                    },
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+
         try:
-            for file_id in selected_file_ids:
-                if not scope.contains(file_id):
-                    raise PermissionDeniedError(
-                        provider="google_drive",
-                        safe_message="artifact is outside the tracked Drive selection",
-                    )
-                drive_file = provider.get_file(file_id)
+            for drive_file in listing.files:
+                file_id = drive_file.file_id
                 revision = drive_file.revision_id or drive_file.modified_time or "unknown"
                 fingerprint = drive_change_fingerprint(
                     mount_id=mount.mount_id,
@@ -407,9 +438,10 @@ class GoogleDriveAdapter:
 
     async def reconcile(self, mount: MountRef, cursor: str | None) -> ReconcileResult:
         scope: DriveTrackingScope | None = await self._tracking_scope_store.load(mount.mount_id)
-        tracked_ids = set(scope.selected_file_ids) if scope else set()
 
         provider, connection = await self._provider_for_mount(mount.mount_id)
+        # 한 번 훑는 동안 조상 조회를 재사용한다. 같은 폴더가 여러 파일의 조상이다.
+        membership_cache: dict[str, tuple[str, ...]] = {}
 
         page_token = cursor
         if page_token is None:
@@ -426,7 +458,17 @@ class GoogleDriveAdapter:
         # 같은 폴더가 여러 파일의 조상이다. 한 번 훑는 동안 재사용한다.
         path_cache: dict[str, tuple[str, tuple[str, ...]]] = {}
         for item in page.changes:
-            if item.file_id not in tracked_ids:
+            if scope is None:
+                continue
+            if item.removed:
+                # 이탈은 파일이 SA 에게서 통째로 사라진 모양으로 온다 (실측 §2.1.1).
+                # 그때는 부모를 물을 수 없으므로 소속을 확인할 방법이 없다. 우리
+                # 폴더의 파일이었는지는 등록된 아티팩트가 안다 — Control 이 모르는
+                # id 면 그냥 지나간다.
+                pass
+            elif not is_inside_folder(
+                provider, item.file_id, scope.folder_id, cache=membership_cache
+            ):
                 continue
             change_type = ChangeType.DELETE if item.removed else ChangeType.UPDATE
             revision = item.revision_id or "unknown"

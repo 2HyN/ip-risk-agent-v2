@@ -27,8 +27,14 @@ class PickerSessionResponse(BaseModel):
 
 
 class DriveMountCreationRequest(BaseModel):
+    """공유받은 **폴더 하나**를 붙인다 (§6.1 · 1-F).
+
+    예전에는 고른 file id 의 목록을 받았다. 그러면 마운트한 뒤에 폴더에 넣은 파일이
+    영영 잡히지 않는다 — 이 서비스를 쓰는 방법이 바로 그 "넣는 것" 이다.
+    """
+
     risk_workspace_id: str
-    selected_file_ids: list[str]
+    folder_id: str = Field(min_length=1, max_length=256)
     display_metadata_by_file: dict[str, SafeMetadata] = {}
 
 
@@ -108,8 +114,13 @@ def create_drive_mounts_router(
     router = APIRouter()
 
     async def initialize_selection(
-        *, mount_id: str, selected_file_ids: list[str]
+        *, mount_id: str, selected_file_ids: list[str] | None = None
     ) -> None:
+        """마운트 직후 폴더를 한 번 훑는다.
+
+        변경 피드는 커서를 잡은 **뒤**부터 준다. 이미 폴더에 있던 파일은 그것으로
+        발견되지 않으므로 여기서 훑는다.
+        """
         if initial_change_sync is None:
             return
         try:
@@ -190,19 +201,18 @@ def create_drive_mounts_router(
             request,
             connection_id=connection_id,
             risk_workspace_id=body.risk_workspace_id,
-            selected_file_ids=body.selected_file_ids,
+            selected_file_ids=[body.folder_id],
         )
 
-        await _merge_tracking_scope(
+        await _set_tracked_folder(
             tracking_scope_store,
             mount_id=result.server_mount_id,
-            added_file_ids=result.selected_file_ids or body.selected_file_ids,
+            folder_id=body.folder_id,
             display_metadata_by_file=body.display_metadata_by_file,
         )
 
         await initialize_selection(
-            mount_id=result.server_mount_id,
-            selected_file_ids=result.selected_file_ids or body.selected_file_ids,
+            mount_id=result.server_mount_id, selected_file_ids=None
         )
 
         return result
@@ -228,120 +238,47 @@ def create_drive_mounts_router(
             request,
             connection_id=context.operational_connection_id,
             risk_workspace_id=body.risk_workspace_id,
-            selected_file_ids=body.selected_file_ids,
+            selected_file_ids=[body.folder_id],
         )
-        await _merge_tracking_scope(
+        await _set_tracked_folder(
             tracking_scope_store,
             mount_id=result.server_mount_id,
-            added_file_ids=result.selected_file_ids or body.selected_file_ids,
+            folder_id=body.folder_id,
             display_metadata_by_file=body.display_metadata_by_file,
         )
         await initialize_selection(
-            mount_id=result.server_mount_id,
-            selected_file_ids=result.selected_file_ids or body.selected_file_ids,
+            mount_id=result.server_mount_id, selected_file_ids=None
         )
         return result
 
-    @router.post(
-        "/api/v1/source-mounts/{mount_id}/drive/untrack",
-        response_model=DriveUntrackResponse,
-    )
-    async def untrack_drive_artifact(
-        mount_id: str, request: Request, body: DriveUntrackRequest
-    ) -> DriveUntrackResponse:
-        await mount_authz_dependency(request, mount_id)
-        await workspace_authz_dependency(request, body.risk_workspace_id)
-        if untrack_callback is None:
-            raise HTTPException(status_code=404, detail="untracking is not configured")
-        outcome = await untrack_callback.untrack_artifact(
-            request,
-            risk_workspace_id=body.risk_workspace_id,
-            artifact_id=body.artifact_id,
-        )
-        # canonical 처리가 끝난 뒤에 감시를 끊는다. 순서를 뒤집으면 canonical 처리가
-        # 실패했을 때 감시만 끊긴 채로 Risk 가 활성으로 남는다. 이 순서라면 반대로
-        # 감시가 남아 다음 변경에 Risk 가 되살아나므로 사용자가 다시 시도할 수 있다.
-        remaining = await _remove_from_tracking_scope(
-            tracking_scope_store,
-            mount_id=outcome.mount_id,
-            file_id=outcome.source_artifact_id,
-        )
-        return DriveUntrackResponse(
-            artifact_id=body.artifact_id,
-            excluded_risk_ids=list(outcome.excluded_risk_ids),
-            remaining_file_count=remaining,
-        )
+    # `drive/untrack` 은 없앴다 (§6.1 · 1-F).
+    #
+    # 폴더를 보는 지금 "이 파일만 추적 해제" 는 성립하지 않는다. 범위에서 뺄 방법이
+    # 없고, Risk 만 닫아 두면 **그 파일의 다음 변경에 되살아난다.** 추적을 끊는
+    # 방법은 하나뿐이다 — 폴더 밖으로 옮긴다. 실측에서 그것이 `removed` 로 오고
+    # (§2.1.1), 1-D 가 그때 Risk 를 닫는다.
 
     return router
 
 
-async def _remove_from_tracking_scope(
+async def _set_tracked_folder(
     tracking_scope_store,
     *,
     mount_id: str,
-    file_id: str,
-) -> int:
-    """추적 범위에서 file id 하나를 뺀다. 남은 개수를 돌려준다.
-
-    범위에 없으면 아무것도 바꾸지 않는다. 같은 파일을 두 번 해제해도 안전하다.
-    """
-    existing: DriveTrackingScope | None = await tracking_scope_store.load(mount_id)
-    if existing is None:
-        return 0
-    if file_id not in existing.selected_file_ids:
-        return len(existing.selected_file_ids)
-    file_ids = [item for item in existing.selected_file_ids if item != file_id]
-    metadata = {
-        key: value
-        for key, value in existing.display_metadata_by_file.items()
-        if key != file_id
-    }
-    await tracking_scope_store.save(
-        mount_id,
-        DriveTrackingScope(
-            mount_id=mount_id,
-            selected_file_ids=file_ids,
-            display_metadata_by_file=metadata,
-        ),
-    )
-    return len(file_ids)
-
-
-async def _merge_tracking_scope(
-    tracking_scope_store,
-    *,
-    mount_id: str,
-    added_file_ids: list[str],
+    folder_id: str,
     display_metadata_by_file: dict[str, SafeMetadata],
 ) -> None:
-    """추적 범위에 새 선택을 **더한다**.
+    """이 마운트가 볼 폴더를 정한다.
 
-    Drive source workspace 는 계정 단위로 하나이므로 mount 도 하나다. 이번에 새로
-    고른 file id 만 저장하면 이전에 추적하던 파일이 감시 대상에서 사라진다.
-    변경 감지는 이 범위 안의 file id 로만 동작하므로, 덮어쓰면 조용히 감시가 끊긴다.
+    예전 함수는 고른 file id 를 **더했다** — 덮어쓰면 이전에 추적하던 파일이 조용히
+    감시에서 빠졌기 때문이다. 폴더 하나를 보는 지금은 그 문제가 없다. 무엇이 추적
+    대상인지는 명단이 아니라 **폴더 안에 있는가**로 정해진다.
     """
-    existing: DriveTrackingScope | None = await tracking_scope_store.load(mount_id)
-    file_ids = list(existing.selected_file_ids) if existing is not None else []
-    metadata = dict(existing.display_metadata_by_file) if existing is not None else {}
-    for file_id in added_file_ids:
-        if file_id not in file_ids:
-            file_ids.append(file_id)
-    metadata.update(_selected_metadata(display_metadata_by_file, added_file_ids))
     await tracking_scope_store.save(
         mount_id,
         DriveTrackingScope(
             mount_id=mount_id,
-            selected_file_ids=file_ids,
-            display_metadata_by_file=metadata,
+            folder_id=folder_id,
+            display_metadata_by_file=dict(display_metadata_by_file),
         ),
     )
-
-
-def _selected_metadata(
-    metadata: dict[str, SafeMetadata], selected_file_ids: list[str]
-) -> dict[str, SafeMetadata]:
-    return {
-        file_id: metadata[file_id]
-        for file_id in selected_file_ids
-        if file_id in metadata
-    }

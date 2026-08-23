@@ -89,10 +89,16 @@ export class SourceApiClient {
     return response.access_token;
   }
 
+  /**
+   * 공유받은 **폴더 하나**를 붙인다.
+   *
+   * 예전에는 고른 파일 목록을 보냈다. 그러면 마운트한 뒤에 폴더에 넣은 파일이 영영
+   * 잡히지 않는다 — 이 서비스를 쓰는 방법이 바로 그 "넣는 것" 이다.
+   */
   async createDriveMount(
     connectionId: string,
     riskWorkspaceId: string,
-    selectedFileIds: string[],
+    folderId: string,
     displayMetadataByFile: Record<string, { name: string }> = {},
   ): Promise<MountCreationResponse> {
     const response = await this.client.request<MountCreationApiResponse>(
@@ -101,7 +107,7 @@ export class SourceApiClient {
         method: "POST",
         body: JSON.stringify({
           risk_workspace_id: riskWorkspaceId,
-          selected_file_ids: selectedFileIds,
+          folder_id: folderId,
           display_metadata_by_file: displayMetadataByFile,
         }),
       },
@@ -112,7 +118,7 @@ export class SourceApiClient {
   async createAdditionalDriveMount(
     mountId: string,
     riskWorkspaceId: string,
-    selectedFileIds: string[],
+    folderId: string,
     displayMetadataByFile: Record<string, { name: string }> = {},
   ): Promise<MountCreationResponse> {
     const response = await this.client.request<MountCreationApiResponse>(
@@ -121,7 +127,7 @@ export class SourceApiClient {
         method: "POST",
         body: JSON.stringify({
           risk_workspace_id: riskWorkspaceId,
-          selected_file_ids: selectedFileIds,
+          folder_id: folderId,
           display_metadata_by_file: displayMetadataByFile,
         }),
       },
@@ -129,23 +135,11 @@ export class SourceApiClient {
     return mapMount(response);
   }
 
-  async untrackDriveArtifact(
-    mountId: string,
-    riskWorkspaceId: string,
-    artifactId: string,
-  ): Promise<{ excluded_risk_ids: string[]; remaining_file_count: number }> {
-    return this.client.request<{
-      artifact_id: string;
-      excluded_risk_ids: string[];
-      remaining_file_count: number;
-    }>(`/api/v1/source-mounts/${encodeURIComponent(mountId)}/drive/untrack`, {
-      method: "POST",
-      body: JSON.stringify({
-        risk_workspace_id: riskWorkspaceId,
-        artifact_id: artifactId,
-      }),
-    });
-  }
+  // `untrackDriveArtifact` 는 없앴다.
+  //
+  // 폴더를 보는 지금 "이 파일만 추적 해제" 는 성립하지 않는다 — 범위에서 뺄 방법이
+  // 없고, Risk 만 닫아 두면 그 파일의 다음 변경에 되살아난다. 추적을 끊는 방법은
+  // 하나뿐이다: 폴더 밖으로 옮긴다.
 
   async githubRepositories(connectionId: string): Promise<GitHubRepository[]> {
     return this.mapRepositories(

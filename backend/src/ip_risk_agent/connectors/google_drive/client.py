@@ -22,6 +22,7 @@ from .models import (
     DriveChange,
     DriveChangePage,
     DriveFile,
+    DriveFolderPage,
     DriveWatchChannel,
 )
 
@@ -140,6 +141,37 @@ class GoogleDriveProvider:
             channel_id=response["id"],
             resource_id=response["resourceId"],
             expiration_millis=int(response["expiration"]),
+        )
+
+    def list_folder_children(
+        self, folder_id: str, page_token: str | None = None
+    ) -> DriveFolderPage:
+        """폴더 바로 아래의 항목들. 하위 폴더도 함께 돌려준다.
+
+        재귀는 부르는 쪽이 한다 — 상한을 세면서 내려가야 하기 때문이다 (§6.1).
+        """
+        try:
+            response = (
+                self._service.files()
+                .list(
+                    q=f"'{folder_id}' in parents and trashed = false",
+                    fields=(
+                        "nextPageToken,"
+                        "files(id,name,mimeType,modifiedTime,version,webViewLink,parents)"
+                    ),
+                    pageSize=100,
+                    pageToken=page_token,
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                )
+                .execute()
+            )
+        except HttpError as exc:
+            status = int(getattr(exc.resp, "status", 500))
+            raise map_drive_status_code(status, "drive_folder_listing failed") from exc
+        return DriveFolderPage(
+            files=tuple(self._to_file(item) for item in response.get("files") or []),
+            next_page_token=response.get("nextPageToken"),
         )
 
     def read_text(self, file_id: str, mime_type: str) -> str:

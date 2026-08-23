@@ -26,7 +26,7 @@ const connectedDriveSummary = {
     source_type: "GOOGLE_DRIVE",
     provider_account_label: "owner@example.com",
     status: "ACTIVE",
-    tracking_scope_summary: { selected_file_ids: ["file-1"] },
+    tracking_scope_summary: { folder_id: "folder-1" },
     mounted_by_user_id: "user-1",
   }],
 };
@@ -132,7 +132,7 @@ function googlePicker(selected: DrivePickerFile[]): GoogleDrivePickerAdapter {
 }
 
 describe("SourcePanel product integration", () => {
-  it("adds multiple files through the ACTIVE mount without restarting OAuth", async () => {
+  it("adds another shared folder through the ACTIVE mount without restarting OAuth", async () => {
     window.location.hash = "#/w/vws-1/sources";
     const calls: Array<{ path: string; init: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -151,15 +151,14 @@ describe("SourcePanel product integration", () => {
     }));
     const picker: DrivePickerAdapter = {
       available: true,
+      // 고르는 것은 **폴더 하나**다 (§6.1 · 1-F).
       pick: vi.fn(async () => [
-        { id: "file-1", name: "Already tracked", mimeType: "text/plain" },
-        { id: "file-2", name: "Claims", mimeType: "text/plain" },
-        { id: "file-3", name: "Prior art", mimeType: "application/pdf" },
+        { id: "folder-2", name: "Second folder", mimeType: "application/vnd.google-apps.folder" },
       ]),
     };
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
 
-    expect(await screen.findByText("1 file tracked")).toBeInTheDocument();
+    expect(await screen.findByText("1 folder tracked")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add files" }));
     expect(screen.getByRole("heading", { name: "Add Source" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Select in Google Drive" }));
@@ -168,7 +167,7 @@ describe("SourcePanel product integration", () => {
     const mount = calls.find((call) => call.path.endsWith("/source-mounts/mount-drive-1/drive/mounts"));
     expect(JSON.parse(String(mount?.init.body))).toMatchObject({
       risk_workspace_id: "vws-1",
-      selected_file_ids: ["file-2", "file-3"],
+      folder_id: "folder-2",
     });
     expect(calls.some((call) => call.path.includes("google-drive/start"))).toBe(false);
     expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary"))).toHaveLength(2);
@@ -244,7 +243,7 @@ describe("SourcePanel product integration", () => {
       .toHaveAttribute("href", "#/w/vws-1/risks/risk-7");
   });
 
-  it("treats selecting only an already tracked Drive file as a no-op", async () => {
+  it("treats re-picking the folder already tracked as a no-op", async () => {
     window.location.hash = "#/w/vws-1/sources";
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -258,14 +257,17 @@ describe("SourcePanel product integration", () => {
     }));
     const picker: DrivePickerAdapter = {
       available: true,
-      pick: vi.fn(async () => [{ id: "file-1", name: "Already tracked", mimeType: "text/plain" }]),
+      // 같은 폴더를 다시 고르면 마운트가 하나 더 생긴다 (§6.1 · 1-F).
+      pick: vi.fn(async () => [
+        { id: "folder-1", name: "Tracked", mimeType: "application/vnd.google-apps.folder" },
+      ]),
     };
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Add files" }));
     await userEvent.click(screen.getByRole("button", { name: "Select in Google Drive" }));
 
-    expect(await screen.findByText("All selected files are already tracked in this workspace.")).toBeInTheDocument();
+    expect(await screen.findByText("That folder is already tracked in this workspace.")).toBeInTheDocument();
     expect(calls.some((path) => path.endsWith("/drive/mounts"))).toBe(false);
   });
 
@@ -303,7 +305,7 @@ describe("SourcePanel product integration", () => {
     expect(calls.filter((path) => path.endsWith("/drive/mounts"))).toHaveLength(2);
   });
 
-  it("mounts Picker-selected Drive files immediately and refreshes source state", async () => {
+  it("mounts a shared Drive folder immediately and refreshes source state", async () => {
     window.location.hash = "#/w/vws-1/sources?provider=GOOGLE_DRIVE&connection_id=pending-12345678&status=connected";
     const calls: Array<{ path: string; init: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -315,9 +317,9 @@ describe("SourcePanel product integration", () => {
       if (path.endsWith("/drive/mounts")) return response({ server_mount_id: "mount-7", source_workspace_id: "source-7" });
       return response({ code: "NOT_FOUND" }, 404);
     }));
+    // 고르는 것은 **폴더 하나**다 (§6.1 · 1-F).
     const picker = googlePicker([
-      { id: "file-7", name: "Claims", mimeType: "text/plain" },
-      { id: "file-8", name: "Prior art", mimeType: "application/pdf" },
+      { id: "folder-7", name: "Tracked", mimeType: "application/vnd.google-apps.folder" },
     ]);
     render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
 
@@ -328,7 +330,7 @@ describe("SourcePanel product integration", () => {
     expect(mount?.path).toContain("/source-connections/pending-12345678/");
     expect(JSON.parse(String(mount?.init.body))).toMatchObject({
       risk_workspace_id: "vws-1",
-      selected_file_ids: ["file-7", "file-8"],
+      folder_id: "folder-7",
     });
     expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary")))
       .toHaveLength(2);
@@ -543,62 +545,24 @@ describe("SourcePanel product integration", () => {
     expect(reanalyzed[0]).toEqual({ change_event_id: "change-artifact-drive-1" });
   });
 
-  it("stops tracking one file without touching the others", async () => {
-    // mount 를 통째로 끄는 것과 다르다. 파일 하나만 감시에서 빼고, 그 Risk 는
-    // 지워지지 않고 '제외됨' 으로 닫힌다.
+  it("tells the user the only way to stop tracking a file", async () => {
+    // 폴더를 보는 지금 "이 파일만 추적 해제" 는 성립하지 않는다 (§6.1 · 1-F).
+    // 범위에서 뺄 방법이 없고, Risk 만 닫아 두면 그 파일의 다음 변경에 되살아난다.
     window.location.hash = "#/w/vws-1/sources";
-    const untracked: unknown[] = [];
-    vi.stubGlobal("confirm", vi.fn(() => true));
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      if (path.endsWith("/drive/untrack")) {
-        untracked.push({ path, body: JSON.parse(String(init?.body)) });
-        return response({
-          artifact_id: "artifact-drive-1",
-          excluded_risk_ids: ["risk-1", "risk-2"],
-          remaining_file_count: 3,
-        });
-      }
-      if (path.endsWith("/security/data-access-summary")) {
-        return response({
-          ...connectedDriveSummary,
-          tracked_artifacts: [
-            {
-              artifact_id: "artifact-drive-1",
-              change_event_id: "change-artifact-drive-1",
-              mount_id: "mount-drive-1",
-              source_type: "GOOGLE_DRIVE",
-              source_context: "Google Drive a1b2c3d4",
-              display_name: "Claims.txt",
-              logical_path: "Claims.txt",
-              availability: "AVAILABLE",
-              latest_revision: "rev-2",
-              change_status: "DONE",
-              analysis_status: "SUCCEEDED",
-              risk_count: 2,
-              active_risk_count: 2,
-              first_risk_id: "risk-1",
-              highest_risk_priority: "HIGH",
-              updated_at: "2026-08-21T00:00:00Z",
-            },
-          ],
-        });
-      }
+      calls.push(path);
+      if (path.endsWith("/security/data-access-summary")) return response(connectedDriveSummary);
       const base = baseResponse(path);
       if (base !== null) return base;
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    const picker: DrivePickerAdapter = { available: true, pick: vi.fn(async () => []) };
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={googlePicker([])} /> }} />);
 
-    const [button] = await screen.findAllByRole("button", { name: "추적 해제" });
-    expect(button).toBeDefined();
-    await userEvent.click(button as HTMLElement);
+    expect(await screen.findByText("1 folder tracked")).toBeInTheDocument();
 
-    await waitFor(() => expect(untracked).toHaveLength(1));
-    expect(untracked[0]).toEqual({
-      path: expect.stringContaining("/source-mounts/mount-drive-1/drive/untrack"),
-      body: { risk_workspace_id: "vws-1", artifact_id: "artifact-drive-1" },
-    });
+    // 추적을 끊는 요청을 서버로 보내지 않는다. 보낼 곳이 없어졌다.
+    expect(calls.some((path) => path.endsWith("/drive/untrack"))).toBe(false);
   });
 });

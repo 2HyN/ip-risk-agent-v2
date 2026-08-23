@@ -27,17 +27,35 @@ from ip_risk_agent.connectors.google_drive.tracking_scope import DriveTrackingSc
 
 CHANNEL_TOKEN = "route-channel-token"
 
+#: 시험용 폴더. 추적 대상은 "이 폴더 안에 있는가" 로 정해진다 (§6.1 · 1-F).
+FOLDER_ID = "folder-1"
+
 
 class FakeDriveProvider:
-    def __init__(self, changes_by_token=None, start_token="start-1"):
+    def __init__(self, changes_by_token=None, start_token="start-1", tracked=()):
         self._changes_by_token = changes_by_token or {}
         self._start_token = start_token
+        self._tracked = tuple(tracked)
 
     def get_access_token(self):
         return ("fake-token", None)
 
     def get_file(self, file_id: str):
-        raise NotImplementedError
+        from ip_risk_agent.connectors.google_drive.models import DriveFile
+
+        if file_id not in self._tracked:
+            raise KeyError(file_id)
+        return DriveFile(
+            file_id, file_id, "text/plain", "t1", "rev-1", None, (FOLDER_ID,)
+        )
+
+    def list_folder_children(self, folder_id: str, page_token: str | None = None):
+        from ip_risk_agent.connectors.google_drive.models import DriveFolderPage
+
+        return DriveFolderPage(
+            files=tuple(self.get_file(item) for item in self._tracked),
+            next_page_token=None,
+        )
 
     def get_start_page_token(self) -> str:
         return self._start_token
@@ -79,8 +97,10 @@ async def _build_client(provider: FakeDriveProvider, *, tracked_ids=None, regist
     lookup.register("mount-1", DriveConnectionContext(connection_id="conn-1", credential_ref=ref))
     await scope_store.save(
         "mount-1",
-        DriveTrackingScope(mount_id="mount-1", selected_file_ids=tracked_ids or [], display_metadata_by_file={}),
+        DriveTrackingScope(mount_id="mount-1", folder_id=FOLDER_ID, display_metadata_by_file={}),
     )
+
+    provider._tracked = tuple(tracked_ids or [])
 
     adapter = GoogleDriveAdapter(
         provider_factory=FakeDriveProviderFactory(provider),

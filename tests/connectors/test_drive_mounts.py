@@ -195,7 +195,7 @@ def test_create_mount_saves_tracking_scope_and_calls_callback():
             "/api/v1/source-connections/conn-1/drive/mounts",
             json={
                 "risk_workspace_id": "rw1",
-                "selected_file_ids": ["file-1", "file-2"],
+                "folder_id": "folder-1",
                 "display_metadata_by_file": {"file-1": {"name": "architecture.docx"}},
             },
         )
@@ -203,12 +203,10 @@ def test_create_mount_saves_tracking_scope_and_calls_callback():
         assert response.status_code == 200
         body = response.json()
         assert body["server_mount_id"] == "server-mount-1"
-        assert callback.calls[0]["selected_file_ids"] == ["file-1", "file-2"]
+        assert callback.calls[0]["selected_file_ids"] == ["folder-1"]
 
         scope = await tracking_scope_store.load("server-mount-1")
-        assert scope.selected_file_ids == ["file-1", "file-2"]
-        assert scope.contains("file-1")
-        assert not scope.contains("file-3")
+        assert scope.folder_id == "folder-1"
 
     asyncio.run(scenario())
 
@@ -224,15 +222,16 @@ def test_create_mount_publishes_initial_changes_after_tracking_scope_is_saved():
             "/api/v1/source-connections/conn-1/drive/mounts",
             json={
                 "risk_workspace_id": "rw1",
-                "selected_file_ids": ["file-1", "file-2"],
+                "folder_id": "folder-1",
             },
         )
 
         assert response.status_code == 200
         assert await tracking_scope_store.load("server-mount-1") is not None
+        # 처음 훑기는 **폴더가 정한다.** 부르는 쪽이 목록을 주지 않는다 (§6.1 · 1-F).
         assert sync.calls == [{
             "mount_id": "server-mount-1",
-            "selected_file_ids": ["file-1", "file-2"],
+            "selected_file_ids": None,
         }]
 
     asyncio.run(scenario())
@@ -246,7 +245,7 @@ def test_provider_method_error_is_a_safe_gateway_error_not_422():
 
         response = client.post(
             "/api/v1/source-mounts/mount-1/drive/mounts",
-            json={"risk_workspace_id": "rw1", "selected_file_ids": ["file-3"]},
+            json={"risk_workspace_id": "rw1", "folder_id": "folder-1"},
         )
 
         assert response.status_code == 502
@@ -271,7 +270,7 @@ def test_active_mount_reuses_credential_and_operational_connection_for_more_file
         picker = client.post("/api/v1/source-mounts/mount-1/drive/picker-session")
         mounted = client.post(
             "/api/v1/source-mounts/mount-1/drive/mounts",
-            json={"risk_workspace_id": "rw1", "selected_file_ids": ["file-3"]},
+            json={"risk_workspace_id": "rw1", "folder_id": "folder-1"},
         )
 
         assert picker.status_code == 200
@@ -279,10 +278,10 @@ def test_active_mount_reuses_credential_and_operational_connection_for_more_file
         assert callback.calls[-1] == {
             "connection_id": "conn-1",
             "risk_workspace_id": "rw1",
-            "selected_file_ids": ["file-3"],
+            "selected_file_ids": ["folder-1"],
         }
         scope = await tracking_scope_store.load("server-mount-1")
-        assert scope.selected_file_ids == ["file-3"]
+        assert scope.folder_id == "folder-1"
 
     asyncio.run(scenario())
 
@@ -310,7 +309,7 @@ def test_active_mount_rejects_an_unauthorized_workspace_before_credential_use():
 
         response = client.post(
             "/api/v1/source-mounts/mount-1/drive/mounts",
-            json={"risk_workspace_id": "other-workspace", "selected_file_ids": ["file-3"]},
+            json={"risk_workspace_id": "other-workspace", "folder_id": "folder-1"},
         )
 
         assert response.status_code == 403
@@ -339,80 +338,20 @@ class FakeUntrackCallback:
         return _Outcome()
 
 
-def test_untracking_removes_only_that_file_from_the_watched_scope():
-    """추적 해제는 그 파일만 감시에서 뺀다. 나머지는 계속 감시해야 한다.
+def test_the_untrack_route_is_gone():
+    """폴더를 보는 지금 "이 파일만 추적 해제" 는 성립하지 않는다 (§6.1 · 1-F).
 
-    범위를 통째로 덮어쓰면 다른 파일의 변경 감지가 조용히 끊긴다. 그 사고는 mount
-    추가 경로에서 이미 한 번 겪었다.
+    범위에서 뺄 방법이 없고, Risk 만 닫아 두면 **그 파일의 다음 변경에 되살아난다.**
+    추적을 끊는 방법은 하나뿐이다 — 폴더 밖으로 옮긴다. 실측에서 그것이 `removed`
+    로 오고(§2.1.1), 1-D 가 그때 Risk 를 닫는다.
     """
 
     async def scenario():
-        callback = FakeUntrackCallback(mount_id="mount-1", source_artifact_id="file-b")
-        client, _vault, tracking, _create, _ref = await _setup(untrack_callback=callback)
-        await tracking.save(
-            "mount-1",
-            DriveTrackingScope(
-                mount_id="mount-1",
-                selected_file_ids=["file-a", "file-b", "file-c"],
-                display_metadata_by_file={
-                    "file-a": {"name": "a.md"},
-                    "file-b": {"name": "b.md"},
-                    "file-c": {"name": "c.md"},
-                },
-            ),
-        )
-
+        client, _vault, _tracking, _create, _ref = await _setup()
         response = client.post(
             "/api/v1/source-mounts/mount-1/drive/untrack",
-            json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-b"},
+            json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-1"},
         )
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert body["excluded_risk_ids"] == ["risk-1"]
-        assert body["remaining_file_count"] == 2
-        assert callback.calls == [("vws-1", "artifact-b")]
-
-        stored = await tracking.load("mount-1")
-        assert stored.selected_file_ids == ["file-a", "file-c"]
-        assert set(stored.display_metadata_by_file) == {"file-a", "file-c"}
-
-    asyncio.run(scenario())
-
-
-def test_untracking_the_same_file_twice_is_harmless():
-    async def scenario():
-        callback = FakeUntrackCallback(mount_id="mount-1", source_artifact_id="file-b")
-        client, _vault, tracking, _create, _ref = await _setup(untrack_callback=callback)
-        await tracking.save(
-            "mount-1",
-            DriveTrackingScope(
-                mount_id="mount-1",
-                selected_file_ids=["file-a", "file-b"],
-            ),
-        )
-        for _ in range(2):
-            response = client.post(
-                "/api/v1/source-mounts/mount-1/drive/untrack",
-                json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-b"},
-            )
-            assert response.status_code == 200, response.text
-        stored = await tracking.load("mount-1")
-        assert stored.selected_file_ids == ["file-a"]
-
-    asyncio.run(scenario())
-
-
-def test_untracking_requires_mount_authorization():
-    async def scenario():
-        callback = FakeUntrackCallback(mount_id="mount-1", source_artifact_id="file-b")
-        client, _vault, _tracking, _create, _ref = await _setup(
-            mount_authz=deny_all_authz, untrack_callback=callback
-        )
-        response = client.post(
-            "/api/v1/source-mounts/mount-1/drive/untrack",
-            json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-b"},
-        )
-        assert response.status_code in (401, 403)
-        assert callback.calls == []
+        assert response.status_code == 404
 
     asyncio.run(scenario())

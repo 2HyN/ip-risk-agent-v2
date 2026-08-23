@@ -73,7 +73,7 @@ test("active Drive mount operations use mount-scoped routes without OAuth restar
     : json({ server_mount_id: "mount-2", source_workspace_id: "source-2" }));
 
   await client.createDrivePickerSessionForMount("mount-1");
-  await client.createAdditionalDriveMount("mount-1", "vws-1", ["file-2"]);
+  await client.createAdditionalDriveMount("mount-1", "vws-1", "folder-1");
 
   expect(calls.map((call) => call.url)).toEqual([
     "http://localhost:8000/api/v1/source-mounts/mount-1/drive/picker-session",
@@ -82,7 +82,7 @@ test("active Drive mount operations use mount-scoped routes without OAuth restar
   expect(calls.some((call) => call.url.includes("google-drive/start"))).toBe(false);
   expect(JSON.parse(String(calls[1]?.init.body))).toMatchObject({
     risk_workspace_id: "vws-1",
-    selected_file_ids: ["file-2"],
+    folder_id: "folder-1",
   });
 });
 

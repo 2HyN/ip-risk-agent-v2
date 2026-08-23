@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -26,7 +27,13 @@ from ip_risk_agent.connectors.google_drive.models import (
     DriveFile,
     DriveWatchChannel,
 )
+from ip_risk_agent.connectors.google_drive.models import (
+    FOLDER_MIME_TYPE,
+)
 from ip_risk_agent.connectors.google_drive.tracking_scope import DriveTrackingScope
+
+#: 시험용 폴더. 추적 대상은 "이 폴더 안에 있는가" 로 정해진다 (§6.1 · 1-F).
+FOLDER_ID = "folder-1"
 
 
 class FakeDriveProvider:
@@ -43,7 +50,19 @@ class FakeDriveProvider:
         return ("fake-token", None)
 
     def get_file(self, file_id: str) -> DriveFile:
+        if file_id == FOLDER_ID:
+            return DriveFile(FOLDER_ID, "tracked", FOLDER_MIME_TYPE, None, None, None, ())
         return self._files[file_id]
+
+    def list_folder_children(self, folder_id: str, page_token: str | None = None):
+        from ip_risk_agent.connectors.google_drive.models import DriveFolderPage
+
+        return DriveFolderPage(
+            files=tuple(
+                item for item in self._files.values() if folder_id in item.parents
+            ),
+            next_page_token=None,
+        )
 
     def get_start_page_token(self) -> str:
         self.get_start_page_token_called = True
@@ -96,11 +115,23 @@ async def _build_adapter(
     ref = await vault.put(cred_scope, token_json)
     lookup.register("mount-1", DriveConnectionContext(connection_id="conn-1", credential_ref=ref))
 
+    # `tracked_ids` 는 이제 **폴더 안에 넣을 파일**이다. 명단이 아니라 소속으로
+    # 판정하므로, 대역의 파일에 부모를 붙여 준다.
+    for file_id in tracked_ids:
+        found = provider._files.get(file_id)
+        if found is None:
+            # 시험이 내용을 신경 쓰지 않는 경우. "폴더 안에 있다" 만 세운다.
+            provider._files[file_id] = DriveFile(
+                file_id, file_id, "text/plain", "t1", "rev-1", None, (FOLDER_ID,)
+            )
+        elif not found.parents:
+            provider._files[file_id] = replace(found, parents=(FOLDER_ID,))
+
     await scope_store.save(
         "mount-1",
         DriveTrackingScope(
             mount_id="mount-1",
-            selected_file_ids=tracked_ids,
+            folder_id=FOLDER_ID,
             display_metadata_by_file=display_metadata_by_file or {},
         ),
     )
@@ -353,13 +384,87 @@ def test_initial_changes_publish_only_picker_scoped_files_with_provider_revision
     asyncio.run(scenario())
 
 
-def test_initial_changes_reject_files_outside_picker_scope():
-    async def scenario():
-        provider = FakeDriveProvider()
-        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=["file-1"])
+def test_initial_changes_walk_the_folder_not_a_given_list():
+    """처음 훑기는 **폴더가 정한다.** 부르는 쪽이 목록을 주지 않는다 (§6.1 · 1-F).
 
-        with pytest.raises(PermissionDeniedError):
-            await adapter.initial_changes(_mount(), ["file-2"])
+    예전에는 Picker 가 고른 목록을 받아 그것만 훑었다. 그래서 마운트 시점에 폴더에
+    이미 있던 파일이라도 목록에 없으면 발견되지 않았고, 그 뒤에 넣은 파일도
+    마찬가지였다.
+    """
+
+    async def scenario():
+        inside = DriveFile(
+            file_id="file-1", name="a.md", mime_type="text/markdown",
+            modified_time="t1", revision_id="rev-1", web_view_link=None,
+            parents=(FOLDER_ID,),
+        )
+        outside = DriveFile(
+            file_id="file-2", name="b.md", mime_type="text/markdown",
+            modified_time="t2", revision_id="rev-2", web_view_link=None,
+            parents=("somewhere-else",),
+        )
+        provider = FakeDriveProvider(files={"file-1": inside, "file-2": outside})
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=[])
+
+        changes = await adapter.initial_changes(_mount())
+
+        found = {change.artifact.source_artifact_id for change in changes}
+        assert found == {"file-1"}, "폴더 밖은 훑지 않는다"
+
+    asyncio.run(scenario())
+
+
+def test_a_file_added_after_the_mount_is_picked_up():
+    """이것이 폴더로 바꾼 이유다.
+
+    예전 명단 방식에서는 변경 피드에 와도 명단에 없다고 버려졌다. v1 이 그렇게
+    실패했고 — 폴더 펼침이 **연결 시점의 스냅샷**이었다 — 이 서비스를 쓰는 방법이
+    바로 그 "폴더에 넣는 것" 이다.
+    """
+
+    async def scenario():
+        added = DriveFile(
+            file_id="file-new", name="c.md", mime_type="text/markdown",
+            modified_time="t3", revision_id="rev-3", web_view_link=None,
+            parents=(FOLDER_ID,),
+        )
+        page = DriveChangePage(
+            changes=[
+                DriveChange(file_id="file-new", removed=False, modified_time="t3", revision_id="rev-3")
+            ],
+            next_page_token=None,
+            new_start_page_token="cursor-2",
+        )
+        provider = FakeDriveProvider(
+            files={"file-new": added}, changes_by_token={"start-1": page}
+        )
+        # 마운트할 때는 이 파일이 없었다 — 명단에 있을 수가 없다.
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=[])
+
+        result = await adapter.reconcile(_mount(), cursor=None)
+
+        assert [c.artifact.source_artifact_id for c in result.changes] == ["file-new"]
+
+    asyncio.run(scenario())
+
+
+def test_a_shortcut_inside_the_folder_is_not_followed():
+    """바로가기를 따라가면 **폴더 밖의 파일이 읽힌다** (§6.1).
+
+    지금까지는 통과 목록에 없어서 막혔는데 그것은 규칙이 아니라 우연이었다.
+    """
+    from ip_risk_agent.connectors.google_drive.models import SHORTCUT_MIME_TYPE
+
+    async def scenario():
+        shortcut = DriveFile(
+            file_id="link-1", name="notes.md", mime_type=SHORTCUT_MIME_TYPE,
+            modified_time="t1", revision_id="rev-1", web_view_link=None,
+            parents=(FOLDER_ID,),
+        )
+        provider = FakeDriveProvider(files={"link-1": shortcut})
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=[])
+
+        assert await adapter.initial_changes(_mount()) == ()
 
     asyncio.run(scenario())
 
