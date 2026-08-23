@@ -31,7 +31,6 @@ secrets:
   fixed:
     session: iprisk-v2-session-secret
     googleLoginClient: iprisk-v2-google-login-client-secret
-    driveClient: iprisk-v2-drive-client-secret
     driveChannel: iprisk-v2-drive-channel-token
     githubPrivateKey: iprisk-v2-github-private-key
     githubWebhook: iprisk-v2-github-webhook-secret

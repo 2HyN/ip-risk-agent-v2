@@ -94,7 +94,7 @@ class FakeDriveProviderFactory:
     def __init__(self, provider: FakeDriveProvider) -> None:
         self._provider = provider
 
-    def create(self, token: dict) -> FakeDriveProvider:
+    def create(self) -> FakeDriveProvider:
         return self._provider
 
 
@@ -138,7 +138,6 @@ async def _build_adapter(
 
     adapter = GoogleDriveAdapter(
         provider_factory=FakeDriveProviderFactory(provider),
-        credential_vault=vault,
         connection_lookup=lookup,
         tracking_scope_store=scope_store,
         runtime_store=runtime_store,
@@ -177,7 +176,9 @@ def test_fetch_snapshot_returns_full_text_for_tracked_file():
 
         assert snapshot.content_scope.value == "FULL_TEXT"
         assert snapshot.text_segments[0].text == "hello world"
-        assert provider.export_called is True
+        # D1 — 보관할 자격증명이 없다. 토큰을 되쓰는 순간 이 결정이 없애려던
+        # 그 보관물이 되살아난다.
+        assert provider.export_called is False
 
     asyncio.run(scenario())
 
@@ -256,7 +257,6 @@ def test_health_returns_offline_when_connection_not_registered():
         runtime_store = InMemoryRuntimeStore()
         adapter = GoogleDriveAdapter(
             provider_factory=FakeDriveProviderFactory(FakeDriveProvider()),
-            credential_vault=vault,
             connection_lookup=lookup,
             tracking_scope_store=scope_store,
             runtime_store=runtime_store,
@@ -379,7 +379,9 @@ def test_initial_changes_publish_only_picker_scoped_files_with_provider_revision
         ]
         assert [change.revision for change in changes] == ["rev-1", "rev-2"]
         assert all(change.change_type is ChangeType.CREATE for change in changes)
-        assert provider.export_called is True
+        # D1 — 보관할 자격증명이 없다. 토큰을 되쓰는 순간 이 결정이 없애려던
+        # 그 보관물이 되살아난다.
+        assert provider.export_called is False
 
     asyncio.run(scenario())
 

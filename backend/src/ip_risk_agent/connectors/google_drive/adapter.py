@@ -44,7 +44,6 @@ from iprisk_contracts.source_snapshot import SourceSnapshot
 
 from ..common.adapter_support import build_access_receipt, bytes_of_text
 from ..common.segmentation import segments_for
-from ..common.credential_vault import SourceCredentialVault
 from ..common.errors import (
     AuthRequiredError,
     NotFoundError,
@@ -68,7 +67,13 @@ from .tracking_scope import DriveTrackingScope
 
 
 class DriveProviderFactory(Protocol):
-    def create(self, token: dict) -> DriveProvider: ...
+    """D1 — provider 를 만드는 데 토큰이 필요 없다.
+
+    접근이 폴더 공유에서 오므로 마운트마다 다른 자격증명이 없다. 하나의 서비스
+    계정이 공유받은 것만 본다 (`service_account.py`).
+    """
+
+    def create(self) -> DriveProvider: ...
 
 
 def _is_readable(mime_type: str, name: str) -> bool:
@@ -96,13 +101,11 @@ class GoogleDriveAdapter:
         self,
         *,
         provider_factory: DriveProviderFactory,
-        credential_vault: SourceCredentialVault,
         connection_lookup: DriveConnectionLookup,
         tracking_scope_store,
         runtime_store,
     ) -> None:
         self._provider_factory = provider_factory
-        self._credential_vault = credential_vault
         self._connection_lookup = connection_lookup
         self._tracking_scope_store = tracking_scope_store
         self._runtime_store = runtime_store
@@ -110,24 +113,18 @@ class GoogleDriveAdapter:
     async def _provider_for_mount(
         self, mount_id: str
     ) -> tuple[DriveProvider, DriveConnectionContext]:
-        connection = await self._connection_lookup.resolve(mount_id)
-        raw_token = await self._credential_vault.get(connection.credential_ref)
-        token = json.loads(raw_token)
-        provider = self._provider_factory.create(token)
-        return provider, connection
+        """연결은 여전히 찾는다 — 변경 커서를 그 id 로 보관하기 때문이다.
 
-    async def _persist_refreshed_token(
-        self, connection: DriveConnectionContext, provider: DriveProvider
-    ) -> None:
-        await self._credential_vault.update(
-            connection.credential_ref, json.dumps(provider.export_token())
-        )
+        찾지 않는 것은 **자격증명**이다. 마운트마다 다른 토큰이 없고, 보관할 것도
+        없다 (D1).
+        """
+        connection = await self._connection_lookup.resolve(mount_id)
+        return self._provider_factory.create(), connection
 
     async def health(self, mount: MountRef) -> SourceHealth:
         try:
             provider, connection = await self._provider_for_mount(mount.mount_id)
             provider.get_access_token()
-            await self._persist_refreshed_token(connection, provider)
             status = SourceHealthStatus.HEALTHY
         except AuthRequiredError:
             status = SourceHealthStatus.REAUTH_REQUIRED
@@ -167,7 +164,6 @@ class GoogleDriveAdapter:
             and runtime.watch_expiry is not None
             and runtime.watch_expiry > now + renewal_window
         ):
-            await self._persist_refreshed_token(connection, provider)
             return False
 
         page_token = runtime.change_cursor if runtime is not None else None
@@ -197,7 +193,6 @@ class GoogleDriveAdapter:
                 }
             ),
         )
-        await self._persist_refreshed_token(connection, provider)
         return True
 
     async def fetch_snapshot(self, change: SourceChange) -> SourceSnapshot:
@@ -221,7 +216,6 @@ class GoogleDriveAdapter:
             )
 
         if change.change_type is ChangeType.DELETE:
-            await self._persist_refreshed_token(connection, provider)
             return self._unsupported_snapshot(change, resolved_revision=change.revision or "deleted")
 
         drive_file = provider.get_file(file_id)
@@ -232,7 +226,6 @@ class GoogleDriveAdapter:
         # 검사를 받기도 하고 안 받기도 한다. 폴더 마운트가 열리면 (§6.1) 그 차이가
         # 그대로 누락이 된다.
         if not _is_readable(drive_file.mime_type, drive_file.name):
-            await self._persist_refreshed_token(connection, provider)
             return self._unsupported_snapshot(
                 change, resolved_revision=drive_file.revision_id or "unknown"
             )
@@ -241,11 +234,9 @@ class GoogleDriveAdapter:
             text = provider.read_text(file_id, drive_file.mime_type)
         except UnicodeDecodeError:
             # 이름이나 mime 은 텍스트라고 했는데 알맹이가 아니었다 (§6.2).
-            await self._persist_refreshed_token(connection, provider)
             return self._unsupported_snapshot(
                 change, resolved_revision=drive_file.revision_id or "unreadable"
             )
-        await self._persist_refreshed_token(connection, provider)
 
         segments = segments_for(
             text, self._infer_artifact_kind(drive_file.name, drive_file.mime_type)
@@ -326,38 +317,35 @@ class GoogleDriveAdapter:
                 )
             )
 
-        try:
-            for drive_file in listing.files:
-                file_id = drive_file.file_id
-                revision = drive_file.revision_id or drive_file.modified_time or "unknown"
-                fingerprint = drive_change_fingerprint(
+        for drive_file in listing.files:
+            file_id = drive_file.file_id
+            revision = drive_file.revision_id or drive_file.modified_time or "unknown"
+            fingerprint = drive_change_fingerprint(
+                mount_id=mount.mount_id,
+                file_id=file_id,
+                resolved_revision=revision,
+            )
+            changes.append(
+                SourceChange(
+                    contract_version="1",
+                    event_id=fingerprint,
+                    provider_event_id=None,
+                    event_fingerprint=fingerprint,
+                    risk_workspace_id=mount.risk_workspace_id,
                     mount_id=mount.mount_id,
-                    file_id=file_id,
-                    resolved_revision=revision,
+                    source_workspace_id=mount.source_workspace_id,
+                    source_type=SourceType.GOOGLE_DRIVE,
+                    artifact=SourceArtifactRef(
+                        source_artifact_id=file_id,
+                        display_name=display_name_for(drive_file.name),
+                    ),
+                    change_type=ChangeType.CREATE,
+                    revision=revision,
+                    previous_revision=None,
+                    observed_at=now,
+                    safe_metadata={},
                 )
-                changes.append(
-                    SourceChange(
-                        contract_version="1",
-                        event_id=fingerprint,
-                        provider_event_id=None,
-                        event_fingerprint=fingerprint,
-                        risk_workspace_id=mount.risk_workspace_id,
-                        mount_id=mount.mount_id,
-                        source_workspace_id=mount.source_workspace_id,
-                        source_type=SourceType.GOOGLE_DRIVE,
-                        artifact=SourceArtifactRef(
-                            source_artifact_id=file_id,
-                            display_name=display_name_for(drive_file.name),
-                        ),
-                        change_type=ChangeType.CREATE,
-                        revision=revision,
-                        previous_revision=None,
-                        observed_at=now,
-                        safe_metadata={},
-                    )
-                )
-        finally:
-            await self._persist_refreshed_token(connection, provider)
+            )
         return tuple(changes)
 
     def _unsupported_snapshot(self, change: SourceChange, *, resolved_revision: str) -> SourceSnapshot:
@@ -451,7 +439,6 @@ class GoogleDriveAdapter:
             page_token = provider.get_start_page_token()
 
         page = provider.list_changes(page_token)
-        await self._persist_refreshed_token(connection, provider)
 
         now = datetime.now(timezone.utc)
         changes: list[SourceChange] = []

@@ -25,6 +25,7 @@ from ip_risk_agent.gcp.foundation import (
 )
 from ip_risk_agent.gcp.identity import GoogleOidcTaskAuthenticator
 from ip_risk_agent.gcp_contract import (
+    DRIVE_SERVICE_ACCOUNT,
     DYNAMIC_CREDENTIAL_SECRET_PREFIX,
     FIRESTORE_DATABASE,
     FIXED_SECRET_IDS,
@@ -86,8 +87,7 @@ def _settings(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist") -
         "GCP_REGION": REGION,
         "FIRESTORE_DATABASE": FIRESTORE_DATABASE,
         "LOCAL_STAGING_BUCKET": STAGING_BUCKET,
-        "GOOGLE_DRIVE_CLIENT_ID": "drive-client",
-        "GOOGLE_DRIVE_CLIENT_SECRET": "drive-secret",
+        "GOOGLE_DRIVE_SERVICE_ACCOUNT": DRIVE_SERVICE_ACCOUNT,
         "GITHUB_APP_ID": "app-1",
         "GITHUB_APP_PRIVATE_KEY_SECRET_ID": FIXED_SECRET_IDS[
             "github_private_key"
@@ -102,11 +102,10 @@ def _settings(role: AppRole, *, frontend_dist_dir: str = "/app/frontend/dist") -
                 "GOOGLE_LOGIN_CLIENT_ID": "login-client",
                 "GOOGLE_LOGIN_CLIENT_SECRET": "login-secret",
                 "GOOGLE_LOGIN_REDIRECT_URI": "https://api.example.com/api/v1/auth/google/callback",
-                "GOOGLE_DRIVE_REDIRECT_URI": "https://api.example.com/api/v1/source-connections/google-drive/callback",
+                "GOOGLE_DRIVE_SERVICE_ACCOUNT": DRIVE_SERVICE_ACCOUNT,
                 "GOOGLE_DRIVE_WEBHOOK_BASE_URL": "https://api.example.com/webhooks/google-drive",
                 "DRIVE_WATCH_CHANNEL_TOKEN": "channel-token",
-                "GOOGLE_PICKER_API_KEY": "picker-key",
-                "GOOGLE_CLOUD_PROJECT_NUMBER": PROJECT_NUMBER,
+                                "GOOGLE_CLOUD_PROJECT_NUMBER": PROJECT_NUMBER,
                 "GITHUB_APP_SLUG": "ip-risk-agent-v2",
                 "GITHUB_WEBHOOK_SECRET_ID": FIXED_SECRET_IDS["github_webhook"],
                 "GITHUB_APP_CALLBACK_URL": "https://api.example.com/api/v1/source-connections/github/install/callback",
@@ -402,8 +401,7 @@ def _environment(
         "GCP_REGION": settings.gcp_region or "",
         "FIRESTORE_DATABASE": settings.firestore_database or "",
         "LOCAL_STAGING_BUCKET": settings.local_staging_bucket or "",
-        "GOOGLE_DRIVE_CLIENT_ID": settings.drive_client_id or "",
-        "GOOGLE_DRIVE_CLIENT_SECRET": settings.drive_client_secret or "",
+        "GOOGLE_DRIVE_SERVICE_ACCOUNT": settings.drive_service_account or "",
         "GITHUB_APP_ID": settings.github_app_id or "",
         "GITHUB_APP_PRIVATE_KEY_SECRET_ID": settings.github_private_key_secret_id or "",
         "SOURCE_CREDENTIAL_SECRET_PREFIX": settings.source_credential_secret_prefix,
@@ -416,10 +414,8 @@ def _environment(
             "GOOGLE_LOGIN_CLIENT_ID": settings.google_login_client_id,
             "GOOGLE_LOGIN_CLIENT_SECRET": settings.google_login_client_secret,
             "GOOGLE_LOGIN_REDIRECT_URI": settings.google_login_redirect_uri,
-            "GOOGLE_DRIVE_REDIRECT_URI": settings.drive_redirect_uri,
             "GOOGLE_DRIVE_WEBHOOK_BASE_URL": settings.drive_webhook_base_url,
             "DRIVE_WATCH_CHANNEL_TOKEN": settings.drive_watch_channel_token,
-            "GOOGLE_PICKER_API_KEY": settings.google_picker_api_key,
             "GOOGLE_CLOUD_PROJECT_NUMBER": settings.google_cloud_project_number,
             "GITHUB_APP_SLUG": settings.github_app_slug,
             "GITHUB_WEBHOOK_SECRET_ID": settings.github_webhook_secret_id,

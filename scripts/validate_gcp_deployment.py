@@ -21,6 +21,7 @@ from ip_risk_agent.gcp_contract import (
     ARTIFACT_REPOSITORY,
     CLOUD_BUILD_SOURCE_BUCKET,
     DEPLOY_SERVICE_ACCOUNT,
+    DRIVE_SERVICE_ACCOUNT,
     DYNAMIC_CREDENTIAL_SECRET_PREFIX,
     FIRESTORE_DATABASE,
     FIXED_SECRET_IDS,
@@ -62,8 +63,7 @@ COMMON_ENVIRONMENT = {
     "GCP_REGION",
     "FIRESTORE_DATABASE",
     "LOCAL_STAGING_BUCKET",
-    "GOOGLE_DRIVE_CLIENT_ID",
-    "GOOGLE_DRIVE_CLIENT_SECRET",
+    "GOOGLE_DRIVE_SERVICE_ACCOUNT",
     "GITHUB_APP_ID",
     "GITHUB_APP_PRIVATE_KEY_SECRET_ID",
     "SOURCE_CREDENTIAL_SECRET_PREFIX",
@@ -74,10 +74,8 @@ API_ENVIRONMENT = {
     "GOOGLE_LOGIN_CLIENT_ID",
     "GOOGLE_LOGIN_CLIENT_SECRET",
     "GOOGLE_LOGIN_REDIRECT_URI",
-    "GOOGLE_DRIVE_REDIRECT_URI",
     "GOOGLE_DRIVE_WEBHOOK_BASE_URL",
     "DRIVE_WATCH_CHANNEL_TOKEN",
-    "GOOGLE_PICKER_API_KEY",
     "GOOGLE_CLOUD_PROJECT_NUMBER",
     "GITHUB_APP_SLUG",
     "GITHUB_WEBHOOK_SECRET_ID",
@@ -320,7 +318,6 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
             "fixed": {
                 "session": FIXED_SECRET_IDS["session"],
                 "googleLoginClient": FIXED_SECRET_IDS["google_login_client"],
-                "driveClient": FIXED_SECRET_IDS["drive_client"],
                 "driveChannel": FIXED_SECRET_IDS["drive_channel"],
                 "githubPrivateKey": FIXED_SECRET_IDS["github_private_key"],
                 "githubWebhook": FIXED_SECRET_IDS["github_webhook"],
@@ -367,6 +364,7 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
             "GCP_REGION": REGION,
             "FIRESTORE_DATABASE": FIRESTORE_DATABASE,
             "LOCAL_STAGING_BUCKET": STAGING_BUCKET,
+            "GOOGLE_DRIVE_SERVICE_ACCOUNT": DRIVE_SERVICE_ACCOUNT,
             "GITHUB_APP_PRIVATE_KEY_SECRET_ID": FIXED_SECRET_IDS[
                 "github_private_key"
             ],
@@ -398,12 +396,11 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
             "GOOGLE_LOGIN_CLIENT_SECRET": FIXED_SECRET_IDS[
                 "google_login_client"
             ],
-            "GOOGLE_DRIVE_CLIENT_SECRET": FIXED_SECRET_IDS["drive_client"],
             "DRIVE_WATCH_CHANNEL_TOKEN": FIXED_SECRET_IDS["drive_channel"],
         },
-        "worker": {
-            "GOOGLE_DRIVE_CLIENT_SECRET": FIXED_SECRET_IDS["drive_client"],
-        },
+        # D1 이후 worker 에는 Drive 비밀이 없다. 접근이 폴더 공유에서 오므로
+        # 보관할 자격증명 자체가 없다.
+        "worker": {},
     }
     if cloud_run.get("secretEnvironment") != expected_secret_environment:
         errors.append("Cloud Run fixed secret mapping violates the v2 namespace")
@@ -512,6 +509,11 @@ def _validate_iam_contract(iam: dict, errors: list[str]) -> None:
             "members": [API_SERVICE_ACCOUNT, WORKER_SERVICE_ACCOUNT]
         },
         "artifactRepository": {"member": DEPLOY_SERVICE_ACCOUNT},
+        # D1 — 이 SA 를 가장할 수 있는 것은 두 실행 신원뿐이다. 사람이 여기 들어오면
+        # 공유받은 폴더 전부를 사람이 읽을 수 있게 된다.
+        "driveImpersonation": {
+            "members": [API_SERVICE_ACCOUNT, WORKER_SERVICE_ACCOUNT]
+        },
     }
     expected_roles = {
         "firestore": "roles/datastore.user",
@@ -521,6 +523,7 @@ def _validate_iam_contract(iam: dict, errors: list[str]) -> None:
         "schedulerInvoke": "roles/run.invoker",
         "stagingObjects": "roles/storage.objectUser",
         "artifactRepository": "roles/artifactregistry.writer",
+        "driveImpersonation": "roles/iam.serviceAccountTokenCreator",
     }
     for name, principals in expected_principals.items():
         binding = bindings.get(name, {})
@@ -541,10 +544,6 @@ def _validate_iam_contract(iam: dict, errors: list[str]) -> None:
     expected_fixed_access = {
         FIXED_SECRET_IDS["session"]: [API_SERVICE_ACCOUNT],
         FIXED_SECRET_IDS["google_login_client"]: [API_SERVICE_ACCOUNT],
-        FIXED_SECRET_IDS["drive_client"]: [
-            API_SERVICE_ACCOUNT,
-            WORKER_SERVICE_ACCOUNT,
-        ],
         FIXED_SECRET_IDS["drive_channel"]: [API_SERVICE_ACCOUNT],
         FIXED_SECRET_IDS["github_private_key"]: [
             API_SERVICE_ACCOUNT,

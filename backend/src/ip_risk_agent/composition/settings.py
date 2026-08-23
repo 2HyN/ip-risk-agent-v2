@@ -55,12 +55,11 @@ class Settings:
     google_login_client_id: str | None = None
     google_login_client_secret: str | None = field(default=None, repr=False)
     google_login_redirect_uri: str | None = None
-    drive_client_id: str | None = None
-    drive_client_secret: str | None = field(default=None, repr=False)
-    drive_redirect_uri: str | None = None
+    #: D1 — Drive 접근을 대신하는 서비스 계정 주소. 사용자가 이 주소로 폴더를
+    #: 공유한다. 비밀이 아니다 — 이것을 알아도 접근이 생기지 않는다.
+    drive_service_account: str | None = None
     drive_webhook_base_url: str | None = None
     drive_watch_channel_token: str | None = field(default=None, repr=False)
-    google_picker_api_key: str | None = field(default=None, repr=False)
     google_cloud_project_number: str | None = None
     github_app_id: str | None = None
     github_app_slug: str | None = None
@@ -119,12 +118,9 @@ class Settings:
             google_login_client_id=value("GOOGLE_LOGIN_CLIENT_ID"),
             google_login_client_secret=value("GOOGLE_LOGIN_CLIENT_SECRET"),
             google_login_redirect_uri=value("GOOGLE_LOGIN_REDIRECT_URI"),
-            drive_client_id=value("GOOGLE_DRIVE_CLIENT_ID"),
-            drive_client_secret=value("GOOGLE_DRIVE_CLIENT_SECRET"),
-            drive_redirect_uri=value("GOOGLE_DRIVE_REDIRECT_URI"),
+            drive_service_account=value("GOOGLE_DRIVE_SERVICE_ACCOUNT"),
             drive_webhook_base_url=value("GOOGLE_DRIVE_WEBHOOK_BASE_URL"),
             drive_watch_channel_token=value("DRIVE_WATCH_CHANNEL_TOKEN"),
-            google_picker_api_key=value("GOOGLE_PICKER_API_KEY"),
             google_cloud_project_number=value("GOOGLE_CLOUD_PROJECT_NUMBER"),
             github_app_id=value("GITHUB_APP_ID"),
             github_app_slug=value("GITHUB_APP_SLUG"),
@@ -166,9 +162,10 @@ class Settings:
             self.google_login_client_secret,
             self.google_login_redirect_uri,
         )
-        drive_credentials = (self.drive_client_id, self.drive_client_secret)
-        drive_api = (
-            self.drive_redirect_uri,
+        # D1 — 서비스 계정은 **두 역할이 다 쓴다** (worker 가 대조·스냅샷에서
+        # Drive 를 읽는다). 감시 채널을 거는 것은 API 뿐이므로 웹훅 주소와 채널
+        # 토큰만 API 묶음이다.
+        drive_watch = (
             self.drive_webhook_base_url,
             self.drive_watch_channel_token,
         )
@@ -181,7 +178,6 @@ class Settings:
             self.github_webhook_secret_id,
             self.github_app_callback_url,
         )
-        picker = (self.google_picker_api_key, self.google_cloud_project_number)
         task_target = (
             self.analysis_worker_url,
             self.cloud_tasks_service_account,
@@ -192,18 +188,15 @@ class Settings:
         )
         rag = (self.rag_region, self.rag_corpus_id, self.rag_corpus_version)
         _all_or_none("Google login", login)
-        _all_or_none("Google Drive credentials", drive_credentials)
-        _all_or_none("Google Drive API", drive_api)
+        _all_or_none("Google Drive watch", drive_watch)
         _all_or_none("GitHub App credentials", github_credentials)
         _all_or_none("GitHub App API", github_api)
-        _all_or_none("Google Picker", picker)
         _all_or_none("Cloud Tasks target", task_target)
         _all_or_none("Cloud Tasks publisher", task_publisher)
         _all_or_none("RAG", rag)
 
         for name, url in (
             ("GOOGLE_LOGIN_REDIRECT_URI", self.google_login_redirect_uri),
-            ("GOOGLE_DRIVE_REDIRECT_URI", self.drive_redirect_uri),
             ("GOOGLE_DRIVE_WEBHOOK_BASE_URL", self.drive_webhook_base_url),
             ("GITHUB_APP_CALLBACK_URL", self.github_app_callback_url),
             ("ANALYSIS_WORKER_URL", self.analysis_worker_url),
@@ -220,15 +213,12 @@ class Settings:
                 "GCP_REGION": self.gcp_region,
                 "FIRESTORE_DATABASE": self.firestore_database,
                 "LOCAL_STAGING_BUCKET": self.local_staging_bucket,
+                "GOOGLE_DRIVE_SERVICE_ACCOUNT": self.drive_service_account,
             }
             if self.role is AppRole.API:
                 role_required = {
                     "Google login group": login[0] if all(login) else None,
-                    "Google Drive credentials": (
-                        drive_credentials[0] if all(drive_credentials) else None
-                    ),
-                    "Google Drive API group": drive_api[0] if all(drive_api) else None,
-                    "Google Picker group": picker[0] if all(picker) else None,
+                    "Google Drive watch group": drive_watch[0] if all(drive_watch) else None,
                     "GitHub App credentials": (
                         github_credentials[0] if all(github_credentials) else None
                     ),
@@ -242,9 +232,6 @@ class Settings:
                 }
             elif self.role is AppRole.WORKER:
                 role_required = {
-                    "Google Drive credentials": (
-                        drive_credentials[0] if all(drive_credentials) else None
-                    ),
                     "GitHub App credentials": (
                         github_credentials[0] if all(github_credentials) else None
                     ),
@@ -346,9 +333,8 @@ class Settings:
                     self.session_secret or None,
                     self.frontend_dist_dir,
                     *login,
-                    *drive_api,
+                    *drive_watch,
                     *github_api,
-                    *picker,
                     self.analysis_worker_url,
                     self.cloud_tasks_service_account,
                     self.cloud_tasks_location,
@@ -379,18 +365,12 @@ class Settings:
 
     @property
     def drive_enabled(self) -> bool:
-        return self.drive_client_id is not None
+        return self.drive_service_account is not None
 
     @property
     def github_enabled(self) -> bool:
         return self.github_app_id is not None
 
-    @property
-    def drive_picker_enabled(self) -> bool:
-        return (
-            self.google_picker_api_key is not None
-            and self.google_cloud_project_number is not None
-        )
 
     @property
     def rag_enabled(self) -> bool:

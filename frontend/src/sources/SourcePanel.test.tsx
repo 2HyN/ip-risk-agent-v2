@@ -4,17 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ControlPlaneApp } from "../app/control-plane-app.js";
 import { SourcePanel } from "./SourcePanel.js";
-import {
-  GoogleDrivePickerAdapter,
-  type DrivePickerAdapter,
-  type DrivePickerFile,
-} from "./platform/DrivePickerAdapter.js";
 import type {
   ConnectLocalMountParams,
   PlatformAdapter,
 } from "./platform/PlatformAdapter.js";
 
 const user = { id: "user-1", email: "owner@example.com", display_name: "Owner", avatar_url: null, csrf_token: "csrf-token" };
+const SHARING_ADDRESS = "iprisk-v2-drive@example.iam.gserviceaccount.com";
+const sharingConfig = { drive_sharing: { enabled: true, sharing_address: SHARING_ADDRESS } };
 const workspace = { id: "vws-1", name: "Counsel", description: null, owner_user_id: "user-1", security_policy_version: "security-v1", retention_policy_version: "retention-v1", created_at: "2026-08-17T00:00:00Z", updated_at: "2026-08-17T00:00:00Z", status: "ACTIVE" };
 const membership = { id: "member-1", risk_workspace_id: "vws-1", user_id: "user-1", role: "OWNER", status: "ACTIVE", invited_by: "user-1", created_at: "2026-08-17T00:00:00Z", updated_at: "2026-08-17T00:00:00Z" };
 const emptySummary = { risk_workspace_id: "vws-1", retention_policy_version: "retention-v1", policy_version: "security-v1", mounts: [], connected_sources: [], recent_access: [], raw_source_persisted: false, analysis_artifact_persisted: false, external_rag_reference_only: true };
@@ -42,7 +39,6 @@ const connectedGithubSummary = {
     mounted_by_user_id: "user-1",
   }],
 };
-const unavailablePicker: DrivePickerAdapter = { available: false, pick: async () => [] };
 
 class FakePlatform implements PlatformAdapter {
   readonly platform = "desktop" as const;
@@ -64,8 +60,6 @@ class FakePlatform implements PlatformAdapter {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  delete window.google;
-  delete window.gapi;
   window.location.hash = "";
 });
 
@@ -81,58 +75,8 @@ function baseResponse(path: string): Response | null {
   return null;
 }
 
-function googlePicker(selected: DrivePickerFile[]): GoogleDrivePickerAdapter {
-  const response = { ACTION: "action", DOCUMENTS: "docs" };
-  const document = { ID: "id", MIME_TYPE: "mimeType", NAME: "name" };
-  const action = { CANCEL: "cancel", ERROR: "error", PICKED: "picked" };
-  class DocsView {
-    setIncludeFolders() { return this; }
-    setSelectFolderEnabled() { return this; }
-  }
-  class PickerBuilder {
-    private callback: ((data: unknown) => void) | null = null;
-    addView() { return this; }
-    enableFeature() { return this; }
-    setOAuthToken() { return this; }
-    setDeveloperKey() { return this; }
-    setAppId() { return this; }
-    setOrigin() { return this; }
-    setCallback(value: (data: unknown) => void) {
-      this.callback = value;
-      return this;
-    }
-    build() {
-      const callbackData = {
-        [response.ACTION]: action.PICKED,
-        [response.DOCUMENTS]: selected.map((file) => ({
-          [document.ID]: file.id,
-          [document.NAME]: file.name,
-          [document.MIME_TYPE]: file.mimeType,
-        })),
-      };
-      return {
-        setVisible: () => queueMicrotask(() => this.callback?.(callbackData)),
-      };
-    }
-  }
-  window.google = { picker: {
-    Action: action,
-    Response: response,
-    Document: document,
-    Feature: { MULTISELECT_ENABLED: "multiselectEnabled" },
-    ViewId: { DOCS: "all" },
-    DocsView,
-    PickerBuilder,
-  } };
-  return new GoogleDrivePickerAdapter(async () => ({
-    enabled: true,
-    browserApiKey: "restricted-browser-key",
-    cloudProjectNumber: "123456789012",
-  }));
-}
-
 describe("SourcePanel product integration", () => {
-  it("adds another shared folder through the ACTIVE mount without restarting OAuth", async () => {
+  it("adds another shared folder to a workspace that already tracks one", async () => {
     window.location.hash = "#/w/vws-1/sources";
     const calls: Array<{ path: string; init: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -141,35 +85,35 @@ describe("SourcePanel product integration", () => {
       if (path.endsWith("/security/data-access-summary")) return response(connectedDriveSummary);
       const base = baseResponse(path);
       if (base !== null) return base;
-      if (path.endsWith("/source-mounts/mount-drive-1/drive/picker-session")) {
-        return response({ access_token: "active-picker-token" });
-      }
-      if (path.endsWith("/source-mounts/mount-drive-1/drive/mounts")) {
-        return response({ server_mount_id: "mount-drive-2", source_workspace_id: "source-drive-2" });
+      if (path.endsWith("/runtime-config")) return response(sharingConfig);
+      if (path.endsWith("/google-drive/folders")) {
+        return response({
+          server_mount_id: "mount-drive-2",
+          source_workspace_id: "source-drive-2",
+          tracked_file_count: 3,
+        });
       }
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    const picker: DrivePickerAdapter = {
-      available: true,
-      // 고르는 것은 **폴더 하나**다 (§6.1 · 1-F).
-      pick: vi.fn(async () => [
-        { id: "folder-2", name: "Second folder", mimeType: "application/vnd.google-apps.folder" },
-      ]),
-    };
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
     expect(await screen.findByText("1 folder tracked")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add files" }));
-    expect(screen.getByRole("heading", { name: "Add Source" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Select in Google Drive" }));
+    await userEvent.type(
+      await screen.findByLabelText("Drive folder link"),
+      "https://drive.google.com/drive/folders/folder-2",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
 
-    expect(await screen.findByText("Additional Google Drive files are now tracked.")).toBeInTheDocument();
-    const mount = calls.find((call) => call.path.endsWith("/source-mounts/mount-drive-1/drive/mounts"));
+    expect(await screen.findByText("폴더를 붙였습니다. 파일 3개를 추적합니다.")).toBeInTheDocument();
+    const mount = calls.find((call) => call.path.endsWith("/google-drive/folders"));
     expect(JSON.parse(String(mount?.init.body))).toMatchObject({
       risk_workspace_id: "vws-1",
-      folder_id: "folder-2",
+      folder_id: "https://drive.google.com/drive/folders/folder-2",
     });
+    // D1 — 밖으로 나갔다 오지 않는다. 승인 화면도 Picker 도 없다.
     expect(calls.some((call) => call.path.includes("google-drive/start"))).toBe(false);
+    expect(calls.some((call) => call.path.includes("picker-session"))).toBe(false);
     expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary"))).toHaveLength(2);
   });
 
@@ -224,7 +168,7 @@ describe("SourcePanel product integration", () => {
       return response({ code: "NOT_FOUND" }, 404);
     }));
 
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={unavailablePicker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
     expect(await screen.findByRole("heading", { name: "Tracked artifacts" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Claims.txt" })).toBeInTheDocument();
@@ -243,7 +187,7 @@ describe("SourcePanel product integration", () => {
       .toHaveAttribute("href", "#/w/vws-1/risks/risk-7");
   });
 
-  it("treats re-picking the folder already tracked as a no-op", async () => {
+  it("says the folder is already tracked instead of mounting it twice", async () => {
     window.location.hash = "#/w/vws-1/sources";
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
@@ -252,146 +196,129 @@ describe("SourcePanel product integration", () => {
       if (path.endsWith("/security/data-access-summary")) return response(connectedDriveSummary);
       const base = baseResponse(path);
       if (base !== null) return base;
-      if (path.endsWith("/picker-session")) return response({ access_token: "active-picker-token" });
+      if (path.endsWith("/runtime-config")) return response(sharingConfig);
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    const picker: DrivePickerAdapter = {
-      available: true,
-      // 같은 폴더를 다시 고르면 마운트가 하나 더 생긴다 (§6.1 · 1-F).
-      pick: vi.fn(async () => [
-        { id: "folder-1", name: "Tracked", mimeType: "application/vnd.google-apps.folder" },
-      ]),
-    };
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Add files" }));
-    await userEvent.click(screen.getByRole("button", { name: "Select in Google Drive" }));
+    await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-1");
+    await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
 
-    expect(await screen.findByText("That folder is already tracked in this workspace.")).toBeInTheDocument();
-    expect(calls.some((path) => path.endsWith("/drive/mounts"))).toBe(false);
+    expect(await screen.findByRole("status")).toHaveTextContent("이미 추적하고 있습니다");
+    expect(calls.some((path) => path.endsWith("/google-drive/folders"))).toBe(false);
   });
 
-  it("keeps an ACTIVE connection available for retry after an additional mount failure", async () => {
+  it("mounts a shared folder and says how many files it found", async () => {
     window.location.hash = "#/w/vws-1/sources";
-    let failMount = true;
-    const calls: string[] = [];
+    const calls: Array<{ path: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      calls.push({ path, init: init ?? {} });
+      const base = baseResponse(path);
+      if (base !== null) return base;
+      if (path.endsWith("/runtime-config")) return response(sharingConfig);
+      if (path.endsWith("/google-drive/folders")) {
+        return response({
+          server_mount_id: "mount-7",
+          source_workspace_id: "source-7",
+          tracked_file_count: 5,
+        });
+      }
+      return response({ code: "NOT_FOUND" }, 404);
+    }));
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
+    expect(await screen.findByText(SHARING_ADDRESS)).toBeInTheDocument();
+    await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-7");
+    await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
+
+    expect(await screen.findByText("폴더를 붙였습니다. 파일 5개를 추적합니다.")).toBeInTheDocument();
+    expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary"))).toHaveLength(2);
+  });
+
+  it("says zero out loud so an empty folder is not mistaken for a broken one", async () => {
+    // 결함 40 — 사용자가 이 둘을 구별하지 못해 폴더 대신 파일을 골랐다.
+    window.location.hash = "#/w/vws-1/sources";
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      calls.push(path);
-      if (path.endsWith("/security/data-access-summary")) return response(connectedDriveSummary);
       const base = baseResponse(path);
       if (base !== null) return base;
-      if (path.endsWith("/picker-session")) return response({ access_token: "active-picker-token" });
-      if (path.endsWith("/drive/mounts")) {
-        if (failMount) return response({ code: "SOURCE_UNAVAILABLE" }, 503);
-        return response({ server_mount_id: "mount-drive-2", source_workspace_id: "source-drive-2" });
+      if (path.endsWith("/runtime-config")) return response(sharingConfig);
+      if (path.endsWith("/google-drive/folders")) {
+        return response({
+          server_mount_id: "mount-8",
+          source_workspace_id: "source-8",
+          tracked_file_count: 0,
+        });
       }
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    const picker: DrivePickerAdapter = {
-      available: true,
-      pick: vi.fn(async () => [{ id: "file-2", name: "Claims", mimeType: "text/plain" }]),
-    };
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Add files" }));
-    await userEvent.click(screen.getByRole("button", { name: "Select in Google Drive" }));
-    expect(await screen.findByRole("button", { name: "Retry tracking selected files" })).toBeInTheDocument();
-    expect(screen.getByText("Claims")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
+    await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-8");
+    await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
 
-    failMount = false;
-    await userEvent.click(screen.getByRole("button", { name: "Retry tracking selected files" }));
-    expect(await screen.findByText("Additional Google Drive files are now tracked.")).toBeInTheDocument();
-    expect(calls.filter((path) => path.endsWith("/drive/mounts"))).toHaveLength(2);
+    expect(
+      await screen.findByText("폴더를 붙였습니다. 안에 파일이 없어 아직 추적할 것이 없습니다."),
+    ).toBeInTheDocument();
   });
 
-  it("mounts a shared Drive folder immediately and refreshes source state", async () => {
-    window.location.hash = "#/w/vws-1/sources?provider=GOOGLE_DRIVE&connection_id=pending-12345678&status=connected";
-    const calls: Array<{ path: string; init: RequestInit }> = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  it("tells the user to share the folder, with the address, when Drive refuses it", async () => {
+    window.location.hash = "#/w/vws-1/sources";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      calls.push({ path, init: init ?? {} });
       const base = baseResponse(path);
       if (base !== null) return base;
-      if (path.endsWith("/drive/picker-session")) return response({ access_token: "short-lived-picker-token" });
-      if (path.endsWith("/drive/mounts")) return response({ server_mount_id: "mount-7", source_workspace_id: "source-7" });
-      return response({ code: "NOT_FOUND" }, 404);
-    }));
-    // 고르는 것은 **폴더 하나**다 (§6.1 · 1-F).
-    const picker = googlePicker([
-      { id: "folder-7", name: "Tracked", mimeType: "application/vnd.google-apps.folder" },
-    ]);
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
-
-    await userEvent.click(await screen.findByRole("button", { name: "Select in Google Drive" }));
-
-    expect(await screen.findByText("Google Drive files가 연결되었습니다.")).toBeInTheDocument();
-    const mount = calls.find((call) => call.path.endsWith("/drive/mounts"));
-    expect(mount?.path).toContain("/source-connections/pending-12345678/");
-    expect(JSON.parse(String(mount?.init.body))).toMatchObject({
-      risk_workspace_id: "vws-1",
-      folder_id: "folder-7",
-    });
-    expect(calls.filter((call) => call.path.endsWith("/security/data-access-summary")))
-      .toHaveLength(2);
-  });
-
-  it("keeps the selection and shows a retry action when Drive mount creation fails", async () => {
-    window.location.hash = "#/w/vws-1/sources?provider=GOOGLE_DRIVE&connection_id=pending-12345678&status=connected";
-    let failMount = true;
-    const calls: Array<{ path: string; init: RequestInit }> = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input);
-      calls.push({ path, init: init ?? {} });
-      const base = baseResponse(path);
-      if (base !== null) return base;
-      if (path.endsWith("/drive/picker-session")) return response({ access_token: "short-lived-picker-token" });
-      if (path.endsWith("/drive/mounts")) {
-        if (failMount) return response({ code: "SOURCE_UNAVAILABLE" }, 503);
-        return response({ server_mount_id: "mount-7", source_workspace_id: "source-7" });
+      if (path.endsWith("/runtime-config")) return response(sharingConfig);
+      if (path.endsWith("/google-drive/folders")) {
+        return response({
+          detail: {
+            code: "DRIVE_FOLDER_NOT_SHARED",
+            sharing_address: SHARING_ADDRESS,
+            message: "이 폴더가 아직 공유되지 않았습니다. " + SHARING_ADDRESS + " 를 뷰어로 공유해 주세요.",
+          },
+        }, 409);
       }
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    const picker: DrivePickerAdapter = {
-      available: true,
-      pick: vi.fn(async () => [{ id: "file-7", name: "Claims", mimeType: "text/plain" }]),
-    };
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Select in Google Drive" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
+    await userEvent.type(await screen.findByLabelText("Drive folder link"), "folder-9");
+    await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("mount로 만들지 못했습니다");
-    expect(screen.getByText("Claims")).toBeInTheDocument();
-    expect(calls.filter((call) => call.path.endsWith("/drive/mounts"))).toHaveLength(1);
-
-    failMount = false;
-    await userEvent.click(screen.getByRole("button", { name: "Retry tracking selected files" }));
-    expect(await screen.findByText("Google Drive files가 연결되었습니다.")).toBeInTheDocument();
-    expect(calls.filter((call) => call.path.endsWith("/drive/mounts"))).toHaveLength(2);
+    expect(await screen.findByRole("alert")).toHaveTextContent("아직 공유되지 않았습니다");
+    expect(screen.getByRole("alert")).toHaveTextContent(SHARING_ADDRESS);
   });
 
-  it("shows a safe error and never calls mounts when Picker callback parsing fails", async () => {
-    window.location.hash = "#/w/vws-1/sources?provider=GOOGLE_DRIVE&connection_id=pending-12345678&status=connected";
-    const calls: Array<{ path: string; init: RequestInit }> = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  it("refuses a file chosen as a folder and says so", async () => {
+    // 결함 37 — 예전에는 아무것도 추적하지 않는 마운트가 성공으로 보였다.
+    window.location.hash = "#/w/vws-1/sources";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
-      calls.push({ path, init: init ?? {} });
       const base = baseResponse(path);
       if (base !== null) return base;
-      if (path.endsWith("/drive/picker-session")) return response({ access_token: "short-lived-picker-token" });
+      if (path.endsWith("/runtime-config")) return response(sharingConfig);
+      if (path.endsWith("/google-drive/folders")) {
+        return response({
+          detail: {
+            code: "DRIVE_NOT_A_FOLDER",
+            message: "폴더가 아니라 파일입니다. 추적할 파일들을 담은 폴더를 공유해 주세요.",
+          },
+        }, 400);
+      }
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    const picker: DrivePickerAdapter = {
-      available: true,
-      pick: vi.fn(async () => { throw new Error("invalid_documents"); }),
-    };
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Select in Google Drive" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Google Drive" }));
+    await userEvent.type(await screen.findByLabelText("Drive folder link"), "doc-1");
+    await userEvent.click(screen.getByRole("button", { name: "폴더 붙이기" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("선택 결과를 확인하지 못했습니다");
-    expect(calls.some((call) => call.path.endsWith("/drive/mounts"))).toBe(false);
-    expect(screen.queryByText("invalid_documents")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("폴더가 아니라 파일입니다");
   });
 
   it("completes a GitHub callback with the current workspace and CSRF token", async () => {
@@ -407,7 +334,7 @@ describe("SourcePanel product integration", () => {
       return response({ code: "NOT_FOUND" }, 404);
     }));
     const platform = new FakePlatform();
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={platform} drivePicker={unavailablePicker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={platform} /> }} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Connect repository" }));
 
@@ -437,7 +364,7 @@ describe("SourcePanel product integration", () => {
       if (path.endsWith("/github/repositories")) return response({ repositories: [{ id: 7, full_name: "2HyN/sample_github_deps", owner: "2HyN", name: "sample_github_deps", private: false, default_branch: "main" }] });
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={unavailablePicker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "GitHub Repository" }));
 
@@ -459,7 +386,7 @@ describe("SourcePanel product integration", () => {
       if (path.endsWith("/github/repositories")) return response({ repositories: [] });
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={unavailablePicker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "GitHub 에서 저장소 추가" }));
 
@@ -476,7 +403,7 @@ describe("SourcePanel product integration", () => {
       return response({ code: "NOT_FOUND" }, 404);
     }));
     const platform = new FakePlatform();
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={platform} drivePicker={unavailablePicker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={platform} /> }} />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Local Folder" }));
     await userEvent.click(await screen.findByRole("button", { name: "Enroll this desktop" }));
@@ -534,8 +461,7 @@ describe("SourcePanel product integration", () => {
       if (base !== null) return base;
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    const picker: DrivePickerAdapter = { available: true, pick: vi.fn(async () => []) };
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={picker} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
     const [button] = await screen.findAllByRole("button", { name: "다시 검사" });
     expect(button).toBeDefined();
@@ -558,7 +484,7 @@ describe("SourcePanel product integration", () => {
       if (base !== null) return base;
       return response({ code: "NOT_FOUND" }, 404);
     }));
-    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} drivePicker={googlePicker([])} /> }} />);
+    render(<ControlPlaneApp router="hash" integration={{ sourcePanel: <SourcePanel platform={new FakePlatform()} /> }} />);
 
     expect(await screen.findByText("1 folder tracked")).toBeInTheDocument();
 

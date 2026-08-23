@@ -36,8 +36,7 @@ requiredEnvironment:
     - GCP_REGION
     - FIRESTORE_DATABASE
     - LOCAL_STAGING_BUCKET
-    - GOOGLE_DRIVE_CLIENT_ID
-    - GOOGLE_DRIVE_CLIENT_SECRET
+    - GOOGLE_DRIVE_SERVICE_ACCOUNT
     - GITHUB_APP_ID
     - GITHUB_APP_PRIVATE_KEY_SECRET_ID
     - SOURCE_CREDENTIAL_SECRET_PREFIX
@@ -47,10 +46,8 @@ requiredEnvironment:
     - GOOGLE_LOGIN_CLIENT_ID
     - GOOGLE_LOGIN_CLIENT_SECRET
     - GOOGLE_LOGIN_REDIRECT_URI
-    - GOOGLE_DRIVE_REDIRECT_URI
     - GOOGLE_DRIVE_WEBHOOK_BASE_URL
     - DRIVE_WATCH_CHANNEL_TOKEN
-    - GOOGLE_PICKER_API_KEY
     - GOOGLE_CLOUD_PROJECT_NUMBER
     - GITHUB_APP_SLUG
     - GITHUB_WEBHOOK_SECRET_ID
@@ -79,6 +76,9 @@ canonicalEnvironment:
     GCP_REGION: asia-northeast3
     FIRESTORE_DATABASE: ip-risk-agent-v2
     LOCAL_STAGING_BUCKET: proj-aj22-211200020328-iprisk-v2-staging
+    # D1 — 사용자가 이 주소로 폴더를 공유한다. 비밀이 아니다. 이 신원은 프로젝트
+    # 역할이 0 이고, 접근은 공유에서만 온다.
+    GOOGLE_DRIVE_SERVICE_ACCOUNT: iprisk-v2-drive@proj-aj22-211200020328.iam.gserviceaccount.com
     GITHUB_APP_PRIVATE_KEY_SECRET_ID: iprisk-v2-github-private-key
     SOURCE_CREDENTIAL_SECRET_PREFIX: iprisk-v2-cred
   api:
@@ -99,7 +99,5 @@ secretEnvironment:
   api:
     SESSION_SECRET: iprisk-v2-session-secret
     GOOGLE_LOGIN_CLIENT_SECRET: iprisk-v2-google-login-client-secret
-    GOOGLE_DRIVE_CLIENT_SECRET: iprisk-v2-drive-client-secret
     DRIVE_WATCH_CHANNEL_TOKEN: iprisk-v2-drive-channel-token
-  worker:
-    GOOGLE_DRIVE_CLIENT_SECRET: iprisk-v2-drive-client-secret
+  worker: {}

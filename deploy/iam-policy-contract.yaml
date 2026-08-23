@@ -33,6 +33,14 @@ runtimeBindings:
     role: roles/artifactregistry.writer
     member: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
     resource: projects/proj-aj22-211200020328/locations/asia-northeast3/repositories/ip-risk-agent-v2
+  driveImpersonation:
+    # D1 — Drive 접근은 IAM 이 아니라 폴더 공유에서 온다. 그래서 이 SA 에는
+    # 프로젝트 역할이 없다. 두 실행 신원이 이 SA 하나를 가장할 수 있을 뿐이다.
+    role: roles/iam.serviceAccountTokenCreator
+    members:
+      - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+      - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-drive@proj-aj22-211200020328.iam.gserviceaccount.com
   vertexRag:
     role: roles/aiplatform.user
     member: iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
@@ -54,9 +62,6 @@ buildBindings:
 fixedSecretAccess:
   iprisk-v2-session-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
   iprisk-v2-google-login-client-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
-  iprisk-v2-drive-client-secret:
-    - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
-    - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
   iprisk-v2-drive-channel-token: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
   iprisk-v2-github-private-key:
     - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com

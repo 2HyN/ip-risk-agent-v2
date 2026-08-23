@@ -10,6 +10,13 @@ export interface StartConnectionResponse {
 export interface MountCreationResponse {
   serverMountId: string;
   sourceWorkspaceId: string;
+  /**
+   * 붙인 직후 폴더에서 실제로 찾은 파일 수. **0 도 답이다** — 이 값이 없으면
+   * 화면에서 "빈 폴더" 와 "못 읽는 폴더" 가 똑같이 아무것도 아닌 것으로 보인다
+   * (결함 40). Drive 마운트에만 있다.
+   */
+  trackedFileCount: number | null;
+  truncated: boolean;
 }
 
 export interface GitHubRepository {
@@ -29,10 +36,15 @@ export interface OriginalSourceResponse {
   metadata_safe: Record<string, unknown>;
 }
 
-export interface DrivePickerRuntimeConfig {
+/**
+ * D1 — 화면이 알아야 할 것은 **어디로 공유하는가** 하나뿐이다.
+ *
+ * Picker 설정을 대신한다. Picker 는 브라우저 API 키를 내려보내야 했는데, 공유
+ * 주소는 알아도 접근이 생기지 않는다 — 접근은 사용자가 폴더를 공유해야 생긴다.
+ */
+export interface DriveSharingRuntimeConfig {
   enabled: boolean;
-  browserApiKey: string | null;
-  cloudProjectNumber: string | null;
+  sharingAddress: string | null;
 }
 
 interface StartConnectionApiResponse {
@@ -43,6 +55,8 @@ interface StartConnectionApiResponse {
 interface MountCreationApiResponse {
   server_mount_id: string;
   source_workspace_id: string;
+  tracked_file_count?: number | null;
+  truncated?: boolean;
 }
 
 interface GitHubRepositoriesApiResponse {
@@ -59,13 +73,6 @@ interface GitHubRepositoriesApiResponse {
 export class SourceApiClient {
   constructor(private readonly client: ApiClient) {}
 
-  async startDriveConnection(riskWorkspaceId: string): Promise<StartConnectionResponse> {
-    return this.start(
-      "/api/v1/source-connections/google-drive/start",
-      riskWorkspaceId,
-    );
-  }
-
   async startGithubConnection(riskWorkspaceId: string): Promise<StartConnectionResponse> {
     return this.start(
       "/api/v1/source-connections/github/install/start",
@@ -73,67 +80,29 @@ export class SourceApiClient {
     );
   }
 
-  async createDrivePickerSession(connectionId: string): Promise<string> {
-    const response = await this.client.request<{ access_token: string }>(
-      `/api/v1/source-connections/${encodeURIComponent(connectionId)}/drive/picker-session`,
-      { method: "POST" },
-    );
-    return response.access_token;
-  }
-
-  async createDrivePickerSessionForMount(mountId: string): Promise<string> {
-    const response = await this.client.request<{ access_token: string }>(
-      `/api/v1/source-mounts/${encodeURIComponent(mountId)}/drive/picker-session`,
-      { method: "POST" },
-    );
-    return response.access_token;
-  }
-
   /**
-   * 공유받은 **폴더 하나**를 붙인다.
+   * 공유받은 **폴더 하나**를 붙인다 — D1.
    *
-   * 예전에는 고른 파일 목록을 보냈다. 그러면 마운트한 뒤에 폴더에 넣은 파일이 영영
-   * 잡히지 않는다 — 이 서비스를 쓰는 방법이 바로 그 "넣는 것" 이다.
+   * 승인 화면도 Picker 도 없다. 사용자가 폴더를 서비스 계정에 공유하고 그 주소를
+   * 넣으면 끝이다. 서버가 폴더인지 확인하고 몇 개를 찾았는지 함께 돌려준다.
    */
-  async createDriveMount(
-    connectionId: string,
+  async mountSharedDriveFolder(
     riskWorkspaceId: string,
-    folderId: string,
-    displayMetadataByFile: Record<string, { name: string }> = {},
+    folderReference: string,
   ): Promise<MountCreationResponse> {
     const response = await this.client.request<MountCreationApiResponse>(
-      `/api/v1/source-connections/${encodeURIComponent(connectionId)}/drive/mounts`,
+      "/api/v1/source-connections/google-drive/folders",
       {
         method: "POST",
         body: JSON.stringify({
           risk_workspace_id: riskWorkspaceId,
-          folder_id: folderId,
-          display_metadata_by_file: displayMetadataByFile,
+          folder_id: folderReference,
         }),
       },
     );
     return mapMount(response);
   }
 
-  async createAdditionalDriveMount(
-    mountId: string,
-    riskWorkspaceId: string,
-    folderId: string,
-    displayMetadataByFile: Record<string, { name: string }> = {},
-  ): Promise<MountCreationResponse> {
-    const response = await this.client.request<MountCreationApiResponse>(
-      `/api/v1/source-mounts/${encodeURIComponent(mountId)}/drive/mounts`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          risk_workspace_id: riskWorkspaceId,
-          folder_id: folderId,
-          display_metadata_by_file: displayMetadataByFile,
-        }),
-      },
-    );
-    return mapMount(response);
-  }
 
   // `untrackDriveArtifact` 는 없앴다.
   //
@@ -238,18 +207,16 @@ export class SourceApiClient {
     );
   }
 
-  async drivePickerRuntimeConfig(): Promise<DrivePickerRuntimeConfig> {
+  async driveSharingRuntimeConfig(): Promise<DriveSharingRuntimeConfig> {
     const response = await this.client.request<{
-      drive_picker: {
+      drive_sharing: {
         enabled: boolean;
-        browser_api_key: string | null;
-        cloud_project_number: string | null;
+        sharing_address: string | null;
       };
     }>("/api/v1/runtime-config");
     return {
-      enabled: response.drive_picker.enabled,
-      browserApiKey: response.drive_picker.browser_api_key,
-      cloudProjectNumber: response.drive_picker.cloud_project_number,
+      enabled: response.drive_sharing.enabled,
+      sharingAddress: response.drive_sharing.sharing_address,
     };
   }
 
@@ -273,5 +240,7 @@ function mapMount(response: MountCreationApiResponse): MountCreationResponse {
   return {
     serverMountId: response.server_mount_id,
     sourceWorkspaceId: response.source_workspace_id,
+    trackedFileCount: response.tracked_file_count ?? null,
+    truncated: response.truncated ?? false,
   };
 }

@@ -5,7 +5,6 @@ import { SessionProvider, useSession } from "./auth/session";
 import { SourcePanel } from "./sources/SourcePanel";
 import { SourceApiClient } from "./sources/api/connectionClient";
 import { createOpenOriginalHandler } from "./sources/openOriginal";
-import { GoogleDrivePickerAdapter } from "./sources/platform/DrivePickerAdapter";
 import { detectPlatformAdapter } from "./sources/platform/PlatformAdapter";
 
 function ProductRoutes() {
@@ -23,10 +22,6 @@ function ProductRoutes() {
     );
   }
   const sourceApi = useMemo(() => new SourceApiClient(api.client), [api]);
-  const drivePicker = useMemo(
-    () => new GoogleDrivePickerAdapter(() => sourceApi.drivePickerRuntimeConfig()),
-    [sourceApi],
-  );
   const openOriginal = useMemo(
     () => createOpenOriginalHandler(sourceApi, platform),
     [platform, sourceApi],
@@ -35,7 +30,7 @@ function ProductRoutes() {
     <ControlPlaneRoutes
       router={platform.platform === "desktop" ? "hash" : "browser"}
       integration={{
-        sourcePanel: <SourcePanel platform={platform} drivePicker={drivePicker} />,
+        sourcePanel: <SourcePanel platform={platform} />,
         openOriginal,
       }}
     />

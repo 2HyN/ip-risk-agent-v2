@@ -43,15 +43,15 @@ export function AddSourceChooser({
 }: AddSourceChooserProps) {
   const [error, setError] = useState<string | null>(null);
 
-  const handleDriveClick = async (): Promise<void> => {
+  /**
+   * D1 — Drive 는 밖으로 나갔다 오지 않는다.
+   *
+   * 승인 화면도 Picker 도 없다. 사용자가 폴더를 서비스 계정에 공유하는 것이
+   * 승인이므로, 여기서는 그 안내를 여는 것으로 끝난다.
+   */
+  const handleDriveClick = (): void => {
     onSelect("GOOGLE_DRIVE");
     setError(null);
-    try {
-      const { authorizeUrl } = await connectionApiClient.startDriveConnection(riskWorkspaceId);
-      navigateExternal(authorizeUrl);
-    } catch {
-      setError("Google Drive 연결을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-    }
   };
 
   /** GitHub 설치 화면으로 보낸다. 저장소를 설치에 **추가**하려면 이 길뿐이다. */
@@ -79,7 +79,7 @@ export function AddSourceChooser({
   return (
     <div className="source-provider-grid">
       <h2>Add Source</h2>
-      <Button type="button" variant="secondary" onClick={() => void handleDriveClick()}>
+      <Button type="button" variant="secondary" onClick={handleDriveClick}>
         Google Drive
       </Button>
       <Button type="button" variant="secondary" onClick={() => void handleGithubClick()}>

@@ -26,16 +26,9 @@ import {
   SourceApiClient,
   type GitHubRepository,
 } from "./api/connectionClient.js";
-import type { DrivePickerAdapter, DrivePickerFile } from "./platform/DrivePickerAdapter.js";
 import type { PlatformAdapter } from "./platform/PlatformAdapter.js";
 
-export function SourcePanel({
-  platform,
-  drivePicker,
-}: {
-  platform: PlatformAdapter;
-  drivePicker: DrivePickerAdapter;
-}) {
+export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
   const { api } = useSession();
   const { workspace, role } = useWorkspace();
   const sourceApi = useMemo(() => new SourceApiClient(api.client), [api]);
@@ -299,7 +292,11 @@ export function SourcePanel({
               connectionApiClient={sourceApi}
             />
           </Card>
-          {managedDrive !== null || managedGithub !== null || completion || selected === "LOCAL" ? <Card>
+          {managedDrive !== null
+          || managedGithub !== null
+          || completion
+          || selected === "LOCAL"
+          || selected === "GOOGLE_DRIVE" ? <Card>
           {managedGithub !== null ? (
             <GitHubCompletion
               sourceApi={sourceApi}
@@ -307,22 +304,18 @@ export function SourcePanel({
               riskWorkspaceId={workspace.id}
               onComplete={() => complete("GitHub repository를 추가로 연결했습니다.")}
             />
-          ) : managedDrive !== null ? (
-            <DriveCompletion
+          ) : managedDrive !== null || selected === "GOOGLE_DRIVE" || (completion && provider === "GOOGLE_DRIVE") ? (
+            <DriveFolderShare
               sourceApi={sourceApi}
-              drivePicker={drivePicker}
-              mountId={managedDrive.mount_id}
-              trackedFolderId={driveFolderId(managedDrive)}
+              trackedFolderId={managedDrive === null ? null : driveFolderId(managedDrive)}
               riskWorkspaceId={workspace.id}
-              onComplete={() => complete("Additional Google Drive files are now tracked.")}
-            />
-          ) : completion && provider === "GOOGLE_DRIVE" ? (
-            <DriveCompletion
-              sourceApi={sourceApi}
-              drivePicker={drivePicker}
-              connectionId={connectionId}
-              riskWorkspaceId={workspace.id}
-              onComplete={() => complete("Google Drive files가 연결되었습니다.")}
+              onComplete={(count) =>
+                complete(
+                  count === 0
+                    ? "폴더를 붙였습니다. 안에 파일이 없어 아직 추적할 것이 없습니다."
+                    : `폴더를 붙였습니다. 파일 ${count}개를 추적합니다.`,
+                )
+              }
             />
           ) : completion && provider === "GITHUB" ? (
             <GitHubCompletion
@@ -400,138 +393,124 @@ function TrackedArtifactDetail({
   );
 }
 
-function DriveCompletion({
+/**
+ * 폴더를 공유받아 붙인다 — D1.
+ *
+ * Picker 를 대신한다. Picker 의 폴더 선택은 **폴더 객체만** 주었고 그 안은 못
+ * 읽었다 (결함 41). 화면이 하는 일은 둘이다 — 어디로 공유할지 알려 주고, 붙인 뒤
+ * **몇 개를 찾았는지** 말한다. 뒤엣것이 없으면 빈 폴더와 못 읽는 폴더가 똑같이
+ * 아무것도 아닌 것으로 보인다 (결함 40).
+ */
+function DriveFolderShare({
   sourceApi,
-  drivePicker,
-  connectionId,
-  mountId,
   riskWorkspaceId,
   trackedFolderId = null,
   onComplete,
 }: {
   sourceApi: SourceApiClient;
-  drivePicker: DrivePickerAdapter;
-  connectionId?: string;
-  mountId?: string;
   riskWorkspaceId: string;
   trackedFolderId?: string | null;
-  onComplete: () => void;
+  onComplete: (trackedFileCount: number) => void;
 }) {
-  const [files, setFiles] = useState<DrivePickerFile[]>([]);
+  const [address, setAddress] = useState<string | null>(null);
+  const [folderReference, setFolderReference] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const addingFiles = mountId !== undefined;
+  const [copied, setCopied] = useState(false);
 
-  async function pickerSession(): Promise<string> {
-    if (mountId !== undefined) return sourceApi.createDrivePickerSessionForMount(mountId);
-    if (connectionId !== undefined) return sourceApi.createDrivePickerSession(connectionId);
-    throw new Error("drive_reference_missing");
-  }
+  useEffect(() => {
+    let cancelled = false;
+    void sourceApi
+      .driveSharingRuntimeConfig()
+      .then((config) => {
+        if (!cancelled) setAddress(config.sharingAddress);
+      })
+      .catch(() => {
+        if (!cancelled) setAddress(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceApi]);
 
-  async function createMount(selectedFiles: DrivePickerFile[]): Promise<void> {
-    // 고른 것은 **폴더 하나**다 (§6.1 · 1-F). 그 안에 있는 것이 추적 대상이고,
-    // 나중에 넣는 파일도 함께 잡힌다.
-    const folder = selectedFiles[0];
-    if (folder === undefined) throw new Error("drive_folder_missing");
-    const displayMetadata = { [folder.id]: { name: folder.name } };
-    if (mountId !== undefined) {
-      await sourceApi.createAdditionalDriveMount(
-        mountId,
-        riskWorkspaceId,
-        folder.id,
-        displayMetadata,
-      );
-      return;
-    }
-    if (connectionId !== undefined) {
-      await sourceApi.createDriveMount(
-        connectionId,
-        riskWorkspaceId,
-        folder.id,
-        displayMetadata,
-      );
-      return;
-    }
-    throw new Error("drive_reference_missing");
-  }
-
-  async function pick(): Promise<void> {
+  async function submit(): Promise<void> {
     setBusy(true);
     setError(null);
     setInfo(null);
-    let selectedFiles: DrivePickerFile[];
     try {
-      const accessToken = await pickerSession();
-      selectedFiles = await drivePicker.pick(accessToken);
-    } catch {
-      setError("Google Drive Picker 선택 결과를 확인하지 못했습니다. 다시 선택해 주세요.");
-      setBusy(false);
-      return;
-    }
-    // 같은 폴더를 다시 고르면 마운트가 하나 더 생긴다. 아무것도 늘지 않고
-    // 목록만 둘로 보인다.
-    const newFiles = selectedFiles.filter((file) => file.id !== trackedFolderId);
-    setFiles(newFiles);
-    if (selectedFiles.length > 0 && newFiles.length === 0) {
-      setInfo("That folder is already tracked in this workspace.");
-      setBusy(false);
-      return;
-    }
-    if (newFiles.length === 0) {
-      setBusy(false);
-      return;
-    }
-    try {
-      await createMount(newFiles);
-      onComplete();
+      const mount = await sourceApi.mountSharedDriveFolder(riskWorkspaceId, folderReference.trim());
+      onComplete(mount.trackedFileCount ?? 0);
     } catch (reason) {
-      if (reason instanceof ApiFailure && reason.status === 409) {
-        setFiles([]);
-        setInfo("All selected files are already tracked in this workspace.");
-        setBusy(false);
-        return;
-      }
-      setError("선택한 Drive 파일을 mount로 만들지 못했습니다.");
-      setBusy(false);
-    }
-  }
-
-  async function mount(): Promise<void> {
-    setBusy(true);
-    setError(null);
-    setInfo(null);
-    try {
-      await createMount(files);
-      onComplete();
-    } catch {
-      setError("선택한 Drive 파일을 mount로 만들지 못했습니다.");
+      setError(messageFor(reason));
     } finally {
       setBusy(false);
     }
   }
 
+  /** 서버가 무엇을 해야 하는지 말해 줬으면 그대로 보여 준다. 다시 쓰지 않는다. */
+  function messageFor(reason: unknown): string {
+    if (reason instanceof ApiFailure) {
+      const detail = reason.detail;
+      if (typeof detail === "object" && detail !== null && typeof detail.message === "string") {
+        return detail.message;
+      }
+      if (reason.status === 409) return "이 폴더가 아직 공유되지 않았습니다.";
+    }
+    return "폴더를 붙이지 못했습니다. 주소를 다시 확인해 주세요.";
+  }
+
   return (
     <div className="source-completion">
-      <p className="eyebrow">Google Drive connected</p>
-      <h2>{addingFiles ? "Add files" : "Select files to track"}</h2>
-      {addingFiles ? <p>Pick another shared folder to track alongside the current one.</p> : null}
-      <p>Picker에서 Select하면 명시적으로 선택한 file ID만 즉시 tracking scope에 저장됩니다.</p>
-      {!drivePicker.available ? <p className="source-error">Drive Picker runtime configuration is unavailable.</p> : null}
-      <Button type="button" variant="secondary" disabled={!drivePicker.available || busy} onClick={() => void pick()}>
-        Select in Google Drive
-      </Button>
-      {files.map((file) => <p key={file.id} className="source-selection">{file.name}</p>)}
-      {files.length === 0 ? null : (
-        <p className="source-selection" role="status">
-          {busy ? "선택한 Drive 파일을 연결하는 중입니다." : `${files.length}개 파일이 선택되었습니다.`}
+      <p className="eyebrow">Google Drive</p>
+      <h2>추적할 폴더를 공유해 주세요</h2>
+      <p>
+        Drive 에서 폴더를 열고 아래 주소를 <strong>뷰어</strong>로 공유한 뒤, 그 폴더 주소를
+        붙여 넣으세요. 공유한 폴더 안만 보이고, 무엇을 넣을지는 직접 정하시면 됩니다.
+      </p>
+      {address === null ? (
+        <p className="source-error">공유 주소를 아직 불러오지 못했습니다.</p>
+      ) : (
+        <p className="source-selection">
+          <code>{address}</code>{" "}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              void navigator.clipboard?.writeText(address);
+              setCopied(true);
+            }}
+          >
+            {copied ? "복사됨" : "주소 복사"}
+          </Button>
         </p>
       )}
-      {files.length === 0 || error === null ? null : (
-        <Button type="button" disabled={busy} onClick={() => void mount()}>
-          Retry tracking selected files
-        </Button>
-      )}
+      <label className="source-field">
+        <span>폴더 주소</span>
+        <input
+          type="text"
+          value={folderReference}
+          placeholder="https://drive.google.com/drive/folders/..."
+          aria-label="Drive folder link"
+          onChange={(event) => {
+            setFolderReference(event.target.value);
+            setError(null);
+          }}
+        />
+      </label>
+      <Button
+        type="button"
+        disabled={busy || folderReference.trim().length === 0}
+        onClick={() => {
+          if (trackedFolderId !== null && folderReference.trim().includes(trackedFolderId)) {
+            setInfo("이 폴더는 이미 추적하고 있습니다.");
+            return;
+          }
+          void submit();
+        }}
+      >
+        {busy ? "폴더를 확인하는 중" : "폴더 붙이기"}
+      </Button>
       {error === null ? null : <p className="source-error" role="alert">{error}</p>}
       {info === null ? null : <p className="source-selection" role="status">{info}</p>}
     </div>

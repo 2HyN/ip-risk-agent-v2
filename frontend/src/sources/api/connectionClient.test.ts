@@ -26,14 +26,14 @@ function json(body: unknown, status = 200): Response {
 
 test("connection start reuses the authenticated CSRF-aware client", async () => {
   const { client, calls } = sourceClient(() => json({
-    authorize_url: "https://accounts.google.com/o/oauth2/v2/auth",
+    authorize_url: "https://github.com/apps/ip-risk-agent-v2/installations/new",
     state: "opaque-state",
   }));
 
-  const result = await client.startDriveConnection("vws-1");
+  const result = await client.startGithubConnection("vws-1");
 
   expect(result.state).toBe("opaque-state");
-  expect(calls[0]?.url).toBe("http://localhost:8000/api/v1/source-connections/google-drive/start");
+  expect(calls[0]?.url).toBe("http://localhost:8000/api/v1/source-connections/github/install/start");
   expect(new Headers(calls[0]?.init.headers).get("X-CSRF-Token")).toBe("csrf-token");
   expect(calls[0]?.init.credentials).toBe("include");
   expect(JSON.parse(String(calls[0]?.init.body))).toEqual({ risk_workspace_id: "vws-1" });
@@ -67,23 +67,57 @@ test("server errors remain failures instead of being treated as empty success", 
   await expect(client.startGithubConnection("vws-1")).rejects.toThrow();
 });
 
-test("active Drive mount operations use mount-scoped routes without OAuth restart", async () => {
-  const { client, calls } = sourceClient((url) => url.endsWith("/picker-session")
-    ? json({ access_token: "picker-token" })
-    : json({ server_mount_id: "mount-2", source_workspace_id: "source-2" }));
+test("mounting a shared Drive folder needs neither OAuth nor a picker session", async () => {
+  const { client, calls } = sourceClient(() => json({
+    server_mount_id: "mount-2",
+    source_workspace_id: "source-2",
+    tracked_file_count: 5,
+    truncated: false,
+  }));
 
-  await client.createDrivePickerSessionForMount("mount-1");
-  await client.createAdditionalDriveMount("mount-1", "vws-1", "folder-1");
+  const mount = await client.mountSharedDriveFolder(
+    "vws-1",
+    "https://drive.google.com/drive/folders/folder-1",
+  );
 
+  expect(mount.trackedFileCount).toBe(5);
   expect(calls.map((call) => call.url)).toEqual([
-    "http://localhost:8000/api/v1/source-mounts/mount-1/drive/picker-session",
-    "http://localhost:8000/api/v1/source-mounts/mount-1/drive/mounts",
+    "http://localhost:8000/api/v1/source-connections/google-drive/folders",
   ]);
+  expect(calls.some((call) => call.url.includes("picker-session"))).toBe(false);
   expect(calls.some((call) => call.url.includes("google-drive/start"))).toBe(false);
-  expect(JSON.parse(String(calls[1]?.init.body))).toMatchObject({
+  expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
     risk_workspace_id: "vws-1",
-    folder_id: "folder-1",
+    folder_id: "https://drive.google.com/drive/folders/folder-1",
   });
+});
+
+test("a mounted folder that turned out to be empty reports zero, not nothing", async () => {
+  // 결함 40 — 개수가 없으면 화면에서 빈 폴더와 못 읽는 폴더가 구별되지 않는다.
+  const { client } = sourceClient(() => json({
+    server_mount_id: "mount-3",
+    source_workspace_id: "source-3",
+    tracked_file_count: 0,
+    truncated: false,
+  }));
+
+  const mount = await client.mountSharedDriveFolder("vws-1", "folder-1");
+
+  expect(mount.trackedFileCount).toBe(0);
+});
+
+test("the browser is told where to share, and that is all it needs", async () => {
+  const { client, calls } = sourceClient(() => json({
+    drive_sharing: {
+      enabled: true,
+      sharing_address: "iprisk-v2-drive@example.iam.gserviceaccount.com",
+    },
+  }));
+
+  const config = await client.driveSharingRuntimeConfig();
+
+  expect(config.sharingAddress).toBe("iprisk-v2-drive@example.iam.gserviceaccount.com");
+  expect(calls[0]?.url).toBe("http://localhost:8000/api/v1/runtime-config");
 });
 
 test("desktop revoke is an authenticated CSRF-protected mutation", async () => {

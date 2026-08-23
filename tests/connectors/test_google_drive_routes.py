@@ -77,7 +77,7 @@ class FakeDriveProviderFactory:
     def __init__(self, provider: FakeDriveProvider) -> None:
         self._provider = provider
 
-    def create(self, token: dict) -> FakeDriveProvider:
+    def create(self) -> FakeDriveProvider:
         return self._provider
 
 
@@ -104,7 +104,6 @@ async def _build_client(provider: FakeDriveProvider, *, tracked_ids=None, regist
 
     adapter = GoogleDriveAdapter(
         provider_factory=FakeDriveProviderFactory(provider),
-        credential_vault=vault,
         connection_lookup=lookup,
         tracking_scope_store=scope_store,
         runtime_store=runtime_store,

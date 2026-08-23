@@ -1,19 +1,38 @@
+/**
+ * `detail` 은 문자열일 수도, 구조를 가진 객체일 수도 있다.
+ *
+ * FastAPI 의 `HTTPException(detail=...)` 이 둘 다 허용하고, 사용자가 다음에 무엇을
+ * 해야 하는지를 담아야 하는 실패(예: Drive 폴더가 아직 공유되지 않았다)는 코드와
+ * 문구를 함께 들고 온다.
+ */
+export type ApiFailureDetail = string | { code?: string; message?: string; [key: string]: unknown };
+
 export type ApiFailurePayload = {
   code?: string;
   message?: string;
-  detail?: string;
+  detail?: ApiFailureDetail;
   details?: Array<Record<string, unknown>>;
 };
 
 export class ApiFailure extends Error {
   readonly status: number;
   readonly code: string;
+  /** 서버가 준 그대로. 무엇을 해야 하는지를 담은 실패는 여기에만 들어 있다. */
+  readonly detail: ApiFailureDetail | null;
 
   constructor(status: number, payload: ApiFailurePayload = {}) {
-    super(payload.message ?? payload.detail ?? "The request could not be completed.");
+    const detail = payload.detail ?? null;
+    const structured = typeof detail === "object" && detail !== null ? detail : null;
+    super(
+      payload.message
+      ?? structured?.message
+      ?? (typeof detail === "string" ? detail : undefined)
+      ?? "The request could not be completed.",
+    );
     this.name = "ApiFailure";
     this.status = status;
-    this.code = payload.code ?? "REQUEST_FAILED";
+    this.code = payload.code ?? structured?.code ?? "REQUEST_FAILED";
+    this.detail = detail;
   }
 }
 

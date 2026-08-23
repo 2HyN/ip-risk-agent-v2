@@ -23,6 +23,10 @@ API_SERVICE_ACCOUNT_ID = "iprisk-v2-api"
 WORKER_SERVICE_ACCOUNT_ID = "iprisk-v2-worker"
 TASKS_SERVICE_ACCOUNT_ID = "iprisk-v2-tasks"
 SCHEDULER_SERVICE_ACCOUNT_ID = "iprisk-v2-scheduler"
+#: D1 — 사용자가 이 신원에 폴더를 공유하면 그 안이 보인다. **프로젝트 역할이 0 이다.**
+#: 접근이 공유에서만 오므로 역할이 필요 없고, 역할이 없으므로 이 신원이 새더라도
+#: 우리 데이터에 닿지 않는다. api·worker 가 이 SA 하나에 대한 가장 권한만 갖는다.
+DRIVE_SERVICE_ACCOUNT_ID = "iprisk-v2-drive"
 DEPLOY_SERVICE_ACCOUNT_ID = "iprisk-v2-deploy"
 
 SCHEDULER_JOBS = (
@@ -37,7 +41,6 @@ SCHEDULER_JOBS = (
 FIXED_SECRET_IDS = {
     "session": "iprisk-v2-session-secret",
     "google_login_client": "iprisk-v2-google-login-client-secret",
-    "drive_client": "iprisk-v2-drive-client-secret",
     "drive_channel": "iprisk-v2-drive-channel-token",
     "github_private_key": "iprisk-v2-github-private-key",
     "github_webhook": "iprisk-v2-github-webhook-secret",
@@ -65,6 +68,7 @@ API_SERVICE_ACCOUNT = service_account_email(API_SERVICE_ACCOUNT_ID)
 WORKER_SERVICE_ACCOUNT = service_account_email(WORKER_SERVICE_ACCOUNT_ID)
 TASKS_SERVICE_ACCOUNT = service_account_email(TASKS_SERVICE_ACCOUNT_ID)
 SCHEDULER_SERVICE_ACCOUNT = service_account_email(SCHEDULER_SERVICE_ACCOUNT_ID)
+DRIVE_SERVICE_ACCOUNT = service_account_email(DRIVE_SERVICE_ACCOUNT_ID)
 DEPLOY_SERVICE_ACCOUNT = service_account_email(DEPLOY_SERVICE_ACCOUNT_ID)
 
 
@@ -84,6 +88,7 @@ __all__ = [
     "RAG_CORPUS_DISPLAY_NAME",
     "REGION",
     "SCHEDULER_JOBS",
+    "DRIVE_SERVICE_ACCOUNT",
     "SCHEDULER_SERVICE_ACCOUNT",
     "STAGING_BUCKET",
     "TASK_QUEUE",

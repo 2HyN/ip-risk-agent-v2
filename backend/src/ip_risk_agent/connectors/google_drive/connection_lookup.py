@@ -1,8 +1,11 @@
-"""mount_id -> (connection_id, credential_ref) 조회 포트.
-SourceChange/MountRef에는 어떤 Drive OAuth 계정을 써야 하는지가 없다 (그건
-canonical WorkspaceMount/SourceConnection이 갖고 있고, Control Plane
-소유다). Agent 2가 Control 내부를 직접 import할 수 없으므로, Integration이
-이 Protocol을 canonical lookup에 연결해준다 (Agent 2 Spec 3번).
+"""mount_id -> connection_id 조회 포트.
+
+D1 이후 이 조회가 자격증명을 들고 오지 않는다. Drive 접근은 폴더 공유에서 오고
+신원은 하나뿐이라, 마운트마다 고를 토큰이 없다. 그래도 연결 자체는 찾아야 한다 —
+**변경 커서를 연결 id 로 보관**하기 때문이다.
+
+`credential_ref` 칸은 남겨 두되 비어 있을 수 있다. 서비스 계정 연결에는 보관한
+자격증명이 없다.
 """
 from __future__ import annotations
 from typing import Protocol
@@ -11,7 +14,8 @@ from ..common.credential_vault import CredentialRef
 from ..common.errors import NotFoundError
 class DriveConnectionContext(StrictModel):
     connection_id: str
-    credential_ref: CredentialRef
+    #: D1 연결에는 없다. 보관할 자격증명이 없는 것이 요점이다.
+    credential_ref: CredentialRef | None = None
     operational_connection_id: str | None = None
 class DriveConnectionLookup(Protocol):
     async def resolve(self, mount_id: str) -> DriveConnectionContext: ...

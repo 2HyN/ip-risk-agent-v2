@@ -29,10 +29,10 @@ from ip_risk_agent.connectors.github.routes import create_github_webhook_router
 from ip_risk_agent.connectors.github.tracking_scope import GitHubTrackingScope
 from ip_risk_agent.connectors.github.webhook_processor import GitHubWebhookProcessor
 from ip_risk_agent.connectors.google_drive.adapter import GoogleDriveAdapter
-from ip_risk_agent.connectors.google_drive.client import GoogleDriveProviderFactory
 from ip_risk_agent.connectors.google_drive.mounts_routes import create_drive_mounts_router
-from ip_risk_agent.connectors.google_drive.oauth import HttpxDriveOAuthClient
-from ip_risk_agent.connectors.google_drive.oauth_routes import create_drive_oauth_router
+from ip_risk_agent.connectors.google_drive.service_account import (
+    ServiceAccountDriveProviderFactory,
+)
 from ip_risk_agent.connectors.google_drive.routes import create_drive_webhook_router
 from ip_risk_agent.connectors.google_drive.tracking_scope import DriveTrackingScope
 from ip_risk_agent.connectors.local.adapter import LocalAdapter
@@ -116,13 +116,12 @@ class _SourceRuntime:
     drive_adapter: GoogleDriveAdapter
     github_adapter: GitHubAdapter
     local_adapter: LocalAdapter
-    drive_provider_factory: GoogleDriveProviderFactory
+    drive_provider_factory: ServiceAccountDriveProviderFactory
     github_provider_factory: GitHubAppProviderFactory
 
 
 def _source_runtime(foundation, settings: Settings) -> _SourceRuntime:
-    assert settings.drive_client_id is not None
-    assert settings.drive_client_secret is not None
+    assert settings.drive_service_account is not None
     assert settings.github_app_id is not None
     assert settings.github_private_key_secret_id is not None
     backend = foundation.operational_backend
@@ -152,17 +151,15 @@ def _source_runtime(foundation, settings: Settings) -> _SourceRuntime:
         collection="source_operational_local_runtime",
         model=LocalRuntime,
     )
-    drive_factory = GoogleDriveProviderFactory(
-        settings.drive_client_id,
-        settings.drive_client_secret,
-    )
+    # D1 — Drive 접근이 폴더 공유에서 온다. 보관할 토큰이 없고, 이 신원은
+    # 프로젝트 역할이 0 이다.
+    drive_factory = ServiceAccountDriveProviderFactory(settings.drive_service_account)
     github_factory = GitHubAppProviderFactory(
         app_id=settings.github_app_id,
         private_key_pem=_secret(foundation, settings.github_private_key_secret_id),
     )
     drive_adapter = GoogleDriveAdapter(
         provider_factory=drive_factory,
-        credential_vault=foundation.credential_vault,
         connection_lookup=DriveMountConnectionLookup(pending),
         tracking_scope_store=drive_tracking,
         runtime_store=drive_runtime,
@@ -195,9 +192,7 @@ def _source_runtime(foundation, settings: Settings) -> _SourceRuntime:
 def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeComposition:
     settings = context.settings
     assert context.device_auth_service is not None
-    assert settings.drive_client_id is not None
-    assert settings.drive_client_secret is not None
-    assert settings.drive_redirect_uri is not None
+    assert settings.drive_service_account is not None
     assert settings.drive_watch_channel_token is not None
     assert settings.drive_webhook_base_url is not None
     assert settings.scheduler_service_account is not None
@@ -256,28 +251,12 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
         ),
     )
 
-    drive_oauth = create_drive_oauth_router(
-        client_id=settings.drive_client_id,
-        redirect_uri=settings.drive_redirect_uri,
-        state_store=oauth_state,
-        oauth_client=HttpxDriveOAuthClient(
-            client_id=settings.drive_client_id,
-            client_secret=settings.drive_client_secret,
-            redirect_uri=settings.drive_redirect_uri,
-        ),
-        credential_vault=foundation.credential_vault,
-        connection_creation_callback=registration,
-        authz_dependency=workspace_auth,
-        completion_redirect=completion,
-    )
     drive_mounts = create_drive_mounts_router(
         provider_factory=source.drive_provider_factory,
-        credential_vault=foundation.credential_vault,
-        connection_credential_lookup=registration,
-        mount_connection_lookup=DriveMountConnectionLookup(source.pending),
+        sharing_address=source.drive_provider_factory.sharing_address,
+        connection_creation_callback=registration,
         tracking_scope_store=source.drive_tracking,
         mount_creation_callback=registration,
-        untrack_callback=_DriveUntrackBridge(context.control_facade),
         initial_change_sync=DriveInitialChangePublisher(
             control_facade=context.control_facade,
             adapter=source.drive_adapter,
@@ -287,8 +266,6 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
             watch_address=settings.drive_webhook_base_url,
             watch_channel_token=settings.drive_watch_channel_token,
         ),
-        connection_authz_dependency=connection_auth,
-        mount_authz_dependency=mount_auth,
         workspace_authz_dependency=workspace_auth,
     )
     drive_webhook = create_drive_webhook_router(
@@ -367,7 +344,7 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
             source.local_adapter,
         ),
         source_routers=SourceRouterBundle(
-            web=(drive_oauth, drive_mounts, github_install, github_mounts),
+            web=(drive_mounts, github_install, github_mounts),
             webhooks=(drive_webhook, github_webhook),
             desktop=(local_desktop,),
         ),
@@ -460,31 +437,6 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             FirestoreWorkspaceEraser(foundation.clients.firestore),
         ),
     )
-
-
-class _DriveUntrackBridge:
-    """Drive 추적 해제의 canonical 부분을 control plane 에 넘긴다.
-
-    인가는 라우터의 mount 범위 의존성이 이미 끝냈다
-    (``SessionSourceAuthorizer`` 가 ``MOUNT_SOURCE_OPERATION`` 을 확인한다).
-    여기서는 그 결과만 전달한다.
-    """
-
-    def __init__(self, control_facade) -> None:
-        self._control = control_facade
-
-    async def untrack_artifact(
-        self,
-        request,
-        *,
-        risk_workspace_id: str,
-        artifact_id: str,
-    ):
-        del request
-        return await self._control.untrack_artifact(
-            risk_workspace_id=risk_workspace_id,
-            artifact_id=artifact_id,
-        )
 
 
 class _DriveChannelResolver:

@@ -1,7 +1,13 @@
+"""D1 — 폴더를 공유받아 붙인다. 승인 화면도 Picker 도 없다.
+
+예전 시험은 Picker 세션 발급과 연결별 마운트를 확인했다. 그 경로는 **동작하지
+않는 것으로 실측됐다** — `drive.file` 로 폴더를 고르면 폴더 객체만 받고 안은 못
+읽는다 (결함 41). 그래서 확인할 것이 바뀌었다.
+"""
+
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 
@@ -10,49 +16,90 @@ pytest.importorskip("fastapi")
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from ip_risk_agent.connectors.common.credential_vault import (
-    CredentialScope,
-    InMemoryCredentialVault,
-)
 from ip_risk_agent.connectors.common.authz import allow_all_authz, deny_all_authz
-from ip_risk_agent.connectors.google_drive.tracking_scope import DriveTrackingScope
-from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
-from ip_risk_agent.connectors.google_drive.connection_lookup import (
-    DriveConnectionContext,
-    InMemoryDriveConnectionLookup,
-    InMemoryDriveConnectionCredentialLookup,
+from ip_risk_agent.connectors.common.errors import (
+    NotFoundError,
+    PermissionDeniedError,
+    TemporaryUnavailableError,
 )
+from ip_risk_agent.connectors.common.runtime_store import InMemoryRuntimeStore
+from ip_risk_agent.connectors.google_drive.models import DriveFile, DriveFolderPage
 from ip_risk_agent.connectors.google_drive.mounts_routes import (
     DriveMountCreationResponse,
     create_drive_mounts_router,
+    parse_folder_reference,
 )
 
-from iprisk_contracts.common import SourceType
+SHARING_ADDRESS = "iprisk-v2-drive@example.iam.gserviceaccount.com"
+FOLDER_ID = "folder-1"
+FOLDER_MIME = "application/vnd.google-apps.folder"
+DOCUMENT_MIME = "application/vnd.google-apps.document"
+
+
+def _folder(file_id: str = FOLDER_ID, name: str = "patent") -> DriveFile:
+    return DriveFile(file_id, name, FOLDER_MIME, "t1", "rev-1", None, ())
+
+
+def _doc(file_id: str, name: str) -> DriveFile:
+    return DriveFile(file_id, name, "text/plain", "t1", "rev-1", None, (FOLDER_ID,))
 
 
 class FakeDriveProvider:
-    def __init__(self, *, should_fail: bool = False) -> None:
-        self.should_fail = should_fail
+    def __init__(
+        self,
+        *,
+        root: DriveFile | None = None,
+        children: tuple[DriveFile, ...] = (),
+        lookup_error: Exception | None = None,
+    ) -> None:
+        self._root = root if root is not None else _folder()
+        self._children = children
+        self._lookup_error = lookup_error
         self.export_called = False
 
-    def get_access_token(self):
-        if self.should_fail:
-            from ip_risk_agent.connectors.common.errors import AuthRequiredError
+    def get_file(self, file_id: str) -> DriveFile:
+        if self._lookup_error is not None:
+            raise self._lookup_error
+        return self._root
 
-            raise AuthRequiredError(provider="google_drive", safe_message="reauth required")
-        return ("refreshed-access-token", None)
+    def list_folder_children(self, folder_id: str, page_token: str | None = None):
+        return DriveFolderPage(files=self._children, next_page_token=None)
 
     def export_token(self) -> dict:
         self.export_called = True
-        return {"access_token": "refreshed-access-token", "refresh_token": "rt", "expires_at": None, "scope": "x"}
+        return {}
 
 
 class FakeDriveProviderFactory:
     def __init__(self, provider: FakeDriveProvider) -> None:
         self._provider = provider
 
-    def create(self, token: dict) -> FakeDriveProvider:
+    def create(self) -> FakeDriveProvider:
         return self._provider
+
+
+class FakeConnectionCreationCallback:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def create_drive_connection(
+        self,
+        request: Request,
+        *,
+        risk_workspace_id,
+        provider_subject,
+        provider_email,
+        credential_ref,
+    ) -> str:
+        self.calls.append(
+            {
+                "risk_workspace_id": risk_workspace_id,
+                "provider_subject": provider_subject,
+                "provider_email": provider_email,
+                "credential_ref": credential_ref,
+            }
+        )
+        return "conn-1"
 
 
 class FakeMountCreationCallback:
@@ -69,7 +116,9 @@ class FakeMountCreationCallback:
                 "selected_file_ids": selected_file_ids,
             }
         )
-        return DriveMountCreationResponse(server_mount_id="server-mount-1", source_workspace_id="sw-1")
+        return DriveMountCreationResponse(
+            server_mount_id="server-mount-1", source_workspace_id="sw-1"
+        )
 
 
 class FakeInitialChangeSync:
@@ -77,15 +126,11 @@ class FakeInitialChangeSync:
         self.calls: list[dict] = []
 
     async def initialize(self, *, mount_id, selected_file_ids) -> None:
-        self.calls.append(
-            {"mount_id": mount_id, "selected_file_ids": selected_file_ids}
-        )
+        self.calls.append({"mount_id": mount_id, "selected_file_ids": selected_file_ids})
 
 
 class FailingInitialChangeSync:
     async def initialize(self, *, mount_id, selected_file_ids) -> None:
-        from ip_risk_agent.connectors.common.errors import TemporaryUnavailableError
-
         raise TemporaryUnavailableError(
             provider="google_drive",
             safe_message="drive_file_metadata failed",
@@ -93,265 +138,197 @@ class FailingInitialChangeSync:
         )
 
 
-async def _setup(
-    provider: FakeDriveProvider | None = None,
+def _setup(
+    provider: FakeDriveProvider,
     *,
-    mount_authz=allow_all_authz,
     workspace_authz=allow_all_authz,
     initial_change_sync=None,
-    untrack_callback=None,
 ):
-    vault = InMemoryCredentialVault()
-    cred_scope = CredentialScope(provider=SourceType.GOOGLE_DRIVE, connection_id="conn-1", secret_name="tok")
-    token_json = json.dumps({"access_token": "at", "refresh_token": "rt", "expires_at": None, "scope": "x"})
-    credential_ref = await vault.put(cred_scope, token_json)
-
-    lookup = InMemoryDriveConnectionCredentialLookup()
-    lookup.register("conn-1", credential_ref)
-    mount_lookup = InMemoryDriveConnectionLookup()
-    mount_lookup.register(
-        "mount-1",
-        DriveConnectionContext(
-            connection_id="canonical-conn-1",
-            credential_ref=credential_ref,
-            operational_connection_id="conn-1",
-        ),
-    )
-
     tracking_scope_store = InMemoryRuntimeStore()
-    callback = FakeMountCreationCallback()
-    factory = FakeDriveProviderFactory(provider or FakeDriveProvider())
+    connections = FakeConnectionCreationCallback()
+    mounts = FakeMountCreationCallback()
+    sync = initial_change_sync if initial_change_sync is not None else FakeInitialChangeSync()
 
     router = create_drive_mounts_router(
-        provider_factory=factory,
-        credential_vault=vault,
-        connection_credential_lookup=lookup,
-        mount_connection_lookup=mount_lookup,
+        provider_factory=FakeDriveProviderFactory(provider),
+        sharing_address=SHARING_ADDRESS,
+        connection_creation_callback=connections,
         tracking_scope_store=tracking_scope_store,
-        mount_creation_callback=callback,
-        untrack_callback=untrack_callback,
-        initial_change_sync=initial_change_sync,
-        connection_authz_dependency=allow_all_authz,
-        mount_authz_dependency=mount_authz,
+        mount_creation_callback=mounts,
+        initial_change_sync=sync,
         workspace_authz_dependency=workspace_authz,
     )
     app = FastAPI()
     app.include_router(router)
-    client = TestClient(app)
-    return client, vault, tracking_scope_store, callback, credential_ref
+    return TestClient(app), tracking_scope_store, connections, mounts, sync
 
 
-def test_picker_session_returns_access_token():
-    async def scenario():
-        client, vault, _, _, _ = await _setup()
-
-        response = client.post("/api/v1/source-connections/conn-1/drive/picker-session")
-
-        assert response.status_code == 200
-        assert response.json()["access_token"] == "refreshed-access-token"
-
-    asyncio.run(scenario())
+def _mount(client, folder_reference: str = FOLDER_ID):
+    return client.post(
+        "/api/v1/source-connections/google-drive/folders",
+        json={"risk_workspace_id": "vws-1", "folder_id": folder_reference},
+    )
 
 
-def test_picker_session_persists_refreshed_token():
-    async def scenario():
-        client, vault, _, _, credential_ref = await _setup()
-
-        client.post("/api/v1/source-connections/conn-1/drive/picker-session")
-
-        stored = await vault.get(credential_ref)
-        assert "refreshed-access-token" in stored
-
-    asyncio.run(scenario())
+def test_the_sharing_address_is_what_the_screen_shows_instead_of_a_picker():
+    client, *_ = _setup(FakeDriveProvider())
+    response = client.get("/api/v1/source-connections/google-drive/sharing-address")
+    assert response.status_code == 200
+    assert response.json() == {"address": SHARING_ADDRESS}
 
 
-def test_picker_session_unknown_connection_returns_error():
-    async def scenario():
-        client, _, _, _, _ = await _setup()
+def test_a_shared_folder_is_mounted_and_reports_how_many_files_it_found():
+    """0 을 0 이라고 말할 수 있어야 한다 (결함 40).
 
-        response = client.post("/api/v1/source-connections/never-registered/drive/picker-session")
+    개수를 돌려주지 않으면 화면에서 빈 폴더와 못 읽는 폴더가 똑같이 아무것도 아닌
+    것으로 보인다. 실제로 사용자가 그 둘을 구별하지 못해 파일을 폴더로 골랐다.
+    """
+    provider = FakeDriveProvider(children=(_doc("f1", "a.md"), _doc("f2", "b.md")))
+    client, scopes, _connections, mounts, sync = _setup(provider)
 
-        assert response.status_code >= 400
+    response = _mount(client)
 
-    asyncio.run(scenario())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tracked_file_count"] == 2
+    assert body["truncated"] is False
 
-
-def test_picker_session_reauth_required_returns_401():
-    async def scenario():
-        client, _, _, _, _ = await _setup(FakeDriveProvider(should_fail=True))
-
-        response = client.post("/api/v1/source-connections/conn-1/drive/picker-session")
-
-        assert response.status_code == 401
-
-    asyncio.run(scenario())
+    scope = asyncio.run(scopes.load("server-mount-1"))
+    assert scope.folder_id == FOLDER_ID
+    assert scope.display_metadata_by_file[FOLDER_ID]["name"] == "patent"
+    assert mounts.calls[0]["selected_file_ids"] == [FOLDER_ID]
+    assert sync.calls == [{"mount_id": "server-mount-1", "selected_file_ids": None}]
 
 
-def test_create_mount_saves_tracking_scope_and_calls_callback():
-    async def scenario():
-        client, _, tracking_scope_store, callback, _ = await _setup()
+def test_an_empty_shared_folder_is_a_success_that_says_zero():
+    client, *_ = _setup(FakeDriveProvider(children=()))
 
-        response = client.post(
-            "/api/v1/source-connections/conn-1/drive/mounts",
-            json={
-                "risk_workspace_id": "rw1",
-                "folder_id": "folder-1",
-                "display_metadata_by_file": {"file-1": {"name": "architecture.docx"}},
-            },
+    response = _mount(client)
+
+    assert response.status_code == 200
+    assert response.json()["tracked_file_count"] == 0
+
+
+def test_the_connection_carries_no_credential_because_there_is_nothing_to_keep():
+    """D1 의 요점 — 보관할 자격증명이 없다.
+
+    workspace 를 전부 지운 뒤에도 Drive refresh token 19 개가 남아 있던 사고가
+    구조적으로 재발할 수 없는 이유가 이것이다.
+    """
+    client, _scopes, connections, _mounts, _sync = _setup(FakeDriveProvider())
+
+    _mount(client)
+
+    assert connections.calls[0]["credential_ref"] is None
+    assert connections.calls[0]["provider_email"] == SHARING_ADDRESS
+
+
+def test_a_file_is_refused_instead_of_becoming_a_mount_that_tracks_nothing():
+    """결함 37 — 파일을 폴더로 받으면 아무것도 안 하는 마운트가 성공으로 보인다.
+
+    운영에서 실제로 그렇게 됐다. Google 문서 하나가 folder_id 로 들어가, 부모로
+    건 질의가 영영 0 개인 ACTIVE 마운트가 만들어졌다.
+    """
+    document = DriveFile("doc-1", "문서", DOCUMENT_MIME, "t1", "r1", None, ())
+    client, _scopes, connections, mounts, _sync = _setup(FakeDriveProvider(root=document))
+
+    response = _mount(client, "doc-1")
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "DRIVE_NOT_A_FOLDER"
+    # 아무것도 만들지 않는다. 확인이 먼저다.
+    assert connections.calls == []
+    assert mounts.calls == []
+
+
+def test_an_unshared_folder_is_told_exactly_what_to_do():
+    client, _scopes, connections, mounts, _sync = _setup(
+        FakeDriveProvider(
+            lookup_error=NotFoundError(provider="google_drive", safe_message="not found")
         )
+    )
 
-        assert response.status_code == 200
-        body = response.json()
-        assert body["server_mount_id"] == "server-mount-1"
-        assert callback.calls[0]["selected_file_ids"] == ["folder-1"]
+    response = _mount(client)
 
-        scope = await tracking_scope_store.load("server-mount-1")
-        assert scope.folder_id == "folder-1"
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "DRIVE_FOLDER_NOT_SHARED"
+    assert detail["sharing_address"] == SHARING_ADDRESS
+    assert connections.calls == []
+    assert mounts.calls == []
 
-    asyncio.run(scenario())
 
-
-def test_create_mount_publishes_initial_changes_after_tracking_scope_is_saved():
-    async def scenario():
-        sync = FakeInitialChangeSync()
-        client, _, tracking_scope_store, _, _ = await _setup(
-            initial_change_sync=sync
+def test_a_folder_we_may_not_read_is_the_same_answer_as_one_never_shared():
+    client, *_ = _setup(
+        FakeDriveProvider(
+            lookup_error=PermissionDeniedError(
+                provider="google_drive", safe_message="denied"
+            )
         )
+    )
+    assert _mount(client).status_code == 409
 
-        response = client.post(
-            "/api/v1/source-connections/conn-1/drive/mounts",
-            json={
-                "risk_workspace_id": "rw1",
-                "folder_id": "folder-1",
-            },
+
+def test_a_provider_failure_is_a_safe_gateway_error_not_a_422():
+    client, *_ = _setup(
+        FakeDriveProvider(
+            lookup_error=TemporaryUnavailableError(
+                provider="google_drive", safe_message="drive is busy", retryable=True
+            )
         )
+    )
 
-        assert response.status_code == 200
-        assert await tracking_scope_store.load("server-mount-1") is not None
-        # 처음 훑기는 **폴더가 정한다.** 부르는 쪽이 목록을 주지 않는다 (§6.1 · 1-F).
-        assert sync.calls == [{
-            "mount_id": "server-mount-1",
-            "selected_file_ids": None,
-        }]
+    response = _mount(client)
 
-    asyncio.run(scenario())
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "DRIVE_FOLDER_LOOKUP_FAILED"
 
 
-def test_provider_method_error_is_a_safe_gateway_error_not_422():
-    async def scenario():
-        client, _, tracking_scope_store, _, _ = await _setup(
-            initial_change_sync=FailingInitialChangeSync()
-        )
+def test_a_failed_initial_sweep_does_not_report_a_mounted_folder():
+    client, *_ = _setup(
+        FakeDriveProvider(children=(_doc("f1", "a.md"),)),
+        initial_change_sync=FailingInitialChangeSync(),
+    )
 
-        response = client.post(
-            "/api/v1/source-mounts/mount-1/drive/mounts",
-            json={"risk_workspace_id": "rw1", "folder_id": "folder-1"},
-        )
+    response = _mount(client)
 
-        assert response.status_code == 502
-        assert response.json() == {
-            "detail": {
-                "code": "DRIVE_INITIAL_SYNC_FAILED",
-                "operation": "drive_file_metadata",
-                "provider_error": "TEMPORARY_UNAVAILABLE",
-                "retryable": False,
-            }
-        }
-        assert await tracking_scope_store.load("server-mount-1") is not None
-        assert "file-3" not in response.text
-
-    asyncio.run(scenario())
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "DRIVE_INITIAL_SYNC_FAILED"
 
 
-def test_active_mount_reuses_credential_and_operational_connection_for_more_files():
-    async def scenario():
-        client, _, tracking_scope_store, callback, _ = await _setup()
+def test_an_unauthorized_workspace_is_refused_before_drive_is_touched():
+    client, _scopes, connections, mounts, _sync = _setup(
+        FakeDriveProvider(), workspace_authz=deny_all_authz
+    )
 
-        picker = client.post("/api/v1/source-mounts/mount-1/drive/picker-session")
-        mounted = client.post(
-            "/api/v1/source-mounts/mount-1/drive/mounts",
-            json={"risk_workspace_id": "rw1", "folder_id": "folder-1"},
-        )
+    response = _mount(client)
 
-        assert picker.status_code == 200
-        assert mounted.status_code == 200
-        assert callback.calls[-1] == {
-            "connection_id": "conn-1",
-            "risk_workspace_id": "rw1",
-            "selected_file_ids": ["folder-1"],
-        }
-        scope = await tracking_scope_store.load("server-mount-1")
-        assert scope.folder_id == "folder-1"
-
-    asyncio.run(scenario())
-
-
-def test_mount_route_method_mismatch_is_405_not_422():
-    async def scenario():
-        client, _, _, _, _ = await _setup()
-
-        response = client.get("/api/v1/source-mounts/mount-1/drive/mounts")
-
-        assert response.status_code == 405
-        assert response.json() == {"detail": "Method Not Allowed"}
-
-    asyncio.run(scenario())
-
-
-def test_active_mount_rejects_an_unauthorized_workspace_before_credential_use():
-    async def deny(_request, _resource_id):
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=403, detail="source operation denied")
-
-    async def scenario():
-        client, _, _, callback, _ = await _setup(workspace_authz=deny)
-
-        response = client.post(
-            "/api/v1/source-mounts/mount-1/drive/mounts",
-            json={"risk_workspace_id": "other-workspace", "folder_id": "folder-1"},
-        )
-
-        assert response.status_code == 403
-        assert callback.calls == []
-
-    asyncio.run(scenario())
-
-
-class FakeUntrackCallback:
-    """canonical 쪽 처리를 대신한다. 실제 구현은 artifact 를 보관하고 Risk 를 제외한다."""
-
-    def __init__(self, *, mount_id: str, source_artifact_id: str) -> None:
-        self.calls: list[tuple[str, str]] = []
-        self._mount_id = mount_id
-        self._source_artifact_id = source_artifact_id
-
-    async def untrack_artifact(self, request, *, risk_workspace_id, artifact_id):
-        del request
-        self.calls.append((risk_workspace_id, artifact_id))
-
-        class _Outcome:
-            mount_id = self._mount_id
-            source_artifact_id = self._source_artifact_id
-            excluded_risk_ids = ("risk-1",)
-
-        return _Outcome()
+    assert response.status_code == 401
+    assert connections.calls == []
+    assert mounts.calls == []
 
 
 def test_the_untrack_route_is_gone():
-    """폴더를 보는 지금 "이 파일만 추적 해제" 는 성립하지 않는다 (§6.1 · 1-F).
+    """폴더를 보는 지금 파일 하나만 해제하는 것은 성립하지 않는다 (§6.1 · 1-F)."""
+    client, *_ = _setup(FakeDriveProvider())
+    response = client.post(
+        "/api/v1/source-mounts/mount-1/drive/untrack",
+        json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-1"},
+    )
+    assert response.status_code == 404
 
-    범위에서 뺄 방법이 없고, Risk 만 닫아 두면 **그 파일의 다음 변경에 되살아난다.**
-    추적을 끊는 방법은 하나뿐이다 — 폴더 밖으로 옮긴다. 실측에서 그것이 `removed`
-    로 오고(§2.1.1), 1-D 가 그때 Risk 를 닫는다.
-    """
 
-    async def scenario():
-        client, _vault, _tracking, _create, _ref = await _setup()
-        response = client.post(
-            "/api/v1/source-mounts/mount-1/drive/untrack",
-            json={"risk_workspace_id": "vws-1", "artifact_id": "artifact-1"},
-        )
-        assert response.status_code == 404
+def test_the_picker_session_route_is_gone():
+    """Picker 는 폴더 객체만 주었다. 그 경로를 남겨 두면 다시 그리로 간다."""
+    client, *_ = _setup(FakeDriveProvider())
+    response = client.post("/api/v1/source-connections/conn-1/drive/picker-session")
+    assert response.status_code == 404
 
-    asyncio.run(scenario())
+
+def test_a_pasted_drive_url_is_accepted_because_that_is_what_users_hold():
+    assert parse_folder_reference("folder-1") == "folder-1"
+    assert (
+        parse_folder_reference("https://drive.google.com/drive/folders/abc123?usp=sharing")
+        == "abc123"
+    )
+    assert parse_folder_reference("  https://drive.google.com/drive/u/0/folders/xyz  ") == "xyz"

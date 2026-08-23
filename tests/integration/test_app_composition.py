@@ -101,10 +101,12 @@ def test_integrated_api_mounts_control_source_health_and_runs_lifespan_cleanup()
             "status": "mounted"
         }
         assert client.get("/api/v1/runtime-config").json() == {
-            "drive_picker": {
+            # D1 — 화면이 알아야 할 것은 어디로 공유하는가 하나뿐이다. Picker 는
+            # 브라우저 API 키를 내려보내야 했는데, 공유 주소는 알아도 접근이
+            # 생기지 않는다.
+            "drive_sharing": {
                 "enabled": False,
-                "browser_api_key": None,
-                "cloud_project_number": None,
+                "sharing_address": None,
             }
         }
         assert client.get("/api/v1/auth/me").status_code == 401

@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+#: D1 이 쓰는 범위. 서비스 계정이라 계정 전체를 뜻하지 않는다 — 공유받은 것만 보인다.
+#: `drive.file` 은 폴더를 골라도 **폴더 객체만** 주므로 폴더 마운트가 불가능했다 (결함 41).
+DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document"
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
