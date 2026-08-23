@@ -182,14 +182,18 @@ describe("SourcePanel product integration", () => {
     // 폴더 안 — 실제 구조 그대로: 파일 하나, 하위 폴더 하나.
     expect(await screen.findByText("Claims.txt")).toBeInTheDocument();
     expect(screen.getByText("Analysis: SUCCEEDED · Risk 1/2")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Review →" }))
-      .toHaveAttribute("href", "#/w/vws-1/risks/risk-7");
 
     await userEvent.click(screen.getByRole("button", { name: /drafts/ }));
     expect(await screen.findByText("notes.md")).toBeInTheDocument();
     expect(screen.getByText("Analysis: RUNNING")).toBeInTheDocument();
     // "View artifact analysis" 상세 화면은 없앴다 — 탐색기가 그 자리를 맡는다.
     expect(screen.queryByRole("link", { name: "View artifact analysis" })).toBeNull();
+
+    // 파일 이름이 곧 입구다 — 누르면 Review 에서 그 파일의 Risk 목록으로 간다.
+    await userEvent.click(screen.getByRole("button", { name: /notes\.md/ }));
+    expect(window.location.hash).toContain(
+      "/w/vws-1/risks?artifact_id=artifact-drive-2",
+    );
   });
 
   it("says the folder is already tracked instead of mounting it twice", async () => {

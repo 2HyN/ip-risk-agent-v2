@@ -66,14 +66,13 @@ export function AddSourceChooser({
     }
   };
 
-  const handleGithubClick = async (): Promise<void> => {
-    if (onUseExistingGithub !== null) {
-      onSelect("GITHUB");
-      setError(null);
-      onUseExistingGithub();
-      return;
-    }
-    await startGithubInstall();
+  const handleGithubClick = (): void => {
+    // 어느 경우든 **창부터** 연다. 설치가 없다고 바로 GitHub 으로 내보내면,
+    // 사용자는 무엇을 하러 가는지 모른 채 redirect 를 겪는다. 설치로 나가는
+    // 것은 창 안의 "repo 추가" 버튼을 눌렀을 때뿐이다.
+    onSelect("GITHUB");
+    setError(null);
+    onUseExistingGithub?.();
   };
 
   return (
@@ -86,7 +85,7 @@ export function AddSourceChooser({
       <Button type="button" variant="secondary" onClick={handleDriveClick}>
         Google Drive
       </Button>
-      <Button type="button" variant="secondary" onClick={() => void handleGithubClick()}>
+      <Button type="button" variant="secondary" onClick={handleGithubClick}>
         GitHub Repository
       </Button>
       {onUseExistingGithub === null ? null : (

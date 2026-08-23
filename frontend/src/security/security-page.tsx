@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useSession } from "../auth/session";
-import { formatBytes, formatDate, humanize } from "../shared/format";
+import { formatBytes, formatDate, humanize, shortRevision } from "../shared/format";
 import { useResource } from "../shared/hooks/use-resource";
 import {
   Badge,
@@ -88,7 +88,7 @@ export function SecurityPage() {
           >
             <Field
               label="Deny-only logical path rules"
-              hint={`${settings.data.rule_count} active rules · applied before analysis`}
+              hint={`${settings.data.rule_count} active rules · 분석 직전에 적용 · 경로는 마운트 폴더 기준(폴더 이름 제외) · 걸린 파일의 기존 Risk는 '제외됨'으로 닫힙니다`}
             >
               <Textarea
                 className="input textarea code-input"
@@ -195,7 +195,7 @@ export function SecurityPage() {
                       </td>
                       <td>
                         {event.artifact_id}
-                        <small>Revision {event.revision}</small>
+                        <small>Revision {shortRevision(event.revision)}</small>
                       </td>
                       <td>{humanize(event.access_type)}</td>
                       <td>{formatBytes(event.content_bytes)}</td>

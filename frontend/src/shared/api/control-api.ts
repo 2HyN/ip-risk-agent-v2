@@ -37,6 +37,10 @@ export class ControlApi {
       method: "POST",
       body: JSON.stringify(body),
     });
+  deleteWorkspace = (id: string) =>
+    this.client.request<Workspace>(`/api/v1/workspaces/${id}`, {
+      method: "DELETE",
+    });
   dashboard = (id: string) =>
     this.client.request<Dashboard>(`/api/v1/workspaces/${id}/dashboard`);
   analysesProgress = (id: string) =>

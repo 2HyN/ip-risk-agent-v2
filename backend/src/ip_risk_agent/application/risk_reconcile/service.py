@@ -281,6 +281,9 @@ class AnalysisResultIntakeService:
         affected: list[str] = []
         resolved: list[str] = []
         evidence_count = 0
+        # 알림감이 된 Risk. 한 결과는 한 파일이므로, 파일 하나에서 Risk 가 몇 개
+        # 나와도 **알림은 한 건**으로 묶는다 — 다섯 건이 따로 오면 스팸이다.
+        attention: list[Risk] = []
         for risk_key, projection in projections.items():
             risk = existing_by_key.pop(risk_key, None)
             if risk is None:
@@ -434,29 +437,43 @@ class AnalysisResultIntakeService:
                         attribution=attribution,
                     )
                 )
-            if (
-                lifecycle_decision.event_type is RiskEventType.REOPENED
-                or (
-                    risk.review_priority is ReviewPriority.HIGH
-                    and previous_priority is not ReviewPriority.HIGH
-                )
-            ):
-                notification_type = (
-                    NotificationType.RISK_REOPENED
-                    if lifecycle_decision.event_type is RiskEventType.REOPENED
-                    else NotificationType.RISK_HIGH_DETECTED
-                )
+            if lifecycle_decision.event_type is RiskEventType.REOPENED:
+                # 되살아난 것은 개별로 알린다 — "우리는 가만있었는데 위험이
+                # 돌아왔다" 는 이 제품이 파는 문장이라, 건마다 뜻이 있다.
                 await _add_notification_once(
                     uow,
                     _risk_notification(
                         risk=risk,
                         owner_user_id=workspace_owner,
                         result_fingerprint=result_fingerprint,
-                        notification_type=notification_type,
+                        notification_type=NotificationType.RISK_REOPENED,
                         occurred_at=risk_time,
                     )
                 )
+            elif (
+                risk.review_priority
+                in {ReviewPriority.HIGH, ReviewPriority.INDETERMINATE}
+                and previous_priority is not risk.review_priority
+            ):
+                # HIGH 는 "심각하다", INDETERMINATE 는 "판정을 못 내렸다" — 둘 다
+                # 사람이 봐야 한다. 여기서는 모아 두고 파일 단위로 한 번 알린다.
+                attention.append(risk)
             affected.append(risk.id)
+
+        if attention:
+            await _add_notification_once(
+                uow,
+                _artifact_attention_notification(
+                    risks=attention,
+                    artifact_id=result.artifact_id,
+                    owner_user_id=workspace_owner,
+                    result_fingerprint=result_fingerprint,
+                    occurred_at=max(risk.updated_at for risk in attention),
+                    display_name=await _artifact_display_name(
+                        uow, result.artifact_id
+                    ),
+                ),
+            )
 
         # 0-L — 의존성 파일에서 선언이 통째로 사라진 결과는 해소 권한이 없다.
         # 읽기가 망가진 것과 사람이 다 지운 것을 지금은 가르지 못하므로, 가르지 못하는
@@ -1022,6 +1039,48 @@ def _risk_notification(
         status=NotificationStatus.UNREAD,
         created_at=occurred_at,
         metadata_safe={"risk_id": risk.id, "analysis_type": risk.analysis_type.value},
+    )
+
+
+async def _artifact_display_name(uow, artifact_id: str) -> str | None:
+    artifact = await uow.artifacts.get(artifact_id)
+    return None if artifact is None else artifact.display_name
+
+
+def _artifact_attention_notification(
+    *,
+    risks: list[Risk],
+    artifact_id: str,
+    owner_user_id: str,
+    result_fingerprint: str,
+    occurred_at: datetime,
+    display_name: str | None,
+) -> Notification:
+    """파일 하나의 새 HIGH · INDETERMINATE Risk 를 **한 건**으로 알린다.
+
+    ID 가 (파일, 결과 지문) 에서 나오므로 같은 관측은 두 번 알리지 않고, 파일 안에
+    Risk 가 몇 개든 알림은 하나다. 무엇이 몇 건인지는 metadata 로 들고 간다 —
+    화면이 "claims.md 에서 검토할 위험 3건" 을 만들 재료다.
+    """
+    priorities = sorted({risk.review_priority.value for risk in risks})
+    return Notification(
+        id=stable_key(
+            "notification",
+            (artifact_id, result_fingerprint, NotificationType.RISK_HIGH_DETECTED.value),
+        ),
+        user_id=owner_user_id,
+        risk_workspace_id=risks[0].risk_workspace_id,
+        notification_type=NotificationType.RISK_HIGH_DETECTED,
+        status=NotificationStatus.UNREAD,
+        created_at=occurred_at,
+        metadata_safe={
+            "artifact_id": artifact_id,
+            "display_name": display_name,
+            "risk_count": len(risks),
+            "priorities": priorities,
+            "risk_id": risks[0].id,
+            "analysis_type": risks[0].analysis_type.value,
+        },
     )
 
 

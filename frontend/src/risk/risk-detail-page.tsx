@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../auth/session";
-import { formatDate, humanize } from "../shared/format";
+import { formatDate, humanize, shortRevision } from "../shared/format";
 import { useResource } from "../shared/hooks/use-resource";
 import {
   Badge,
@@ -159,14 +159,16 @@ export function RiskDetailPage() {
           )}
           <Card>
             <p className="eyebrow">Analysis metadata</p>
+            {/* 실행 id 같은 기계용 식별자는 여기 두지 않는다 — 사람이 판단에 쓸 수
+                있는 것(어느 파일의 어느 판본인가)만 남긴다. */}
             <dl className="metadata-list">
               <div>
-                <dt>Analysis job</dt>
-                <dd>{risk.latest_analysis_job_id}</dd>
-              </div>
-              <div>
                 <dt>Evidence revision</dt>
-                <dd>{risk.latest_evidence_revision ?? "Not retained"}</dd>
+                <dd>
+                  {risk.latest_evidence_revision === null
+                    ? "Not retained"
+                    : shortRevision(risk.latest_evidence_revision)}
+                </dd>
               </div>
               <div>
                 <dt>Artifact path</dt>
@@ -301,29 +303,34 @@ function EvidenceComparison({
           title="No retained excerpt"
           description="The risk remains canonical, but no safe evidence excerpt is available."
         />
-        <NoPreviewAssurance openLabel={openLabel} />
       </Card>
     );
   }
 
-  const originalColumn = (
-    <section className="compare-pane">
-      <h3>원본 문서</h3>
-      {[...source, ...(risk.analysis_type === "LICENSE" ? packageMetadata : [])].map(
-        (evidence) => (
+  const originalEvidence = [
+    ...source,
+    ...(risk.analysis_type === "LICENSE" ? packageMetadata : []),
+  ];
+  // 내용 없는 칸은 그리지 않는다 — "발췌가 없습니다" 를 칸마다 적으면 빈 안내가
+  // 실제 근거보다 자리를 더 차지한다. 특허의 좌우 대조만 예외다: 비교라는 형식
+  // 자체가 두 칸을 요구한다.
+  const originalColumn =
+    originalEvidence.length === 0 && risk.analysis_type !== "PATENT" ? null : (
+      <section className="compare-pane">
+        <h3>원본 문서</h3>
+        {originalEvidence.map((evidence) => (
           <EvidenceBlock key={evidence.id} evidence={evidence} />
-        ),
-      )}
-      {source.length === 0 && (risk.analysis_type !== "LICENSE" || packageMetadata.length === 0) ? (
-        <p className="fine-print">원본 쪽 발췌가 남아 있지 않습니다.</p>
-      ) : null}
-      <p className="compare-pane__link">
-        <button type="button" className="text-link" onClick={onOpenOriginal}>
-          {openLabel} ↗
-        </button>
-      </p>
-    </section>
-  );
+        ))}
+        {originalEvidence.length === 0 ? (
+          <p className="fine-print">원본 쪽 발췌가 남아 있지 않습니다.</p>
+        ) : null}
+        <p className="compare-pane__link">
+          <button type="button" className="text-link" onClick={onOpenOriginal}>
+            {openLabel} ↗
+          </button>
+        </p>
+      </section>
+    );
 
   if (risk.analysis_type === "PATENT") {
     return (
@@ -343,7 +350,6 @@ function EvidenceComparison({
             <PatentReferenceLinks evidence={patent} />
           </section>
         </div>
-        <NoPreviewAssurance openLabel={openLabel} />
       </Card>
     );
   }
@@ -354,25 +360,23 @@ function EvidenceComparison({
       <h2>원본 · 근거 라이선스 대조</h2>
       <div className="compare-stack">
         {originalColumn}
-        <section className="compare-pane">
-          <h3>근거 라이선스 전문</h3>
-          {/* 전문은 길다 — 스크롤 상자에 가두고 문제가 된 조항만 하이라이트로 짚는다. */}
-          <div className="license-text">
-            {license.map((evidence) => (
-              <EvidenceBlock key={evidence.id} evidence={evidence} />
-            ))}
-            {license.length === 0 ? (
-              <p className="fine-print">라이선스 전문 발췌가 남아 있지 않습니다.</p>
-            ) : null}
-          </div>
-          {references.length === 0 ? null : (
-            <p className="fine-print">
-              참고 근거: {references.map((item) => item.reference).join(" · ")}
-            </p>
-          )}
-        </section>
+        {license.length === 0 ? null : (
+          <section className="compare-pane">
+            <h3>근거 라이선스 전문</h3>
+            {/* 전문은 길다 — 스크롤 상자에 가두고 문제가 된 조항만 하이라이트로 짚는다. */}
+            <div className="license-text">
+              {license.map((evidence) => (
+                <EvidenceBlock key={evidence.id} evidence={evidence} />
+              ))}
+            </div>
+          </section>
+        )}
+        {references.length === 0 ? null : (
+          <p className="fine-print">
+            참고 근거: {references.map((item) => item.reference).join(" · ")}
+          </p>
+        )}
       </div>
-      <NoPreviewAssurance openLabel={openLabel} />
     </Card>
   );
 }
@@ -382,7 +386,7 @@ function EvidenceBlock({ evidence }: { evidence: Evidence }) {
     <article className="evidence-block">
       <div className="card-row">
         <Badge tone="info">{evidence.evidence_type}</Badge>
-        <small>Revision {evidence.source_revision}</small>
+        <small>Revision {shortRevision(evidence.source_revision)}</small>
       </div>
       <EvidenceExcerpt excerpt={evidence.excerpt} metadata={evidence.metadata_safe} />
       <p className="evidence-block__reference">{evidence.reference}</p>
@@ -393,6 +397,9 @@ function EvidenceBlock({ evidence }: { evidence: Evidence }) {
 /**
  * 근거 특허로 나가는 링크. reference 는 "KIPRIS Plus 출원번호 …" 형식이다.
  * 출원번호를 읽지 못하면 링크를 지어내지 않는다.
+ *
+ * KIPRIS 신형 검색은 `searchQuery=AN=<출원번호>` 필드 질의를 받는다.
+ * 출원번호는 숫자만 남긴다 — 붙임표가 섞이면 AN 질의가 빈다.
  */
 function PatentReferenceLinks({ evidence }: { evidence: Evidence[] }) {
   const numbers = [
@@ -409,7 +416,7 @@ function PatentReferenceLinks({ evidence }: { evidence: Evidence[] }) {
         <a
           key={number}
           className="text-link"
-          href={`https://www.kipris.or.kr/khome/search/searchResult.do?searchWord=${encodeURIComponent(number)}`}
+          href={`https://www.kipris.or.kr/khome/search/searchResult.do?searchQuery=${encodeURIComponent(`AN=${number.replaceAll("-", "")}`)}&tab=patent`}
           target="_blank"
           rel="noreferrer"
         >
@@ -417,18 +424,6 @@ function PatentReferenceLinks({ evidence }: { evidence: Evidence[] }) {
         </a>
       ))}
     </p>
-  );
-}
-
-function NoPreviewAssurance({ openLabel }: { openLabel: string }) {
-  return (
-    <div className="source-assurance">
-      <strong>No raw source preview</strong>
-      <span>
-        Use “{openLabel}” to continue through provider or owning-device
-        authorization.
-      </span>
-    </div>
   );
 }
 

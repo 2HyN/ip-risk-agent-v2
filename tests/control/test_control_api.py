@@ -471,6 +471,18 @@ def test_control_workspace_risk_history_security_notification_routes() -> None:
 
         asyncio.run(seed_risk_and_notification())
 
+        # Files 에서 파일을 눌러 넘어오는 길 — 그 파일의 Risk 만 나온다.
+        by_artifact = client.get(
+            f"/api/v1/workspaces/{vws_id}/risks",
+            params={"artifact_id": "artifact-1"},
+        )
+        assert by_artifact.status_code == 200
+        assert [item["id"] for item in by_artifact.json()["items"]] == ["risk-1"]
+        assert client.get(
+            f"/api/v1/workspaces/{vws_id}/risks",
+            params={"artifact_id": "artifact-none"},
+        ).json()["items"] == []
+
         detail = client.get(f"/api/v1/workspaces/{vws_id}/risks/risk-1")
         assert detail.status_code == 200
         assert detail.headers["etag"].startswith('"')

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { useSession } from "../auth/session.js";
 import { ApiFailure } from "../shared/api/client.js";
@@ -40,6 +40,7 @@ export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
   const { api } = useSession();
   const { workspace, role } = useWorkspace();
   const sourceApi = useMemo(() => new SourceApiClient(api.client), [api]);
+  const navigate = useNavigate();
   const [search, setSearch] = useSearchParams();
   const [selected, setSelected] = useState<SourceProviderType | null>(null);
   const [managedGithub, setManagedGithub] = useState<ConnectedSource | null>(null);
@@ -310,7 +311,17 @@ export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
               const failure = analysisFailureNotice(artifact.analysis_failure_safe);
               return (
                 <li key={artifact.artifact_id} className="explorer-row explorer-row--file">
-                  <div className="explorer-row__main">
+                  {/* 파일 이름이 곧 입구다 — 누르면 Review 에서 이 파일의 Risk
+                      목록으로 간다. 별도의 Review 버튼을 두지 않는다. */}
+                  <button
+                    type="button"
+                    className="explorer-row__main"
+                    onClick={() =>
+                      navigate(
+                        `/w/${workspace.id}/risks?artifact_id=${encodeURIComponent(artifact.artifact_id)}`,
+                      )
+                    }
+                  >
                     <span className="explorer-icon" aria-hidden="true">📄</span>
                     <span className="explorer-row__name">{artifact.display_name}</span>
                     <span className="explorer-row__meta">
@@ -319,16 +330,8 @@ export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
                         ? ` · Risk ${artifact.active_risk_count}/${artifact.risk_count}`
                         : ""}
                     </span>
-                  </div>
+                  </button>
                   <span className="explorer-row__side">
-                    {artifact.first_risk_id === null ? null : (
-                      <Link
-                        className="text-link"
-                        to={`/w/${workspace.id}/risks/${encodeURIComponent(artifact.first_risk_id)}`}
-                      >
-                        Review →
-                      </Link>
-                    )}
                     <Badge tone={toneFor(artifact.analysis_status ?? artifact.availability)}>
                       {artifact.analysis_status ?? artifact.availability}
                     </Badge>
@@ -401,6 +404,20 @@ export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
                   void startInstall();
                 }}
               />
+            ) : selected === "GITHUB" ? (
+              // 설치가 없어도 창부터 보인다 — redirect 는 버튼을 눌렀을 때뿐이다.
+              <div className="source-completion">
+                <p className="eyebrow">GitHub App</p>
+                <h2>Select repository and branch</h2>
+                <p>
+                  아직 이 계정에 연결된 GitHub App 설치가 없습니다. 아래 버튼으로
+                  GitHub 에서 App 을 설치하고 저장소를 고르면, 다음부터는 이 창에서
+                  redirect 없이 바로 연결됩니다.
+                </p>
+                <Button type="button" onClick={() => void startInstall()}>
+                  GitHub App에 repo 추가
+                </Button>
+              </div>
             ) : selected === "GOOGLE_DRIVE" || (completion && provider === "GOOGLE_DRIVE") ? (
               <DriveFolderShare
                 sourceApi={sourceApi}

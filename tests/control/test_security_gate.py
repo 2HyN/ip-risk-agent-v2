@@ -699,3 +699,85 @@ def test_secrets_that_look_like_secrets_are_still_masked():
         "Authorization: Bearer abcdefghijklmnop", keyword_patterns=False
     )
     assert REDACTION_PLACEHOLDER in bearer
+
+
+def test_an_ignored_file_closes_its_open_risks_as_excluded() -> None:
+    """ignore 에 걸린 파일의 열린 Risk 는 EXCLUDED 로 닫힌다.
+
+    정책이 파일을 분석에서 뺐는데 옛 Risk 가 활성 목록에 남으면, 아무도 다시
+    보지 않을 위험이 아직 지켜보는 것처럼 읽힌다. 추적 해제·mount 일시중지와
+    같은 의미론이다 — 지우지 않으므로 규칙을 지우고 재검사하면 되살아난다.
+    """
+    from ip_risk_agent.core.risk import (
+        ReviewDisposition,
+        ReviewPriority,
+        Risk,
+        RiskLifecycleState,
+    )
+    from iprisk_contracts import AnalysisType
+
+    async def scenario() -> None:
+        store, _, job_id, artifact_id = await seed_running_job(
+            path_hint="private/secret.py",
+            source_artifact_id="repo:path:private/secret.py",
+        )
+        async with store() as uow:
+            await uow.risks.add(
+                Risk(
+                    id="risk-1",
+                    risk_workspace_id="vws-1",
+                    artifact_id=artifact_id,
+                    analysis_type=AnalysisType.LICENSE,
+                    risk_key="risk-key-1",
+                    lifecycle_state=RiskLifecycleState.EXISTING,
+                    review_disposition=ReviewDisposition.UNREVIEWED,
+                    review_priority=ReviewPriority.HIGH,
+                    summary="Old finding",
+                    first_seen_at=NOW,
+                    last_seen_at=NOW,
+                    latest_analysis_job_id=job_id,
+                    updated_at=NOW,
+                )
+            )
+            workspace = await uow.workspaces.get("vws-1")
+            assert workspace is not None
+            await uow.workspaces.save(
+                replace(
+                    workspace,
+                    security_policy_version="security-v2",
+                    global_ignore_text="private/**\n",
+                    updated_at=NOW + timedelta(seconds=1),
+                )
+            )
+            await uow.commit()
+
+        gate = SecurityGateService(
+            unit_of_work_factory=store,
+            policy_resolver=InMemorySecurityPolicyResolver(
+                (("vws-1", SecurityGatePolicy(policy_version="security-v2")),)
+            ),
+            clock=lambda: NOW + timedelta(seconds=3),
+            use_canonical_workspace_policy_text=True,
+        )
+        result = await gate.build_analysis_artifact(
+            make_snapshot(
+                path_hint="private/secret.py",
+                source_artifact_id="repo:path:private/secret.py",
+            ),
+            job_id,
+        )
+        assert result.denial_reason is SecurityGateDenialReason.GLOBAL_IGNORE_DENIED
+
+        async with store() as uow:
+            risk = await uow.risks.get("risk-1")
+            assert risk is not None
+            assert risk.review_disposition is ReviewDisposition.EXCLUDED
+            assert risk.lifecycle_state is RiskLifecycleState.RESOLVED
+            assert risk.review_version == 1
+            events = await uow.risks.list_events("risk-1")
+            assert any(
+                event.reason_safe == "ipriskignore policy excluded the file"
+                for event in events
+            )
+
+    run(scenario())

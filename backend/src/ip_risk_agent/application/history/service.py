@@ -236,6 +236,9 @@ def _risk_entry(
         actor_type=event.actor_type,
         actor_user_id=event.actor_user_id,
         risk_id=risk.id,
+        # 화면이 id 를 파일 이름으로 되짚을 열쇠. 이것이 없으면 로그가 해시
+        # 덩어리로만 보인다 — 사건은 파일에서 났는데 파일을 말하지 않았다.
+        artifact_id=risk.artifact_id,
         metadata_safe=sanitize_history_mapping(
             {
                 "previous_state": event.previous_state_safe,
@@ -243,6 +246,10 @@ def _risk_entry(
                 "analysis_job_id": event.analysis_job_id,
                 "evidence_refs": event.evidence_refs,
                 "reason": event.reason_safe,
+                # 사람이 읽는 로그의 본문. Risk 를 열지 않고도 무엇이 감지·해소
+                # 됐는지 알 수 있어야 한다.
+                "analysis_type": risk.analysis_type.value,
+                "summary": risk.summary,
             },
             safety,
         ),

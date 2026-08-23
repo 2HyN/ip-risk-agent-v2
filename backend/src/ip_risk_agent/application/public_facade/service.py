@@ -139,6 +139,7 @@ class ControlPlaneFacade:
             clock=clock,
             concurrency_attempts=config.concurrency_attempts,
             use_canonical_workspace_policy_text=True,
+            id_factory=id_factory,
         )
         self._analysis_results = AnalysisResultIntakeService(
             unit_of_work_factory=unit_of_work_factory,

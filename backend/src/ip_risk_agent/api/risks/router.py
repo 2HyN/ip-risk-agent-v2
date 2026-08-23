@@ -122,6 +122,9 @@ def create_risks_router(deps: RiskRouterDependencies) -> APIRouter:
         review_priority: ReviewPriority | None = None,
         mount_id: str | None = None,
         source_type: SourceType | None = None,
+        # 파일 하나의 Risk 만 본다 — Files 에서 파일을 눌러 넘어오는 길.
+        # 화면에서 거르면 페이지네이션 밖의 Risk 가 새므로 서버가 거른다.
+        artifact_id: str | None = None,
     ):
         await require_workspace_action(
             deps.unit_of_work_factory,
@@ -154,6 +157,7 @@ def create_risks_router(deps: RiskRouterDependencies) -> APIRouter:
                             review_priority is None
                             or risk.review_priority is review_priority
                         )
+                        and (artifact_id is None or risk.artifact_id == artifact_id)
                     ),
                     key=lambda risk: (risk.updated_at, risk.id),
                     reverse=True,
@@ -186,7 +190,7 @@ def create_risks_router(deps: RiskRouterDependencies) -> APIRouter:
         scope = (
             "risks:"
             f"{vws_id}:{analysis_type}:{lifecycle_state}:{review_disposition}:"
-            f"{review_priority}:{mount_id}:{source_type}"
+            f"{review_priority}:{mount_id}:{source_type}:{artifact_id}"
         )
         selected, next_cursor = paginate(
             tuple(projected),

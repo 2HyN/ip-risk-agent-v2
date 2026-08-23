@@ -10,6 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import PurePosixPath
+from uuid import uuid4
 
 from iprisk_contracts import (
     AnalysisArtifact,
@@ -34,6 +35,7 @@ from ip_risk_agent.application.repositories import (
     ControlUnitOfWorkFactory,
     RecordNotFoundError,
 )
+from ip_risk_agent.application.risk_exclusion import exclude_artifact_risks
 from ip_risk_agent.core.artifacts import (
     Artifact,
     ArtifactAvailability,
@@ -143,6 +145,7 @@ class SecurityGateService:
         clock: Clock,
         concurrency_attempts: int = 3,
         use_canonical_workspace_policy_text: bool = False,
+        id_factory: Callable[[str], str] | None = None,
     ) -> None:
         if concurrency_attempts < 1:
             raise ValueError("concurrency_attempts must be positive")
@@ -152,6 +155,11 @@ class SecurityGateService:
         self._concurrency_attempts = concurrency_attempts
         self._use_canonical_workspace_policy_text = (
             use_canonical_workspace_policy_text
+        )
+        # ignore 정책 제외가 남기는 Risk 이력의 id. 게이트를 직접 만드는 시험을
+        # 위해 기본값을 둔다.
+        self._id_factory = id_factory or (
+            lambda kind: f"{kind}-{uuid4().hex}"
         )
 
     async def build_analysis_artifact(
@@ -379,6 +387,24 @@ class SecurityGateService:
             )
         await uow.analysis_jobs.save(job)
         await uow.change_events.save(event)
+        if reason in {
+            SecurityGateDenialReason.GLOBAL_IGNORE_DENIED,
+            SecurityGateDenialReason.SOURCE_IGNORE_DENIED,
+        }:
+            # 정책이 이 파일을 분석에서 뺐다. 그 순간부터 이 파일의 Risk 는 아무도
+            # 다시 보지 않는데, 활성 목록에 남겨 두면 아직 지켜보는 것처럼 읽힌다.
+            # 추적 해제·mount 일시중지와 같은 의미론으로 EXCLUDED 로 닫는다 —
+            # 지우지 않으므로, 규칙을 지우고 다시 검사하면 `should_revive` 가
+            # 되살린다. 이미 제외된 것은 건너뛰므로 거부가 반복돼도 이력이 붇지
+            # 않는다.
+            await exclude_artifact_risks(
+                uow,
+                risk_workspace_id=context.workspace.id,
+                artifact_id=context.artifact.id,
+                occurred_at=occurred_at,
+                reason_safe="ipriskignore policy excluded the file",
+                id_factory=self._id_factory,
+            )
 
 
 async def _load_context(

@@ -1441,3 +1441,96 @@ button.explorer-row__main:hover .explorer-row__name {
 .activity-metadata__key {
   color: var(--muted);
 }
+
+/* Review — 카드끼리 열이 맞아야 한다. 내용 길이에 열 폭이 끌려가지 않게 고정. */
+.review-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.review-table th:nth-child(1) {
+  width: auto;
+}
+.review-table th:nth-child(2),
+.review-table th:nth-child(3) {
+  width: 110px;
+}
+.review-table th:nth-child(4) {
+  width: 120px;
+}
+.review-table th:nth-child(5) {
+  width: 150px;
+}
+.review-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Review — 왼쪽 소스 레일 */
+.review-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.review-rail {
+  flex: 0 0 200px;
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.review-rail button {
+  border: 0;
+  background: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-rail button:hover {
+  background: var(--soft);
+}
+.review-rail button.is-active {
+  background: rgba(38, 103, 216, 0.1);
+  color: var(--blue);
+  font-weight: 600;
+}
+.review-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.filter-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(38, 103, 216, 0.06);
+  font-size: 0.9rem;
+}
+@media (max-width: 900px) {
+  .review-layout {
+    flex-direction: column;
+  }
+  .review-rail {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+}

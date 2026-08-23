@@ -54,6 +54,21 @@ export function analysisFailureNotice(
         "기존 Risk 를 해소하지는 않습니다. 다시 검사하면 완결될 수 있습니다.",
     };
   }
+  if (
+    code === "SECURITY_GATE:GLOBAL_IGNORE_DENIED" ||
+    code === "SECURITY_GATE:SOURCE_IGNORE_DENIED"
+  ) {
+    // 오류가 아니라 정책의 결과다. 이 파일의 열린 Risk 는 '제외됨' 으로 함께
+    // 닫힌다 — 규칙을 지우고 다시 검사하면 되살아난다.
+    return {
+      tone: "info",
+      title: "정책으로 검사에서 제외된 파일입니다",
+      detail:
+        "Security & data 의 .ipriskignore 규칙에 걸려 분석하지 않았습니다. " +
+        "이 파일의 기존 Risk 는 '제외됨' 으로 닫힙니다. " +
+        "다시 검사하려면 규칙을 지운 뒤 재검사하세요.",
+    };
+  }
   if (code.startsWith("SOURCE:REVISION_SUPERSEDED")) {
     return {
       tone: "warning",

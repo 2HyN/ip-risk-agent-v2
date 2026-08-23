@@ -45,7 +45,8 @@ describe("ControlPlaneApp", () => {
     render(<ControlPlaneApp router="hash" integration={{ openOriginal }} />);
     await userEvent.click(await screen.findByRole("button", { name: /open on github/i }));
     expect(openOriginal).toHaveBeenCalledWith({ workspaceId: "vws-1", artifactId: "artifact-1", action: "SOURCE_OPEN_ORIGINAL", sourceType: "GITHUB" });
-    expect(screen.getByText("No raw source preview")).toBeInTheDocument();
+    // 원문은 절대 그리지 않는다 — 남긴 발췌가 없으면 빈 상태만 보인다.
+    expect(screen.getByText("No retained excerpt")).toBeInTheDocument();
   });
 
   it.each([

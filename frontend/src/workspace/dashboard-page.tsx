@@ -1,10 +1,11 @@
-import { useCallback } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { useResource } from "../shared/hooks/use-resource";
 import { useAnalysisProgress } from "../shared/hooks/use-analysis-progress";
 import {
   Badge,
+  Button,
   Card,
   ErrorState,
   LoadingState,
@@ -14,11 +15,36 @@ import { useWorkspace } from "./workspace-context";
 
 export function DashboardPage() {
   const { api } = useSession();
-  const { workspace } = useWorkspace();
+  const { workspace, role } = useWorkspace();
+  const navigate = useNavigate();
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<Error | null>(null);
   const resource = useResource(
     () => api.dashboard(workspace.id),
     [api, workspace.id],
   );
+
+  async function deleteWorkspace(): Promise<void> {
+    // 지우면 이 workspace 의 마운트·Risk·이력이 모두 정리 대상이 된다.
+    // 이름을 되묻는 확인 한 번으로는 부족할 수 있지만, confirm 없이 지우는
+    // 것보다는 낫다 — 버튼도 OWNER 에게만 보인다.
+    const confirmed = window.confirm(
+      `"${workspace.name}" workspace를 삭제할까요?\n` +
+        "마운트, Risk, 이력이 모두 삭제 절차에 들어가며 되돌릴 수 없습니다.",
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteWorkspace(workspace.id);
+      navigate("/");
+    } catch (reason) {
+      setDeleteError(
+        reason instanceof Error ? reason : new Error("Workspace를 삭제하지 못했습니다."),
+      );
+      setDeleting(false);
+    }
+  }
   if (resource.loading)
     return <LoadingState label="Calculating workspace status" />;
   if (resource.error !== null)
@@ -45,14 +71,26 @@ export function DashboardPage() {
           "Canonical risk, analysis, and source health at a glance."
         }
         actions={
-          <Link
-            className="button button--primary"
-            to={`/w/${workspace.id}/risks`}
-          >
-            Review risks
-          </Link>
+          <div className="button-row">
+            <Link
+              className="button button--primary"
+              to={`/w/${workspace.id}/risks`}
+            >
+              Review risks
+            </Link>
+            {role === "OWNER" ? (
+              <Button
+                variant="danger"
+                disabled={deleting}
+                onClick={() => void deleteWorkspace()}
+              >
+                {deleting ? "Deleting…" : "Delete workspace"}
+              </Button>
+            ) : null}
+          </div>
         }
       />
+      {deleteError === null ? null : <ErrorState error={deleteError} />}
       <div className="metric-grid">
         {metrics.map(([label, value, note]) => (
           <Card key={label} className="metric">
