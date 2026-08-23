@@ -35,19 +35,15 @@
 
 ## 1. 픽스처 저장소
 
-`tests/fixtures/integration-repo/` 의 13 개 파일을 **그대로** 새 GitHub 저장소에 올린다.
-private 이어도 된다 — App 이 설치된 곳이면 된다.
+**올라가 있다.** https://github.com/2HyN/sample_INDETERMINATE (`main`, `3459a3c`)
 
-**소스 코드도 문서도 넣지 않는다.** `SOURCE_CODE` 와 `DOCUMENT_TEXT` 는 특허 경로로 가고
-분석 한 건이 KIPRIS 를 11 회쯤 쓴다. 한도가 월 1,000 회다. `README.md` 도 `LICENSE` 도
-넣지 말 것 — `LICENSE.txt` 는 지금 특허 경로로 간다 (결함 26).
+`tests/fixtures/integration-repo/` 의 13 개 파일 그대로다. 저장소를 다시 만들 일이 있으면
+그 폴더를 복사해 올리면 된다.
 
-```powershell
-gh repo create iprisk-integration-fixture --private
-git -C <새 폴더> init
-Copy-Item -Recurse tests/fixtures/integration-repo/* <새 폴더>
-git -C <새 폴더> add -A; git -C <새 폴더> commit -m "fixture"; git -C <새 폴더> push
-```
+**소스 코드도 문서도 없다.** `SOURCE_CODE` 와 `DOCUMENT_TEXT` 는 특허 경로로 가고 분석
+한 건이 KIPRIS 를 11 회쯤 쓴다. 한도가 월 1,000 회다. `README.md` 를 하나 넣으면 이
+픽스처가 돌 때마다 한도를 쓴다 — 지금은 **0 회**다. `LICENSE` 도 넣지 않는다.
+`LICENSE.txt` 는 지금 특허 경로로 간다 (결함 26).
 
 ### 파일마다 무엇을 붙잡는가
 
@@ -93,10 +89,36 @@ git -C <새 폴더> add -A; git -C <새 폴더> commit -m "fixture"; git -C <새
 | `pyarmor@9.2.6` | UNKNOWN | **INDETERMINATE** | pypi.org | 독점. 모르는 것이 맞다 |
 | `chalk@99.99.99` | UNKNOWN | **INDETERMINATE** | registry.npmjs.org | **0-K** — `VERSION_NOT_IN_REGISTRY` |
 
-분포는 LOW 1 · MEDIUM 6 · HIGH 5 · INDETERMINATE 3 이다.
+분포는 **LOW 1 · MEDIUM 8 · HIGH 5 · INDETERMINATE 3** 이다 (`chalk` · `node-forge` 가 두 파일에
+걸쳐 있어 MEDIUM 이 둘 더 나온다).
 
 > **MEDIUM 이 많은 것은 정상이다.** MIT·Apache-2.0 도 고지 의무가 있어
 > `NOTICE_REQUIRED` → MEDIUM 이다. `LOW` 는 의무가 정말 없는 것(WTFPL)에만 붙는다.
+
+### 파일 단위 기대값
+
+| 파일 | 결과 | corpus 판본 | 왜 |
+|---|---|---|---|
+| `broken/package.json` | **PARTIAL** · 후보 0 | — | 0-C. 이것만 `COMPLETE` 가 아니다 |
+| `pyproject.toml` | COMPLETE | **있음** | mysqlclient GPL-2.0 |
+| `requirements.txt` | COMPLETE | **있음** | PyQt5 GPL-3.0 |
+| `requirements-dev.txt` | COMPLETE | **있음** | pikepdf MPL-2.0 |
+| `requirements.lock` | COMPLETE | **있음** | paramiko LGPL-2.1 |
+| `setup.cfg` | COMPLETE | **있음** | PyMuPDF AGPL-3.0 |
+| `uv.lock` · `poetry.lock` · `missing-version/package.json` | COMPLETE | **있음** | `UNKNOWN` 도 검색을 시도한다 |
+| `constraints.txt` · `package.json` · `package-lock.json` · `requirements/base.txt` | COMPLETE | **없음** | 전부 고지 의무뿐이라 부르지 않는다 |
+
+**INDETERMINATE 세 건이 0-H 의 핵심 사례다.** 판본은 남고 `LICENSE_REFERENCE` 근거는
+**0 건**이어야 한다. `UNKNOWN` 은 게이트가 규칙으로 배제하므로 조각이 하나도 붙지 않는데,
+그것과 "검색을 아예 안 했다" 가 구별되어야 한다. 예전에는 둘 다 `null` 이라 같아 보였다.
+
+`node-forge` 는 `BSD-3-Clause OR GPL-2.0-only` 인데 **MEDIUM 이 맞다.** `OR` 에서 이끄는
+leaf 가 BSD 뿐이라 GPL 근거가 붙지 않고 검색도 하지 않는다 (0-G). HIGH 로 보이거나 GPL
+문서가 근거로 붙으면 회귀다.
+
+`chalk` 와 `node-forge` 는 `package.json` 과 `package-lock.json` **양쪽에** 있어 Risk 가
+둘씩 생긴다. 중복이 아니라 고칠 자리가 두 곳이라는 뜻이다. 그래서 선언 17 건 →
+**Risk 17 건**이다.
 
 ---
 
