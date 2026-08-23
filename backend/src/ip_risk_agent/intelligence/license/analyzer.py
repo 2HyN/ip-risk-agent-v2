@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from iprisk_contracts import AnalysisArtifact
 from iprisk_contracts.common import (
@@ -37,6 +38,11 @@ from typing import Protocol
 from ip_risk_agent.core.workspaces.license_profile import WorkspaceLicensePolicy
 
 from . import lockfiles, manifests, policy, spdx
+from .cache import (
+    CachedClauseSearch,
+    ClauseSearchCache,
+    clause_cache_key,
+)
 from .dependency_models import (
     DependencyDeclaration,
     DependencyParseError,
@@ -163,9 +169,12 @@ class LicenseAnalyzer:
         *,
         retriever: ReferenceRetriever | None = None,
         workspace_license_policy: WorkspaceLicensePolicyLookup | None = None,
+        clause_cache: ClauseSearchCache | None = None,
     ) -> None:
         self._metadata = metadata_provider
         self._retriever = retriever
+        # 같은 라이선스가 여러 패키지에 반복된다. 없으면 캐시 없이 동작한다 (§9.2).
+        self._clause_cache = clause_cache
         # Control 이 workspace 에서 읽어 주는 **함수 하나**다. 이 plane 은 그것이
         # 어디서 오는지 모른다 (§3 · §5.10). 특허 쪽 `previously_matched_patents` 와
         # 같은 모양이다.
@@ -368,7 +377,13 @@ class LicenseAnalyzer:
             )
 
         degraded = await self._attach_reference_evidence(
-            declaration, fact.license_expression, outcome, evidence_ids, builder, versions
+            declaration,
+            fact.license_expression,
+            outcome,
+            evidence_ids,
+            builder,
+            versions,
+            workspace_policy,
         )
 
         return (
@@ -392,6 +407,7 @@ class LicenseAnalyzer:
         evidence_ids: list[str],
         builder: ResultBuilder,
         versions: dict[str, str | None],
+        workspace_policy: WorkspaceLicensePolicy,
     ) -> bool:
         """정책 판정의 근거가 될 라이선스 조항을 붙인다.
 
@@ -409,20 +425,47 @@ class LicenseAnalyzer:
         # 때문인지 다른 것 때문인지 가를 수 없다 (§7.4 의 원인 귀속).
         versions["rag_corpus_version"] = self._retriever.corpus_version
 
-        try:
-            chunks = await self._retriever.retrieve(
-                reference_query(expression, outcome), top_k=3
-            )
-        except Exception as exc:  # noqa: BLE001 - provider 예외를 결과로 옮긴다
-            failure = (
-                exc
-                if isinstance(exc, ProviderFailureError)
-                else ProviderFailureError(
-                    "RAG_ENGINE", FailureCategory.UNAVAILABLE, type(exc).__name__
+        profile = workspace_policy.profile
+        cache_key = clause_cache_key(
+            license_expression=expression,
+            outcome=outcome,
+            corpus_version=self._retriever.corpus_version,
+            # 축이 빠지면 SaaS workspace 의 조항 결과가 사내 전용 workspace 에 그대로
+            # 서빙된다. D7 의 "워크스페이스는 서로 완전히 독립" 이 깨진다 (§9.2).
+            axes_hash=profile.axes_hash if profile is not None else "unset",
+        )
+        cached = (
+            await self._clause_cache.get_clause_search(cache_key)
+            if self._clause_cache is not None
+            else None
+        )
+
+        if cached is not None:
+            chunks = list(cached.chunks)
+        else:
+            try:
+                chunks = await self._retriever.retrieve(
+                    reference_query(expression, outcome, profile), top_k=3
                 )
-            )
-            builder.record_failure(failure)
-            return True
+            except Exception as exc:  # noqa: BLE001 - provider 예외를 결과로 옮긴다
+                failure = (
+                    exc
+                    if isinstance(exc, ProviderFailureError)
+                    else ProviderFailureError(
+                        "RAG_ENGINE", FailureCategory.UNAVAILABLE, type(exc).__name__
+                    )
+                )
+                builder.record_failure(failure)
+                return True
+            if self._clause_cache is not None:
+                # **게이트 통과 전**을 담는다. 주제 일치 판정은 순수 계산이라 아낄 것이
+                # 없고, 판정 결과를 담으면 게이트를 고쳐도 옛 판단이 계속 서빙된다.
+                await self._clause_cache.put_clause_search(
+                    cache_key,
+                    CachedClauseSearch(
+                        chunks=tuple(chunks), stored_at=datetime.now(timezone.utc)
+                    ),
+                )
 
         # 임베딩 검색은 관련 문서가 없어도 항상 top_k 개를 돌려준다. 주제가 맞는
         # 것만 남긴다 — 근거가 없는 것보다 틀린 근거가 붙는 것이 나쁘다.

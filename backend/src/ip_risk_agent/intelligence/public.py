@@ -106,6 +106,7 @@ def create_analyzer_registry(
     patent_response_cache=None,
     previously_matched_patents=None,
     workspace_license_policy=None,
+    clause_cache=None,
 ) -> AnalyzerRegistry:
     """Analyzer 를 조립한다.
 
@@ -119,6 +120,8 @@ def create_analyzer_registry(
             # 배포 형태를 모르면 4·5 단계를 돌리지 않는다 (§5.10). 넣지 않으면
             # **설정 안 된 것**으로 다뤄져 등급 대신 확인 필요가 나온다.
             workspace_license_policy=workspace_license_policy,
+            # 같은 라이선스가 여러 패키지에 반복된다 (§9.2).
+            clause_cache=clause_cache,
         )
     ]
     if search_provider is not None:
