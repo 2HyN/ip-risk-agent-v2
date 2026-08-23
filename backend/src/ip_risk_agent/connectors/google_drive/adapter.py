@@ -54,6 +54,7 @@ from ..common.fingerprint import drive_change_fingerprint
 from ..common.runtime_store import DriveRuntime
 from .connection_lookup import DriveConnectionContext, DriveConnectionLookup
 from .models import SELECTABLE_MIME_TYPES, DriveProvider
+from .paths import resolve_path_hint
 from .tracking_scope import DriveTrackingScope
 
 
@@ -247,7 +248,12 @@ class GoogleDriveAdapter:
             resolved_revision=drive_file.revision_id or "unknown",
             retrieved_at=datetime.now(timezone.utc),
             display_name=display_name_for(drive_file.name),
-            logical_path_hint=None,
+            # 예전에는 `None` 이라 Drive 아티팩트의 `logical_path` 가 `별칭/파일이름`
+            # 으로 평평했다. 폴더가 다른 같은 이름의 파일이 구별되지 않고, UI 트리를
+            # 만들 근거가 없었다 (§6.1).
+            logical_path_hint=resolve_path_hint(
+                provider, file_id, drive_file.name, drive_file.parents
+            ),
             mime_type=drive_file.mime_type,
             artifact_kind=self._infer_artifact_kind(drive_file.name, drive_file.mime_type),
             content_scope=ContentScope.FULL_TEXT,
@@ -335,7 +341,9 @@ class GoogleDriveAdapter:
             resolved_revision=resolved_revision,
             retrieved_at=datetime.now(timezone.utc),
             display_name=change.artifact.display_name,
-            logical_path_hint=None,
+            # 지어내지 않는다. 변경이 들고 온 값이 등록에 쓰인 그 값이고, 없으면
+            # `None` 이 맞다 — 지운 파일은 메타데이터를 읽을 수 없다.
+            logical_path_hint=change.artifact.path_hint,
             mime_type=None,
             artifact_kind=ArtifactKind.UNKNOWN,
             content_scope=ContentScope.UNSUPPORTED,
@@ -415,6 +423,8 @@ class GoogleDriveAdapter:
 
         now = datetime.now(timezone.utc)
         changes: list[SourceChange] = []
+        # 같은 폴더가 여러 파일의 조상이다. 한 번 훑는 동안 재사용한다.
+        path_cache: dict[str, tuple[str, tuple[str, ...]]] = {}
         for item in page.changes:
             if item.file_id not in tracked_ids:
                 continue
@@ -436,6 +446,10 @@ class GoogleDriveAdapter:
                     artifact=SourceArtifactRef(
                         source_artifact_id=item.file_id,
                         display_name=self._display_name(scope, item.file_id),
+                        # 아티팩트의 `logical_path` 를 정하는 곳이 여기다. 가져오기가
+                        # 내는 값과 **같아야** 한다 — 다르면 게이트가
+                        # `CANONICAL_CONTEXT_MISMATCH` 로 거부한다.
+                        path_hint=self._path_hint(provider, item.file_id, path_cache),
                     ),
                     change_type=change_type,
                     revision=item.revision_id,
@@ -459,6 +473,26 @@ class GoogleDriveAdapter:
             )
 
         return ReconcileResult(changes=changes, next_cursor=next_cursor, has_more=has_more)
+
+    @staticmethod
+    def _path_hint(
+        provider,
+        file_id: str,
+        cache: dict[str, tuple[str, tuple[str, ...]]],
+    ) -> str | None:
+        """대조가 쓰는 경로. 읽지 못하면 ``None`` 이다.
+
+        지운 파일은 메타데이터를 못 읽는다. 그때 경로를 지어내면 등록된 것과 달라져
+        게이트가 거부한다. 모르면 안 넘기는 것이 맞다 — 이미 등록된 아티팩트의 경로는
+        그대로 남는다.
+        """
+        try:
+            found = provider.get_file(file_id)
+        except Exception:  # noqa: BLE001 - 지운 파일은 읽히지 않는다
+            return None
+        return resolve_path_hint(
+            provider, file_id, found.name, found.parents, cache=cache
+        )
 
     @staticmethod
     def _display_name(scope: DriveTrackingScope | None, file_id: str) -> str:

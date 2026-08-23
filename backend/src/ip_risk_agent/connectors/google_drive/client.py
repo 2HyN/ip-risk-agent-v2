@@ -58,7 +58,7 @@ class GoogleDriveProvider:
         try:
             response = (
                 self._service.files()
-                .get(fileId=file_id, fields="id,name,mimeType,modifiedTime,version,webViewLink")
+                .get(fileId=file_id, fields="id,name,mimeType,modifiedTime,version,webViewLink,parents")
                 .execute()
             )
         except HttpError as exc:
@@ -78,7 +78,7 @@ class GoogleDriveProvider:
             self._service.files()
             .create(
                 body={"name": name, "mimeType": GOOGLE_DOC_MIME_TYPE},
-                fields="id,name,mimeType,modifiedTime,version,webViewLink",
+                fields="id,name,mimeType,modifiedTime,version,webViewLink,parents",
             )
             .execute()
         )
@@ -169,6 +169,7 @@ class GoogleDriveProvider:
             modified_time=response.get("modifiedTime"),
             revision_id=response.get("version"),
             web_view_link=response.get("webViewLink"),
+            parents=tuple(response.get("parents") or ()),
         )
 
 

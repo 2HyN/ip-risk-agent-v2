@@ -34,6 +34,9 @@ class DriveFile:
     modified_time: str | None
     revision_id: str | None
     web_view_link: str | None
+    #: 부모 폴더 id. Drive 는 여러 개를 허용하지만 우리는 첫 번째만 따라간다 —
+    #: 경로가 하나여야 트리가 하나가 된다.
+    parents: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
