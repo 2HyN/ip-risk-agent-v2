@@ -313,7 +313,9 @@ class ControlPlaneFacade:
         async with self._unit_of_work_factory() as uow:
             risks = await uow.risks.list_for_artifact(artifact_id, AnalysisType.PATENT)
             for risk in risks:
-                for evidence in await uow.risks.list_evidence(risk.id):
+                for evidence in await uow.risks.list_evidence(
+                    risk.id, analysis_job_id=risk.latest_analysis_job_id
+                ):
                     parts = evidence.evidence_id_from_result.split(":")
                     if len(parts) >= 2 and parts[0] == "patent" and parts[1]:
                         if parts[1] not in numbers:

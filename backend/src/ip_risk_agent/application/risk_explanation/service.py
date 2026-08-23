@@ -97,7 +97,9 @@ class RiskExplanationService:
                 if risk.explanation_safe and not overwrite:
                     skipped.append(risk_id)
                     continue
-                evidence = await uow.risks.list_evidence(risk_id)
+                evidence = await uow.risks.list_evidence(
+                    risk_id, analysis_job_id=risk.latest_analysis_job_id
+                )
             if not evidence:
                 skipped.append(risk_id)
                 continue

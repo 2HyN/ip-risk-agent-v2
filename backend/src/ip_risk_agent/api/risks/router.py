@@ -212,7 +212,13 @@ def create_risks_router(deps: RiskRouterDependencies) -> APIRouter:
         )
         async with deps.unit_of_work_factory() as uow:
             risk = await uow.risks.get(risk_id)
-            evidence = () if risk is None else await uow.risks.list_evidence(risk.id)
+            evidence = (
+                ()
+                if risk is None
+                else await uow.risks.list_evidence(
+                    risk.id, analysis_job_id=risk.latest_analysis_job_id
+                )
+            )
             artifact = None if risk is None else await uow.artifacts.get(risk.artifact_id)
             mount = None if artifact is None else await uow.mounts.get(artifact.mount_id)
         if risk is None or risk.risk_workspace_id != vws_id:

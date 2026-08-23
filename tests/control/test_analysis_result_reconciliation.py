@@ -1455,3 +1455,62 @@ def test_a_manifest_emptied_on_purpose_does_resolve() -> None:
         assert len(acceptance.resolved_risk_ids) == 1
 
     run(scenario())
+
+
+# --------------------------------------------------------------------- 결함 22
+
+
+def test_old_evidence_survives_for_the_ledger_but_not_for_the_verdict() -> None:
+    """근거는 실행마다 쌓인다. 그런데 **지금 판정 옆에 서면 안 된다.**
+
+    ``clear_evidence`` 가 같은 실행의 행만 지우는 것은 의도다 — 이력
+    (``RiskEvent.evidence_refs``)이 옛 행을 가리키므로, 지우면 "그때 무엇을 보고 그렇게
+    판단했는가" 를 되짚을 수 없다.
+
+    대신 읽을 때 건다. 안 걸면 옛 corpus 판본에서 나온 조각이 현재 판정 옆에 나란히 서고,
+    판정에 적힌 ``rag_corpus_version`` 과 근거가 서로 다른 시점을 가리킨다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        service = make_service(store)
+
+        job1, started1 = await add_running_job(
+            store,
+            suffix="evi-1",
+            revision="revision-1",
+            requested=(AnalysisType.LICENSE,),
+        )
+        await service.accept_analysis_result(
+            license_result(job1, "revision-1", started1)
+        )
+
+        job2, started2 = await add_running_job(
+            store,
+            suffix="evi-2",
+            revision="revision-2",
+            requested=(AnalysisType.LICENSE,),
+            offset_seconds=10,
+        )
+        await service.accept_analysis_result(
+            license_result(job2, "revision-2", started2)
+        )
+
+        async with store() as uow:
+            risk = (
+                await uow.risks.list_for_artifact("artifact-1", AnalysisType.LICENSE)
+            )[0]
+            assert risk.latest_analysis_job_id == job2
+
+            everything = await uow.risks.list_evidence(risk.id)
+            current = await uow.risks.list_evidence(
+                risk.id, analysis_job_id=risk.latest_analysis_job_id
+            )
+
+            # 이력을 위해 옛 행이 남아 있다.
+            assert {item.analysis_job_id for item in everything} == {job1, job2}
+            # 지금 판정이 보는 것은 이번 실행뿐이다.
+            assert {item.analysis_job_id for item in current} == {job2}
+            assert len(current) < len(everything)
+
+    run(scenario())

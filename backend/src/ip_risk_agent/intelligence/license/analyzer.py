@@ -310,6 +310,14 @@ class LicenseAnalyzer:
         if self._retriever is None or not policy.needs_review(outcome):
             return False
 
+        # 검색을 실제로 시도했다는 사실을 먼저 남긴다. 예전에는 조각이 **붙었을 때만**
+        # 기록해서, 주제 불일치로 전부 버린 경우와 조회 실패가 `None` 으로 같아졌다.
+        #
+        # corpus 갱신이 판정을 바꾸는 구조에서 이 필드가 **감사의 전부**다. 어느 판본을
+        # 보고 내린 판단인지 모르면, corpus 를 올린 뒤 판정이 달라졌을 때 그것이 corpus
+        # 때문인지 다른 것 때문인지 가를 수 없다 (§7.4 의 원인 귀속).
+        versions["rag_corpus_version"] = self._retriever.corpus_version
+
         try:
             chunks = await self._retriever.retrieve(
                 reference_query(expression, outcome), top_k=3
@@ -333,7 +341,6 @@ class LicenseAnalyzer:
             # 간다. corpus 커버리지 밖의 라이선스에서는 정상 경로다.
             return False
 
-        versions["rag_corpus_version"] = self._retriever.corpus_version
         for chunk in relevant:
             evidence_ids.append(
                 builder.ledger.add(

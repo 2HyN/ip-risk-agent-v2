@@ -796,11 +796,20 @@ class FirestoreRiskRepository(_Repository):
             removed += 1
         return removed
 
-    async def list_evidence(self, risk_id: str) -> tuple[RiskEvidence, ...]:
-        return await self._query(
+    async def list_evidence(
+        self, risk_id: str, *, analysis_job_id: str | None = None
+    ) -> tuple[RiskEvidence, ...]:
+        # 실행으로 거르는 것은 **가져온 뒤에** 한다. 두 필드 질의를 쓰면 복합 인덱스가
+        # 하나 더 필요한데, Risk 하나의 근거는 몇 건이라 그 비용을 질 이유가 없다.
+        found = await self._query(
             RISK_EVIDENCE,
             (QueryFilter("risk_id", risk_id),),
             risk_evidence_from_document,
+        )
+        if analysis_job_id is None:
+            return found
+        return tuple(
+            evidence for evidence in found if evidence.analysis_job_id == analysis_job_id
         )
 
     async def append_event(self, event: RiskEvent) -> None:

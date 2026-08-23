@@ -676,10 +676,17 @@ class InMemoryRiskRepository(_Repository):
             del self._state.risk_evidence[key]
         return len(stale)
 
-    async def list_evidence(self, risk_id: str) -> tuple[RiskEvidence, ...]:
+    async def list_evidence(
+        self, risk_id: str, *, analysis_job_id: str | None = None
+    ) -> tuple[RiskEvidence, ...]:
         self._open()
         return _sorted(
-            [evidence for evidence in self._state.risk_evidence.values() if evidence.risk_id == risk_id],
+            [
+                evidence
+                for evidence in self._state.risk_evidence.values()
+                if evidence.risk_id == risk_id
+                and (analysis_job_id is None or evidence.analysis_job_id == analysis_job_id)
+            ],
             key=lambda evidence: evidence.id,
         )
 

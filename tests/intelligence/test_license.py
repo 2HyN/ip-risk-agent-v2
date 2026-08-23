@@ -570,3 +570,43 @@ def test_not_knowing_the_version_is_said_out_loud():
     result = run(scenario())
     assert len(result.candidates) == 1
     assert "VERSION_NOT_IN_REGISTRY" in result.candidates[0].uncertainty_flags
+
+
+# ----------------------------------------------------------------- 0-H
+
+
+class _EmptyRetriever:
+    """살아 있지만 붙일 것을 못 찾는 검색기."""
+
+    corpus_version = "2026-08-23.4"
+
+    async def retrieve(self, query, *, filters=None, top_k=None):
+        return []
+
+
+def test_the_corpus_version_is_recorded_even_when_nothing_attaches():
+    """예전에는 조각이 **붙었을 때만** 기록했다.
+
+    그래서 주제 불일치로 전부 버린 경우와 조회 실패가 `None` 으로 같아졌다. corpus 갱신이
+    판정을 바꾸는 구조에서 이 필드가 **감사의 전부**다 — 어느 판본을 보고 내린 판단인지
+    모르면, corpus 를 올린 뒤 판정이 달라졌을 때 그것이 corpus 때문인지 가를 수 없다.
+    """
+    analyzer = LicenseAnalyzer(PROVIDER, retriever=_EmptyRetriever())
+    # PROVIDER 가 아는 패키지 중 needs_review 를 내는 것이어야 RAG 를 부른다.
+    result = run(analyzer.analyze(make_artifact("pymupdf==1.24.0")))
+
+    assert not any(
+        evidence.evidence_type.value == "LICENSE_REFERENCE" for evidence in result.evidence
+    ), "붙은 것이 없어야 이 시험이 뜻을 갖는다"
+    assert result.versions.rag_corpus_version == "2026-08-23.4"
+
+
+def test_a_licence_that_never_calls_rag_records_no_corpus_version():
+    """부르지도 않은 검색의 판본을 적으면 그것도 거짓말이다."""
+    analyzer = LicenseAnalyzer(PROVIDER, retriever=_EmptyRetriever())
+    result = run(analyzer.analyze(make_artifact("requests==2.32.3")))
+
+    from ip_risk_agent.intelligence.license import policy
+
+    assert not policy.needs_review(result.candidates[0].policy_outcome)
+    assert result.versions.rag_corpus_version is None
