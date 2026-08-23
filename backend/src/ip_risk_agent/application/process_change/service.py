@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -42,11 +43,28 @@ from ip_risk_agent.core.mounts import (
 )
 from ip_risk_agent.core.workspaces import RiskWorkspaceStatus
 
+from ip_risk_agent.application.risk_exclusion import (
+    exclude_artifact_risks,
+    revive_artifact_risks,
+)
+
 from .models import ChangeEvent, ChangeEventStatus, change_event_id_for
 from .queue import TaskEnqueuer
 from .transitions import requeue_change_event
 
 Clock = Callable[[], datetime]
+
+
+def _random_id(kind: str) -> str:
+    """이력 ID 기본 생성기.
+
+    composition 의 ``opaque_id`` 와 같은 모양이지만 여기서 만든다 — application 층이
+    composition 을 끌어오면 층이 뒤집힌다 (§3). 배포는 컨테이너가 넘겨 준다.
+    """
+    normalized = kind.strip().replace("_", "-")
+    if not normalized:
+        raise ValueError("id kind must not be empty")
+    return f"{normalized}-{secrets.token_urlsafe(24)}"
 
 
 class SourceChangeDisposition(StrEnum):
@@ -96,6 +114,7 @@ class SourceChangeIntakeService:
         ),
         retry_failed_events: bool = True,
         concurrency_attempts: int = 3,
+        id_factory: Callable[[str], str] = _random_id,
     ) -> None:
         requested = tuple(sorted(set(requested_analysis_types), key=lambda item: item.value))
         if not requested:
@@ -103,6 +122,7 @@ class SourceChangeIntakeService:
         if concurrency_attempts < 1:
             raise ValueError("concurrency_attempts must be positive")
         self._unit_of_work_factory = unit_of_work_factory
+        self._id_factory = id_factory
         self._task_enqueuer = task_enqueuer
         self._clock = clock
         self._requested_analysis_types = requested
@@ -140,6 +160,7 @@ class SourceChangeIntakeService:
 
             mount = await _require_source_context(uow, change)
             occurred_at = normalize_utc(self._clock(), "source_change_intake.clock")
+            previously_unavailable = await _was_unavailable(uow, change)
             artifact, state, is_new = await _apply_artifact_change(
                 uow,
                 change=change,
@@ -147,6 +168,36 @@ class SourceChangeIntakeService:
                 occurred_at=occurred_at,
             )
             is_delete = change.change_type is ChangeType.DELETE
+
+            if is_delete:
+                # 추적이 끝난 파일의 Risk 를 아무도 닫지 않았다. 해소는 분석 결과
+                # 수용에서만 일어나는데 DELETE 는 분석 작업을 만들지 않는다. 파일은
+                # 없는데 Risk 만 목록에 남았다 (§7.1).
+                #
+                # 삭제 · 폴더 이탈 · 접근 상실이 모두 여기로 들어온다. 피드에서 셋이
+                # 같은 모양으로 오고, 추적 조건이 "공유받은 폴더 안에 있는 것" 하나라
+                # 깨지는 방법을 가릴 이유가 없다.
+                await exclude_artifact_risks(
+                    uow,
+                    risk_workspace_id=change.risk_workspace_id,
+                    artifact_id=artifact.id,
+                    occurred_at=occurred_at,
+                    reason_safe="SOURCE_ARTIFACT_UNTRACKED",
+                    id_factory=self._id_factory,
+                )
+            elif previously_unavailable:
+                # 파일이 돌아왔다. 분석을 기다리면 안 된다 — 판본이 그대로면 변경
+                # 지문이 겹쳐 중복으로 처리되고 분석이 아예 돌지 않는다. 잠깐 옮겼다
+                # 되돌리는 흔한 일이 정확히 그 경우다 (§7.1).
+                await revive_artifact_risks(
+                    uow,
+                    risk_workspace_id=change.risk_workspace_id,
+                    artifact_id=artifact.id,
+                    revision=change.revision,
+                    occurred_at=occurred_at,
+                    reason_safe="SOURCE_ARTIFACT_TRACKED_AGAIN",
+                    id_factory=self._id_factory,
+                )
             event = ChangeEvent(
                 id=change_event_id_for(change.event_fingerprint),
                 event_fingerprint=change.event_fingerprint,
@@ -493,3 +544,21 @@ __all__ = [
     "SourceChangeIntakeService",
     "SourceChangeRegistration",
 ]
+
+
+async def _was_unavailable(uow: ControlUnitOfWork, change: SourceChange) -> bool:
+    """이 파일이 방금 전까지 추적 밖이었는가.
+
+    ``_apply_artifact_change`` 가 상태를 덮기 **전에** 물어야 한다. 덮고 나면 항상
+    ``AVAILABLE`` 이라 되살아난 것인지 원래 있던 것인지 알 수 없다.
+    """
+    reference = change.artifact
+    if change.change_type is ChangeType.MOVE and change.previous_artifact is not None:
+        reference = change.previous_artifact
+    existing = await uow.artifacts.get_by_source_identity(
+        change.source_workspace_id, reference.source_artifact_id
+    )
+    if existing is None:
+        return False
+    state = await uow.artifacts.get_state(existing.id)
+    return state is not None and state.availability_state is not ArtifactAvailability.AVAILABLE

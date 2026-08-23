@@ -442,7 +442,15 @@ def test_move_allows_the_previous_source_identity_to_be_reused_by_a_new_artifact
     run(scenario())
 
 
-def test_delete_marks_availability_without_job_or_risk_resolution() -> None:
+def test_delete_marks_availability_and_closes_the_risks() -> None:
+    """추적이 끝난 파일의 Risk 를 닫는다 (§7.1 · 1-D).
+
+    예전에는 아무도 닫지 않았다. 해소는 분석 결과 수용에서만 일어나는데 DELETE 는
+    분석 작업을 만들지 않으므로, **파일은 없는데 Risk 만 목록에 남았다.**
+
+    해소가 아니라 **제외**다. "알아보니 위험이 아니었다" 가 아니라 "더 이상 보지
+    않는다" 이고, 근거와 이력은 그대로 남는다.
+    """
     async def scenario() -> None:
         store = InMemoryControlStore()
         queue = InMemoryTaskEnqueuer()
@@ -489,7 +497,14 @@ def test_delete_marks_availability_without_job_or_risk_resolution() -> None:
             assert state.availability_state is ArtifactAvailability.DELETED
             assert event is not None and event.status is ChangeEventStatus.DONE
             assert await uow.analysis_jobs.list_for_change(deleted.change_event_id) == ()
-            assert risk is not None and risk.lifecycle_state is RiskLifecycleState.NEW
+            assert risk is not None
+            assert risk.lifecycle_state is RiskLifecycleState.RESOLVED
+            assert risk.review_disposition is ReviewDisposition.EXCLUDED
+            # 지우지 않는다. 이력이 왜 닫혔는지를 들고 있어야 한다.
+            events = await uow.risks.list_events("risk-1")
+            assert any(
+                event.reason_safe == "SOURCE_ARTIFACT_UNTRACKED" for event in events
+            )
 
     run(scenario())
 
