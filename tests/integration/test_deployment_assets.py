@@ -250,3 +250,27 @@ def test_every_script_reads_the_code_it_ships_beside() -> None:
         elif bootstrap > first_package:
             offenders.append(f"{path.name}: _repo_path comes after the package import")
     assert offenders == []
+
+
+
+def test_the_desktop_filter_tables_are_not_stale() -> None:
+    """데스크톱이 서버 표에서 생성된 그대로인가.
+
+    같은 판단을 두 언어가 각자 적으면 어긋난다. 실제로 어긋나 있었다 — 서버가 코드
+    확장자 29 · 문서 21 · 제외 폴더 23 을 아는 동안 데스크톱은 9 · 3 · 6 이었고,
+    `requirements.lock` · `constraints.txt` 를 감시하지 않았다.
+
+    **감시가 먼저 거른다.** 서버 표를 넓혀도 데스크톱이 안 보내면 그 파일은 Local
+    마운트에서 존재하지 않는다. 그래서 이 어긋남은 **조용한 누락**이다.
+
+    계약(`shared/contracts`)과 corpus 색인이 같은 방식으로 지켜진다.
+    """
+    import sys
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from generate_source_filters import TARGET, render
+
+    assert TARGET.is_file(), "생성 파일이 없다 — scripts/generate_source_filters.py"
+    assert TARGET.read_text(encoding="utf-8") == render(), (
+        "데스크톱 표가 낡았다. python scripts/generate_source_filters.py 를 돌린다"
+    )
