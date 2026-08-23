@@ -73,7 +73,7 @@
 
 | 패키지 | 식별자 | 등급 | 출처 | |
 |---|---|---|---|---|
-| `left-pad@1.3.0` | WTFPL | **LOW** | deps.dev | |
+| `left-pad@1.3.0` | WTFPL | (Risk 아님) | deps.dev | `NO_ACTION` — 관리 대상이 아니라고 판정했다 |
 | `chalk@5.3.0` | MIT | MEDIUM | deps.dev | |
 | `requests@2.31.0` | Apache-2.0 | MEDIUM | deps.dev | |
 | `node-forge@1.3.1` | BSD-3-Clause OR GPL-2.0-only | MEDIUM | deps.dev | **0-G** — `OR` 에서 이끄는 leaf 만 본다 |
@@ -89,8 +89,15 @@
 | `pyarmor@9.2.6` | UNKNOWN | **INDETERMINATE** | pypi.org | 독점. 모르는 것이 맞다 |
 | `chalk@99.99.99` | UNKNOWN | **INDETERMINATE** | registry.npmjs.org | **0-K** — `VERSION_NOT_IN_REGISTRY` |
 
-분포는 **LOW 1 · MEDIUM 8 · HIGH 5 · INDETERMINATE 3** 이다 (`chalk` · `node-forge` 가 두 파일에
-걸쳐 있어 MEDIUM 이 둘 더 나온다).
+분포는 **MEDIUM 8 · HIGH 5 · INDETERMINATE 3 = Risk 16 건**이다 (`chalk` · `node-forge` 가
+두 파일에 걸쳐 있어 MEDIUM 이 둘 더 나온다).
+
+> **`left-pad` 은 Risk 가 되지 않는다.** WTFPL → `NO_ACTION` → LOW 인데,
+> `_is_risk_worthy` 가 하 등급을 걸러 낸다. 하 등급은 "낮은 위험" 이 아니라 **"알아보고
+> 나서 관리 대상이 아니라고 판정했다"** 는 뜻이라 Risk 를 만들지 않는다. 그래서 선언
+> 17 건에서 Risk 16 건이 된다.
+>
+> `INDETERMINATE` 와 정반대다. 모르는 것은 자동으로 닫으면 안 되므로 Risk 가 된다.
 
 > **MEDIUM 이 많은 것은 정상이다.** MIT·Apache-2.0 도 고지 의무가 있어
 > `NOTICE_REQUIRED` → MEDIUM 이다. `LOW` 는 의무가 정말 없는 것(WTFPL)에만 붙는다.
@@ -295,3 +302,63 @@ eraser 를 부른다. 0 단계의 목적이 "지우고 다시 하면 이번엔 �
 
 > `sample_github` 에는 `README.md` 와 설계 문서가 있어 특허 경로가 돌았다. 한도를 아끼려면
 > 픽스처 저장소에는 **의존성 파일만** 둔다.
+
+---
+
+## 9. 2 회차 결과 — 픽스처 저장소 (2026-08-23)
+
+`sample_INDETERMINATE` 를 마운트해 돌렸다. §8 이 남겨 둔 네 칸 중 셋이 닫혔다.
+
+### 판본 패턴이 13/13 맞았다
+
+미리 적어 둔 "어느 파일에 corpus 판본이 남는가" 가 **하나도 어긋나지 않았다.** 검색을
+시도한 여덟 파일에 `2026-08-23.4` 가 있고, 고지 의무뿐인 네 파일에는 없다.
+`broken/package.json` 만 `PARTIAL` 이고 나머지 12 개는 `COMPLETE` 다. 특허 작업 0 건 —
+**KIPRIS 를 한 번도 쓰지 않았다.**
+
+### `INDETERMINATE` 가 처음으로 그려졌고, 0-H 가 바로 그 자리에서 일했다
+
+세 건 모두 **파일에는 판본이 있고 `LICENSE_REFERENCE` 근거는 0 건**이다.
+
+| Risk | 파일의 판본 | 붙은 근거 |
+|---|---|---|
+| `npm:chalk@99.99.99 — UNKNOWN` | `2026-08-23.4` | `PACKAGE_METADATA` 1 |
+| `pypi:pyarmor@9.2.6 — UNKNOWN` | `2026-08-23.4` | `PACKAGE_METADATA` 1 |
+| `pypi:nvidia-cudnn-cu12@9.24.0.43 — UNKNOWN` | `2026-08-23.4` | `PACKAGE_METADATA` 1 |
+
+**이것이 0-H 가 존재하는 이유다.** `UNKNOWN` 은 `needs_review` 가 참이라 검색을 시도하는데
+게이트가 규칙으로 전부 버린다. 예전에는 이 상태와 "아예 안 봤다" 가 **둘 다 `null`** 이라
+구별되지 않았다. 지금은 판본이 남아 "묻긴 물었고, 675 편 중 답할 것이 없었다" 를 말한다.
+
+### 오부착 0, 5/5 주제 일치
+
+| Risk | 붙은 문서 |
+|---|---|
+| `mysqlclient` GPL-2.0-only | `spdx-gpl-2.0-only` |
+| `pyqt5` GPL-3.0-only | `spdx-gpl-3.0-only` |
+| `pymupdf` AGPL-3.0-only | `agpl-3.0-obligations` |
+| `paramiko` LGPL-2.1-only | `lgpl-2.1-obligations` |
+| `pikepdf` MPL-2.0 | `spdx-mpl-2.0` |
+
+`node-forge` 는 `BSD-3-Clause OR GPL-2.0-only` 인데 **MEDIUM 이고 근거에 GPL 문서가 없다.**
+이끄는 leaf 가 BSD 뿐이라 검색조차 하지 않았다 — 0-G 가 그대로 산다.
+
+### 회귀 감시 세 줄 전부 통과
+
+`matplotlib` → PSF-2.0 (MEDIUM), `pandas` → BSD-3-Clause, `weasyprint` → BSD-3-Clause.
+셋 다 하루 전이었다면 각각 **최고 위험** · Apache-2.0 · UNKNOWN 이었다.
+
+근거 41 건 전부 현재 작업의 것이다 (두 마운트 합계).
+
+### 기대표가 틀렸던 곳
+
+**LOW 1 건을 예상했는데 0 건이다.** 시스템이 맞고 표가 틀렸다 — `_is_risk_worthy` 가 하
+등급을 Risk 로 만들지 않는다. 위 §2 의 주석에 옮겨 적었다.
+
+여기서 따라 나오는 것이 하나 있다. 라이선스든 특허든 하 등급은 전부 걸러지므로
+**Risk 목록에 LOW 는 영원히 나타나지 않는다.** 그런데 화면의 우선도 필터에는 LOW 칸이
+있다. 결코 맞지 않는 필터다 (결함 31).
+
+### 남은 것
+
+§4 E (재분석) 와 §4 F (바뀐 것만 다시 돈다). 둘 다 아직이다.
