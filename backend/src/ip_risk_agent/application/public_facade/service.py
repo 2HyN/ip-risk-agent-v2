@@ -41,6 +41,7 @@ from ip_risk_agent.application.security_gate import (
 )
 from ip_risk_agent.application.risk_exclusion import exclude_artifact_risks
 from ip_risk_agent.core.artifacts import Artifact, ArtifactStatus
+from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from ip_risk_agent.core.audit import AuditEvent, AuditEventType, SourceAccessEvent
 from ip_risk_agent.core.auth import UserStatus
 from ip_risk_agent.core.common import (
@@ -296,6 +297,74 @@ class ControlPlaneFacade:
             "analysis_reanalysis_requested",
             correlation=CorrelationIds(event_id=change_event_id),
         )
+
+    async def revalidate_mount_licenses(
+        self, mount_id: str, *, limit: int = 200
+    ) -> tuple[int, int]:
+        """이 마운트의 의존성 파일을 **내용 변화 없이** 다시 평가한다 (§7.6 · 결함 24).
+
+        ``(요청한 수, 남은 수)`` 를 돌려준다.
+
+        ## 왜 필요한가
+
+        §1.2 (A) 의 가운데 줄 — "우리는 가만있었는데 위험이 생겼다" — 이 이 제품이 파는
+        것이다. 의존성은 그대로인데 그 패키지가 라이선스를 바꾼 경우이고, Redis ·
+        Elastic · MongoDB · HashiCorp 가 실제로 한 일이다.
+
+        그런데 분석은 **변경 이벤트에서만** 시작했다. `requirements.txt` 를 여섯 달
+        안 건드리면 그 안의 패키지가 MIT 에서 BUSL-1.1 로 바뀌어도 우리는 몰랐다.
+        재료는 다 있고 방아쇠만 없었다.
+
+        ## 파일이 아니라 패키지 메타데이터가 대상이다
+
+        파일은 그대로이므로 ``analysis_input_checksum`` 도 그대로다. 그래서 §7.4 가
+        원인을 **"외부 사실"** 로 정확히 귀속할 수 있다 — **입력이 같은데 결과가
+        달라진 것**이 그 뜻이다. 파일을 건드려 촉발하면 그 귀속이 무너진다.
+
+        ## 자른 것을 조용히 넘기지 않는다
+
+        ``limit`` 을 넘으면 남은 수를 돌려준다. 조용히 자르면 "전부 다시 봤다" 로
+        읽힌다 (§9.1 과 같은 이유다).
+        """
+        async with self._unit_of_work_factory() as uow:
+            mount = await uow.mounts.get(mount_id)
+            if mount is None:
+                raise RecordNotFoundError(f"mount was not found: {mount_id!r}")
+            artifacts = await uow.artifacts.list_for_workspace(mount.risk_workspace_id)
+            targets = [
+                artifact
+                for artifact in artifacts
+                if artifact.mount_id == mount_id
+                and artifact.status is ArtifactStatus.ACTIVE
+                and dependency_format(artifact.logical_path) is not None
+            ]
+            events_by_artifact = {
+                artifact.id: await uow.change_events.list_for_artifact(artifact.id)
+                for artifact in targets
+            }
+
+        requested = 0
+        remaining = 0
+        for artifact in targets:
+            events = events_by_artifact.get(artifact.id) or ()
+            if not events:
+                continue
+            if requested >= limit:
+                remaining += 1
+                continue
+            latest = max(events, key=lambda event: event.observed_at)
+            try:
+                await self.request_reanalysis(latest.id)
+            except Exception:  # noqa: BLE001 - 이미 도는 것은 거부된다. 정상이다
+                continue
+            requested += 1
+        if remaining:
+            # 조용히 자르면 "전부 다시 봤다" 로 읽힌다 (§9.1 과 같은 이유다).
+            self._observer.event(
+                "license_revalidation_truncated",
+                correlation=CorrelationIds(mount_id=mount_id),
+            )
+        return requested, remaining
 
     async def workspace_license_policy(
         self, risk_workspace_id: str

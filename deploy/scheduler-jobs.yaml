@@ -15,6 +15,15 @@ jobs:
     schedule: "*/10 * * * *"
     path: /internal/scheduler/source-health-refresh
     body: { cursor: null, limit: 100 }
+  # 외부 사실 변화를 촉발하는 유일한 것이다 (§7.6 · 결함 24). 파일이 그대로여도
+  # 그 안의 패키지가 라이선스를 바꿀 수 있고, 그것이 이 제품이 파는 값이다.
+  #
+  # 하루 한 번이다. 라이선스 변경은 드물지만 늦게 알수록 손해가 크고, 매시간 돌 만큼
+  # 자주 일어나지도 않는다. KIPRIS 를 쓰지 않으므로 한도와 무관하다.
+  - name: ip-risk-agent-v2-license-revalidation
+    schedule: "30 3 * * *"
+    path: /internal/scheduler/license-revalidation
+    body: { cursor: null, limit: 100 }
 defaults:
   timeZone: Asia/Seoul
   attemptDeadline: 300s

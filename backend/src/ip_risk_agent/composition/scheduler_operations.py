@@ -162,6 +162,50 @@ class ProductionSchedulerOperations:
             next_cursor=next_cursor,
         )
 
+    async def revalidate_licenses(
+        self,
+        cursor: str | None,
+        limit: int,
+    ) -> MaintenanceResult:
+        """의존성 파일을 **내용 변화 없이** 다시 평가한다 (§7.6 · 결함 24).
+
+        `source-health-refresh` 와 같은 방식으로 마운트를 훑는다. 마운트가 있는 소스만
+        아티팩트를 갖기 때문이고, 새 목록 조회를 만들지 않아도 된다.
+
+        KIPRIS 를 쓰지 않는 경로다 — 의존성 파일은 라이선스 분석만 받는다. 비용은
+        레지스트리 조회뿐이고, 그것은 조항 캐시(§9.2)가 받는다.
+        """
+        records, next_cursor = await _page_sources(
+            "license-revalidation",
+            (
+                (SourceType.GOOGLE_DRIVE.value, self._drive_tracking),
+                (SourceType.GITHUB.value, self._github_tracking),
+                (SourceType.LOCAL.value, self._local_runtime),
+            ),
+            cursor,
+            limit,
+        )
+        processed = failed = 0
+        for source_value, record in records:
+            try:
+                source_type = SourceType(source_value)
+                mount_id = (
+                    record.mount_handle
+                    if source_type is SourceType.LOCAL
+                    else record.mount_id
+                )
+                requested, _remaining = await self._control.revalidate_mount_licenses(
+                    mount_id
+                )
+                processed += requested
+            except Exception:
+                failed += 1
+        return MaintenanceResult(
+            processed=processed,
+            failed=failed,
+            next_cursor=next_cursor,
+        )
+
     async def refresh_source_health(
         self,
         cursor: str | None,

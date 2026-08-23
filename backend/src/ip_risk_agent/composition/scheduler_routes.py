@@ -28,6 +28,7 @@ class SchedulerOperations(Protocol):
     async def reconcile_drive(self, cursor: str | None, limit: int) -> MaintenanceResult: ...
     async def cleanup_expired(self, cursor: str | None, limit: int) -> MaintenanceResult: ...
     async def refresh_source_health(self, cursor: str | None, limit: int) -> MaintenanceResult: ...
+    async def revalidate_licenses(self, cursor: str | None, limit: int) -> MaintenanceResult: ...
 
 
 def create_scheduler_router(
@@ -56,6 +57,17 @@ def create_scheduler_router(
     @router.post("/source-health-refresh", response_model=MaintenanceResult)
     async def source_health(request: Request, body: MaintenanceRequest) -> MaintenanceResult:
         return await execute(request, body, operations.refresh_source_health)
+
+    @router.post("/license-revalidation", response_model=MaintenanceResult)
+    async def license_revalidation(
+        request: Request, body: MaintenanceRequest
+    ) -> MaintenanceResult:
+        """의존성 파일을 내용 변화 없이 다시 평가한다 (§7.6 · 결함 24).
+
+        이것이 없으면 "우리는 가만있었는데 위험이 생겼다" 를 영영 모른다 — 분석이
+        변경 이벤트에서만 시작하기 때문이다.
+        """
+        return await execute(request, body, operations.revalidate_licenses)
 
     return router
 

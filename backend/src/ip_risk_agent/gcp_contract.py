@@ -30,6 +30,8 @@ SCHEDULER_JOBS = (
     "ip-risk-agent-v2-drive-reconciliation",
     "ip-risk-agent-v2-expired-state-cleanup",
     "ip-risk-agent-v2-source-health-refresh",
+    # 외부 사실 변화를 촉발하는 유일한 것 (§7.6 · 결함 24).
+    "ip-risk-agent-v2-license-revalidation",
 )
 
 FIXED_SECRET_IDS = {

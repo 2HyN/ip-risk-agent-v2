@@ -52,6 +52,7 @@ SCHEDULER_ROUTES = (
     "/internal/scheduler/drive-reconciliation",
     "/internal/scheduler/expired-state-cleanup",
     "/internal/scheduler/source-health-refresh",
+    "/internal/scheduler/license-revalidation",
 )
 COMMON_ENVIRONMENT = {
     "APP_ENV",
@@ -454,7 +455,7 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
     if tuple(job.get("name") for job in scheduler.get("jobs", ())) != SCHEDULER_JOBS:
         errors.append("Cloud Scheduler jobs violate the v2 namespace")
     if tuple(job.get("path") for job in scheduler.get("jobs", ())) != SCHEDULER_ROUTES:
-        errors.append("Cloud Scheduler jobs do not match the four production routes")
+        errors.append("Cloud Scheduler jobs do not match the production routes")
     if any(
         job.get("body")
         != {"cursor": None, "limit": (500 if index == 2 else 100)}

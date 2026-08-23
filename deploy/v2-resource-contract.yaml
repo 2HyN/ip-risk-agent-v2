@@ -24,6 +24,7 @@ schedulerJobs:
   - ip-risk-agent-v2-drive-reconciliation
   - ip-risk-agent-v2-expired-state-cleanup
   - ip-risk-agent-v2-source-health-refresh
+  - ip-risk-agent-v2-license-revalidation
 storage:
   stagingBucket: proj-aj22-211200020328-iprisk-v2-staging
 secrets:

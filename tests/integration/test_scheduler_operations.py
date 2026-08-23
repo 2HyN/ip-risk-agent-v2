@@ -93,6 +93,7 @@ class Control:
             "local-mount": SourceType.LOCAL,
         }
         self.health = []
+        self.revalidated = []
 
     async def get_mount_ref(self, mount_id):
         return MountRef(
@@ -104,6 +105,10 @@ class Control:
 
     async def record_source_health(self, mount_id, health):
         self.health.append((mount_id, health.status))
+
+    async def revalidate_mount_licenses(self, mount_id, *, limit=200):
+        self.revalidated.append(mount_id)
+        return 2, 0
 
 
 class Sink:

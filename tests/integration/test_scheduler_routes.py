@@ -35,6 +35,9 @@ class Operations:
     async def refresh_source_health(self, cursor, limit):
         return await self._run("health", cursor, limit)
 
+    async def revalidate_licenses(self, cursor, limit):
+        return await self._run("revalidate", cursor, limit)
+
 
 def test_scheduler_routes_require_identity_and_bound_the_batch() -> None:
     operations = Operations()
