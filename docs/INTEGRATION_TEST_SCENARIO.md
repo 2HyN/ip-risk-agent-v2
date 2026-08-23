@@ -219,3 +219,57 @@ eraser 를 부른다. 0 단계의 목적이 "지우고 다시 하면 이번엔 �
 * **특허 경로** — 일부러 뺐다. KIPRIS 한도 때문이다. 따로 열 때 한 번만 돈다.
 * **주기적 재평가** (결함 24) — 촉발이 아직 없다. 2-F 캐시 뒤에 선다.
 * **`.ipriskignore`** — 결함 25 로 매처가 셋이 다르다. 열기 전에는 시험 대상이 아니다.
+
+---
+
+## 8. 1 회차 결과 — 2026-08-23 05:05 UTC
+
+픽스처가 아니라 `sample_github` 저장소로 돌았다. 판정은 UI 가 아니라 **저장된 기록**에서
+읽었다 — UI 는 판정만 보여 주고 "온전히 읽었는가 · 어느 판본이 답했는가 · 근거가 이번
+실행의 것인가" 는 기록에만 있다.
+
+배포본 `dae2bfe` (API `00045-fmz` / Worker `00046-zxp`) 가 이 실행을 처리했다.
+
+### 통과
+
+| | 확인한 것 | 실측 |
+|---|---|---|
+| A1 | 경로 배정 | 10/10 정확. `.md` 둘은 특허로, 의존성 8 개는 라이선스로 |
+| A3 | 온전히 읽었는가 | 라이선스 8 건 전부 `SUCCEEDED` + `COMPLETE`. `PARTIAL` 0 |
+| 0-E | 못 한 것을 못 했다고 하는가 | `README.md` → `INCONCLUSIVE` · `NONE` · `ANALYSIS:NOT_APPLICABLE`. 권한이 없으므로 **아무 Risk 도 만들지 못한다** |
+| 0-H | 판본 기록 | corpus `2026-08-23.4` 가 **검색을 시도한 세 파일에만** 있다 (`pyproject.toml`·`requirements.txt`·`setup.cfg`). 나머지 다섯은 `null` — 부르지 않았기 때문이다 |
+| 결함 22 | 근거 수명 | `risk_evidence` 20 건 전부 현재 작업의 것. `risk_events` 16 건은 그대로 남아 원장이 끊기지 않았다 |
+| 0-G | 주제 일치 | HIGH 세 건의 `LICENSE_REFERENCE` 가 `spdx-mpl-2.0` · `lgpl-2.1-obligations` · `agpl-3.0-obligations`. **오부착 0** |
+| 0-K | 미해결 버전 | `ruff@unresolved` 이 요약·발췌·`metadata_safe.resolution=RANGE` **세 곳**에 "버전 미상" 을 남긴다 |
+| 특허 | 끝에서 끝까지 | `SOURCE_EXCERPT` + `PATENT_CLAIM` (KIPRIS 출원번호 1020200110749) |
+
+**RAG 는 HIGH 에만 붙었다.** MEDIUM 12 건은 `PACKAGE_METADATA` 하나뿐이다. 이것이 맞다 —
+`needs_review` 가 거짓이면 검색하지 않고, 그래서 판본도 남지 않는다. 세 가지가 서로
+어긋나지 않는다.
+
+### §5.13 이 실물에서 확인됐다
+
+같은 날 고친 것이 이 실행에 그대로 나타났다.
+
+| 패키지 | 어제 | 오늘 | 왜 |
+|---|---|---|---|
+| `typing-extensions@4.12.2` | **UNKNOWN → 확인 필요** | PSF-2.0 → MEDIUM | `license` 도 `license_expression` 도 **비어 있고** deps.dev 는 non-standard 다. **분류자가 유일한 출처**였다 (결함 28) |
+| `psycopg2@2.9.9` | `LGPL-2.1-only WITH exceptions` | `LGPL-2.1-only` | `exceptions` 는 등록된 예외가 아니라 완화도 못 받았다. 지어낸 예외를 뺐다 (결함 30) |
+
+`typing-extensions` 는 파이썬에서 거의 모든 것이 전이 의존으로 끌고 오는 패키지다.
+분류자를 읽기 시작한 것이 몇 시간 차이로 이 실행을 살렸다.
+
+### 아직 확인하지 못한 것
+
+| | 왜 |
+|---|---|
+| **`INDETERMINATE` 가 한 번도 안 나왔다** | 16 건 중 0 건. **네 번째 등급이 운영에서 한 번도 그려지지 않았다** — 목록·필터·정렬이 미검증이다 |
+| §4 E (재분석) | 아직 안 돌렸다 |
+| §4 F (바뀐 것만) | 아직 안 돌렸다 |
+| 회귀 감시 3 줄 | `sample_github` 에 `matplotlib`·`pandas`·`weasyprint` 가 없다 |
+
+**다음은 §1 의 픽스처다.** 그것이 위 네 칸을 정확히 겨냥해 만들어졌다 — `INDETERMINATE`
+세 건과 회귀 감시 세 줄이 들어 있고, KIPRIS 를 쓰지 않는다.
+
+> `sample_github` 에는 `README.md` 와 설계 문서가 있어 특허 경로가 돌았다. 한도를 아끼려면
+> 픽스처 저장소에는 **의존성 파일만** 둔다.
