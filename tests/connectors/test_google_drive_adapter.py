@@ -546,22 +546,30 @@ def test_reconcile_marks_removed_file_as_delete():
     asyncio.run(scenario())
 
 
-def test_reconcile_uses_display_metadata_name_when_available():
+def test_reconcile_uses_display_metadata_name_when_the_file_is_gone():
+    """저장된 표시 이름은 **읽을 수 없게 된** 파일의 폴백이다.
+
+    살아 있는 파일의 이름은 실제 메타데이터에서 온다 — 저장값을 쓰면 스냅샷의
+    실제 이름과 어긋나 게이트가 `CANONICAL_CONTEXT_MISMATCH` 로 거부한다.
+    지운 파일만은 읽을 수 없으므로, 그때는 저장해 둔 이름이 최선이다.
+    """
+
     async def scenario():
         page = DriveChangePage(
-            changes=[DriveChange(file_id="file-1", removed=False, modified_time="t1", revision_id="r1")],
+            changes=[DriveChange(file_id="file-1", removed=True, modified_time=None, revision_id=None)],
             next_page_token=None,
             new_start_page_token="c2",
         )
         provider = FakeDriveProvider(changes_by_token={"start-1": page})
         adapter, _, _, _ = await _build_adapter(
             provider,
-            tracked_ids=["file-1"],
+            tracked_ids=[],
             display_metadata_by_file={"file-1": {"name": "My Spec Doc"}},
         )
 
         result = await adapter.reconcile(_mount(), cursor=None)
 
+        assert result.changes[0].change_type is ChangeType.DELETE
         assert result.changes[0].artifact.display_name == "My Spec Doc"
 
     asyncio.run(scenario())
@@ -627,5 +635,142 @@ def test_initial_changes_does_not_rewind_an_existing_cursor():
 
         runtime = await runtime_store.load("conn-1")
         assert runtime.change_cursor == "already-advanced"
+
+    asyncio.run(scenario())
+
+
+def test_the_path_a_sweep_registers_is_the_path_a_fetch_returns():
+    """등록과 가져오기가 같은 경로를 내야 한다.
+
+    아티팩트의 `logical_path` 는 초기 훑기가 정하고, 게이트는 스냅샷의
+    `logical_path_hint` 로 그 값을 다시 만들어 비교한다. 둘이 어긋나면 게이트가
+    `CANONICAL_CONTEXT_MISMATCH` 로 **모든 분석을 거부한다.**
+
+    운영에서 정확히 그렇게 됐다 — 초기 훑기는 경로를 비워 `별칭/이름` 으로 평평하게
+    등록했고, 가져오기는 부모를 따라 올라가 `별칭/폴더/이름` 을 냈다.
+    """
+
+    async def scenario():
+        provider = FakeDriveProvider()
+        provider._files[FOLDER_ID] = DriveFile(
+            FOLDER_ID, "patent", FOLDER_MIME_TYPE, "t1", "rev-1", None, ("ancestor-1",)
+        )
+        # 공유 범위 밖이 아니라 **읽히는** 조상이다. D1 의 서비스 계정에서는 사용자가
+        # 부모까지 공유하면 이렇게 된다. 뿌리를 명시하지 않으면 경로가 한 단 길어진다.
+        provider._files["ancestor-1"] = DriveFile(
+            "ancestor-1", "shared-root", FOLDER_MIME_TYPE, "t1", "rev-1", None, ()
+        )
+        provider._files["file-1"] = DriveFile(
+            "file-1", "claims.md", "text/plain", "t1", "rev-1", None, (FOLDER_ID,)
+        )
+        provider._texts["file-1"] = "claim text"
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=["file-1"])
+
+        changes = await adapter.initial_changes(_mount(), None)
+        registered = changes[0].artifact.path_hint
+
+        snapshot = await adapter.fetch_snapshot(changes[0])
+
+        assert registered == "claims.md"
+        assert snapshot.logical_path_hint == registered
+
+    asyncio.run(scenario())
+
+
+def test_a_file_in_a_subfolder_keeps_the_subfolder_in_its_path():
+    """뿌리에서 멈추는 것이지 경로를 버리는 것이 아니다."""
+
+    async def scenario():
+        provider = FakeDriveProvider()
+        provider._files[FOLDER_ID] = DriveFile(
+            FOLDER_ID, "patent", FOLDER_MIME_TYPE, "t1", "rev-1", None, ()
+        )
+        provider._files["sub-1"] = DriveFile(
+            "sub-1", "drafts", FOLDER_MIME_TYPE, "t1", "rev-1", None, (FOLDER_ID,)
+        )
+        provider._files["file-1"] = DriveFile(
+            "file-1", "claims.md", "text/plain", "t1", "rev-1", None, ("sub-1",)
+        )
+        provider._texts["file-1"] = "claim text"
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=["file-1"])
+
+        changes = await adapter.initial_changes(_mount(), None)
+        snapshot = await adapter.fetch_snapshot(changes[0])
+
+        assert changes[0].artifact.path_hint == "drafts/claims.md"
+        assert snapshot.logical_path_hint == "drafts/claims.md"
+
+    asyncio.run(scenario())
+
+
+def test_the_name_a_sweep_reports_is_the_name_a_fetch_returns():
+    """대조(UPDATE)가 낸 이름·경로는 스냅샷이 내는 값과 같아야 한다.
+
+    폴더 마운트(D1)의 추적 저장값에는 폴더 이름 하나뿐이라, 예전에는 대조가 파일
+    이름을 찾지 못해 **file id 를 이름으로** 실었다. 등록이 그 값을 canonical 에
+    쓰면 스냅샷의 실제 이름과 어긋나 게이트가 `CANONICAL_CONTEXT_MISMATCH` 로
+    거부한다 — 파일을 고치기만 하면 그 분석이 전부 실패한다.
+    """
+
+    async def scenario():
+        edited = DriveFile(
+            file_id="file-1", name="claims.md", mime_type="text/plain",
+            modified_time="t2", revision_id="rev-2", web_view_link=None,
+            parents=(FOLDER_ID,),
+        )
+        page = DriveChangePage(
+            changes=[
+                DriveChange(
+                    file_id="file-1", removed=False, modified_time="t2", revision_id="rev-2"
+                )
+            ],
+            next_page_token=None,
+            new_start_page_token="cursor-2",
+        )
+        provider = FakeDriveProvider(
+            files={"file-1": edited},
+            texts={"file-1": "claim text"},
+            changes_by_token={"start-1": page},
+        )
+        # D1 마운트의 저장값 — 폴더 이름 하나뿐이고 파일별 이름이 없다.
+        adapter, _, _, _ = await _build_adapter(
+            provider,
+            tracked_ids=[],
+            display_metadata_by_file={FOLDER_ID: {"name": "tracked"}},
+        )
+
+        result = await adapter.reconcile(_mount(), cursor=None)
+        change = result.changes[0]
+        snapshot = await adapter.fetch_snapshot(change)
+
+        assert change.artifact.display_name == "claims.md"
+        assert snapshot.display_name == change.artifact.display_name
+        assert change.artifact.path_hint == "claims.md"
+        assert snapshot.logical_path_hint == change.artifact.path_hint
+
+    asyncio.run(scenario())
+
+
+def test_a_removed_file_keeps_its_stored_name_and_gets_no_path():
+    """지운 파일은 읽을 수 없다 — 이름도 경로도 지어내지 않는다."""
+
+    async def scenario():
+        page = DriveChangePage(
+            changes=[
+                DriveChange(
+                    file_id="file-gone", removed=True, modified_time=None, revision_id=None
+                )
+            ],
+            next_page_token=None,
+            new_start_page_token="cursor-2",
+        )
+        provider = FakeDriveProvider(changes_by_token={"start-1": page})
+        adapter, _, _, _ = await _build_adapter(provider, tracked_ids=[])
+
+        result = await adapter.reconcile(_mount(), cursor=None)
+
+        assert result.changes[0].change_type is ChangeType.DELETE
+        assert result.changes[0].artifact.display_name == "file-gone"
+        assert result.changes[0].artifact.path_hint is None
 
     asyncio.run(scenario())

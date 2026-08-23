@@ -19,10 +19,21 @@ GitHub 과 Local 은 경로를 그대로 들고 온다. Drive 만 **부모를 �
 
 ## 어디서 멈추는가
 
+* **마운트가 보는 폴더에 닿으면 멈춘다.** 그 폴더가 뿌리이므로 경로에 넣지 않는다.
+  넣으면 ``별칭/폴더이름/파일`` 이 되는데 별칭이 이미 그 폴더 이름이라 같은 이름이
+  두 번 나오고, 무엇보다 **등록된 ``logical_path`` 와 달라져 게이트가
+  ``CANONICAL_CONTEXT_MISMATCH`` 로 거부한다.**
 * 부모가 없으면 뿌리다 (내 드라이브).
 * ``max_depth`` 를 넘으면 멈춘다. §6.1 이 v1 의 값을 그대로 쓰기로 했다 — **깊이 10**.
 * 부모를 읽지 못하면 (공유 범위 밖) 거기서 멈춘다. 오류가 아니다 — 우리가 볼 수 있는
   만큼이 경로다.
+
+## 뿌리를 명시적으로 받는 이유
+
+예전에는 "읽지 못하는 조상" 이 사실상 뿌리 노릇을 했다. `drive.file` 로는 공유받은
+폴더 위가 안 읽혔기 때문이다. D1 의 서비스 계정에서는 **무엇이 읽히는가가 사용자가
+무엇을 공유했는가에 달려 있다.** 부모 폴더까지 공유하면 경로가 조용히 한 단 길어지고
+그 순간 게이트가 모든 분석을 거부한다. 뿌리는 우연히 정해지면 안 된다.
 
 **자른 것은 조용히 넘기지 않는다.** 깊이에서 잘리면 맨 앞에 ``…`` 를 남겨 "여기가 전부가
 아니다" 를 표시한다. 조용히 자르면 그 경로가 뿌리부터인 것처럼 읽힌다.
@@ -65,10 +76,14 @@ def resolve_path_hint(
     name: str,
     parents: tuple[str, ...],
     *,
+    root_folder_id: str | None = None,
     cache: dict[str, tuple[str, tuple[str, ...]]] | None = None,
     max_depth: int = MAX_PATH_DEPTH,
 ) -> str:
-    """이 파일의 ``logical_path_hint``. 마운트 뿌리 기준의 상대 경로다.
+    """이 파일의 ``logical_path_hint``. **마운트 뿌리 기준의 상대 경로**다.
+
+    ``root_folder_id`` 는 이 마운트가 보는 폴더다. 거기 닿으면 멈추고 그 폴더는 경로에
+    넣지 않는다 — 뿌리이기 때문이다.
 
     ``cache`` 는 ``file_id -> (이름, 부모들)`` 이다. 같은 폴더가 여러 파일의 조상이므로
     한 번 훑는 동안 재사용하면 호출 수가 크게 줄어든다.
@@ -79,6 +94,8 @@ def resolve_path_hint(
     depth = 0
 
     while current is not None:
+        if current == root_folder_id:
+            break
         if depth >= max_depth:
             segments.insert(0, TRUNCATED_MARKER)
             break

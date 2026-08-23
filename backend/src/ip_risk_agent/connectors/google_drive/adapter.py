@@ -259,8 +259,14 @@ class GoogleDriveAdapter:
             # 예전에는 `None` 이라 Drive 아티팩트의 `logical_path` 가 `별칭/파일이름`
             # 으로 평평했다. 폴더가 다른 같은 이름의 파일이 구별되지 않고, UI 트리를
             # 만들 근거가 없었다 (§6.1).
+            # 등록이 낸 값과 **같아야** 한다. 다르면 게이트가
+            # `CANONICAL_CONTEXT_MISMATCH` 로 모든 분석을 거부한다.
             logical_path_hint=resolve_path_hint(
-                provider, file_id, drive_file.name, drive_file.parents
+                provider,
+                file_id,
+                drive_file.name,
+                drive_file.parents,
+                root_folder_id=scope.folder_id,
             ),
             mime_type=drive_file.mime_type,
             artifact_kind=self._infer_artifact_kind(drive_file.name, drive_file.mime_type),
@@ -298,6 +304,9 @@ class GoogleDriveAdapter:
         await self._ensure_change_cursor(connection, provider)
         now = datetime.now(timezone.utc)
         changes: list[SourceChange] = []
+        # 같은 폴더가 여러 파일의 조상이다. 한 번 훑는 동안 재사용하면 호출 수가
+        # 크게 준다.
+        path_cache: dict[str, tuple[str, tuple[str, ...]]] = {}
         listing = list_folder_files(provider, scope.folder_id)
         if listing.truncated:
             # 조용히 자르면 "전부 검사했다" 로 읽힌다 (§6.1).
@@ -338,6 +347,18 @@ class GoogleDriveAdapter:
                     artifact=SourceArtifactRef(
                         source_artifact_id=file_id,
                         display_name=display_name_for(drive_file.name),
+                        # 아티팩트의 `logical_path` 를 정하는 곳이 여기다. 비워 두면
+                        # `별칭/이름` 으로 평평해지는데, 가져오기와 대조는 부모 경로를
+                        # 낸다. 하위 폴더의 파일이 곧바로
+                        # `CANONICAL_CONTEXT_MISMATCH` 가 되어 분석이 전부 거부된다.
+                        path_hint=resolve_path_hint(
+                            provider,
+                            file_id,
+                            drive_file.name,
+                            drive_file.parents,
+                            root_folder_id=scope.folder_id,
+                            cache=path_cache,
+                        ),
                     ),
                     change_type=ChangeType.CREATE,
                     revision=revision,
@@ -472,13 +493,11 @@ class GoogleDriveAdapter:
                     mount_id=mount.mount_id,
                     source_workspace_id=mount.source_workspace_id,
                     source_type=SourceType.GOOGLE_DRIVE,
-                    artifact=SourceArtifactRef(
-                        source_artifact_id=item.file_id,
-                        display_name=self._display_name(scope, item.file_id),
-                        # 아티팩트의 `logical_path` 를 정하는 곳이 여기다. 가져오기가
-                        # 내는 값과 **같아야** 한다 — 다르면 게이트가
-                        # `CANONICAL_CONTEXT_MISMATCH` 로 거부한다.
-                        path_hint=self._path_hint(provider, item.file_id, path_cache),
+                    # 이름과 경로 모두 가져오기가 내는 값과 **같아야** 한다 — 게이트가
+                    # 스냅샷의 `display_name` 과 `logical_path_hint` 를 등록된 값과
+                    # 대조하고, 다르면 `CANONICAL_CONTEXT_MISMATCH` 로 거부한다.
+                    artifact=self._artifact_identity(
+                        provider, scope, item, path_cache
                     ),
                     change_type=change_type,
                     revision=item.revision_id,
@@ -504,29 +523,48 @@ class GoogleDriveAdapter:
         return ReconcileResult(changes=changes, next_cursor=next_cursor, has_more=has_more)
 
     @staticmethod
-    def _path_hint(
+    def _artifact_identity(
         provider,
-        file_id: str,
+        scope: DriveTrackingScope,
+        item,
         cache: dict[str, tuple[str, tuple[str, ...]]],
-    ) -> str | None:
-        """대조가 쓰는 경로. 읽지 못하면 ``None`` 이다.
+    ) -> SourceArtifactRef:
+        """대조가 내는 이름과 경로. 가져오기가 내는 값과 **같아야 한다.**
 
-        지운 파일은 메타데이터를 못 읽는다. 그때 경로를 지어내면 등록된 것과 달라져
-        게이트가 거부한다. 모르면 안 넘기는 것이 맞다 — 이미 등록된 아티팩트의 경로는
+        예전에는 이름을 ``display_metadata_by_file`` 에서 찾았다. Picker 시절에는
+        고른 파일마다 이름이 거기 있었지만, 폴더 마운트(D1)의 저장값에는 **폴더
+        하나뿐이다.** 그래서 대조가 낸 UPDATE 는 이름이 file id 가 됐고, 등록이 그
+        값을 canonical 에 쓰면 스냅샷의 실제 이름과 어긋나 게이트가
+        ``CANONICAL_CONTEXT_MISMATCH`` 로 거부했다 — **파일을 고치기만 하면 그
+        분석이 전부 실패하는 상태였다.**
+
+        경로를 만들려고 어차피 읽는 메타데이터가 이름을 들고 있으므로 그것을 쓴다.
+        지운 파일은 읽을 수 없고, 그때는 지어내지 않는다 — 이름은 저장된 표시값
+        (없으면 file id), 경로는 ``None`` 이다. 이미 등록된 아티팩트의 경로는
         그대로 남는다.
         """
-        try:
-            found = provider.get_file(file_id)
-        except Exception:  # noqa: BLE001 - 지운 파일은 읽히지 않는다
-            return None
-        return resolve_path_hint(
-            provider, file_id, found.name, found.parents, cache=cache
-        )
-
-    @staticmethod
-    def _display_name(scope: DriveTrackingScope | None, file_id: str) -> str:
-        if scope is None:
-            return file_id
-        metadata = scope.display_metadata_by_file.get(file_id) or {}
+        if not item.removed:
+            try:
+                found = provider.get_file(item.file_id)
+            except Exception:  # noqa: BLE001 - 지운 파일은 읽히지 않는다
+                found = None
+            if found is not None:
+                return SourceArtifactRef(
+                    source_artifact_id=item.file_id,
+                    display_name=display_name_for(found.name),
+                    path_hint=resolve_path_hint(
+                        provider,
+                        item.file_id,
+                        found.name,
+                        found.parents,
+                        root_folder_id=scope.folder_id,
+                        cache=cache,
+                    ),
+                )
+        metadata = scope.display_metadata_by_file.get(item.file_id) or {}
         name = metadata.get("name")
-        return str(name) if name else file_id
+        return SourceArtifactRef(
+            source_artifact_id=item.file_id,
+            display_name=display_name_for(str(name)) if name else item.file_id,
+            path_hint=None,
+        )
