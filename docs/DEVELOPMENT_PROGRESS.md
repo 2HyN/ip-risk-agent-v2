@@ -201,6 +201,21 @@ Drive 서비스 계정 변경 피드가 이탈·재진입을 주는지. **이 �
 `gcloud` 재인증은 풀렸으나 **가장(impersonation) 권한이 없다** —
 `iam.serviceAccounts.getAccessToken` 이 사람 계정에 붙어 있지 않다.
 
+**실측 (2026-08-23)** — `aj22@iceu.kr` 은 `roles/owner` + `roles/editor` 를 갖고 있는데도
+이 권한이 없다. 설정 실수가 아니라 **설계**다. Google 이 `getAccessToken` 을 Owner 에서
+일부러 뺐다 — 프로젝트 소유만으로 아무 서비스 계정이나 될 수 있으면 SA 로 권한을 나눈
+의미가 없어지기 때문이다. 그 권한은 `roles/iam.serviceAccountTokenCreator` 에만 있다.
+
+`testIamPermissions` 로 확인한 것:
+
+| | |
+|---|---|
+| `iam.serviceAccounts.create` | **있다** |
+| `iam.serviceAccounts.setIamPolicy` | **있다** |
+| `iam.serviceAccounts.getAccessToken` | **없다** |
+
+즉 **스스로 풀 수 있다.** 조직 정책이 막고 있는 것도 아니다 (제약 없음).
+
 푸는 방법 둘 중 **(2)를 권한다.**
 
 1. 사람 계정에 `iprisk-v2-worker` 가장 권한을 준다 — 빠르지만 **운영 신원을 사람이 가장할
@@ -214,7 +229,7 @@ Drive 서비스 계정 변경 피드가 이탈·재진입을 주는지. **이 �
 ### 배포
 
 * 결함 23 의 실제 IAM 확인과 실증 (계약은 고쳐졌다)
-* **0-J · 0-K · 0-H 가 아직 배포되지 않았다.** 배포한 뒤 통합 시험으로 간다
+* 미배포는 없다 — 머리말을 보라.
 
 ---
 
