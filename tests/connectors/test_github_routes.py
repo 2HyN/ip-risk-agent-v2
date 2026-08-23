@@ -125,7 +125,10 @@ def test_valid_push_persists_change_via_sink():
         assert response.status_code == 200
         assert response.json()["changes_persisted"] == 1
         assert len(sink.received) == 1
-        assert sink.received[0].artifact.display_name == "src/a.py"
+        # 보이는 이름에는 폴더가 들어가지 않는다 (§6.3). 트리는 `path_hint` ·
+        # `logical_path` 가 만든다. 예전에는 push 만 전체 경로를 넣어, 하위 폴더
+        # 파일의 이름이 첫 push 뒤에 조용히 바뀌었다.
+        assert sink.received[0].artifact.display_name == "a.py"
 
     asyncio.run(scenario())
 

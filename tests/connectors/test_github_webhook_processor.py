@@ -176,7 +176,10 @@ def test_skips_files_outside_tracking_scope():
         )
 
         assert len(changes) == 1
-        assert changes[0].artifact.display_name == "src/a.py"
+        # 보이는 이름에는 폴더가 들어가지 않는다 (§6.3). 트리는 `path_hint` ·
+        # `logical_path` 가 만든다. 예전에는 push 만 전체 경로를 넣어, 하위 폴더
+        # 파일의 이름이 첫 push 뒤에 조용히 바뀌었다.
+        assert changes[0].artifact.display_name == "a.py"
 
     asyncio.run(scenario())
 
@@ -198,7 +201,7 @@ def test_renamed_file_becomes_move_with_previous_artifact():
         assert len(changes) == 1
         assert changes[0].change_type == ChangeType.MOVE
         assert changes[0].previous_artifact is not None
-        assert changes[0].previous_artifact.display_name == "src/old_name.py"
+        assert changes[0].previous_artifact.display_name == "old_name.py"
 
     asyncio.run(scenario())
 
@@ -276,7 +279,10 @@ def test_source_level_ipriskignore_filters_out_matching_files():
         )
 
         assert len(changes) == 1
-        assert changes[0].artifact.display_name == "src/a.py"
+        # 보이는 이름에는 폴더가 들어가지 않는다 (§6.3). 트리는 `path_hint` ·
+        # `logical_path` 가 만든다. 예전에는 push 만 전체 경로를 넣어, 하위 폴더
+        # 파일의 이름이 첫 push 뒤에 조용히 바뀌었다.
+        assert changes[0].artifact.display_name == "a.py"
 
     asyncio.run(scenario())
 

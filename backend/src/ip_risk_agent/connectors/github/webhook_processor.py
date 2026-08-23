@@ -14,6 +14,7 @@ from typing import Protocol
 
 from iprisk_contracts.common import ChangeType, MountRef, SourceArtifactRef, SourceType
 from iprisk_contracts.source_change import SourceChange
+from ip_risk_agent.core.artifacts.naming import display_name_for
 
 from ..common.errors import InvalidWebhookError, NotFoundError
 from ..common.fingerprint import github_change_fingerprint
@@ -139,7 +140,7 @@ class GitHubWebhookProcessor:
                     )
                     previous_artifact = SourceArtifactRef(
                         source_artifact_id=previous_artifact_id,
-                        display_name=file.previous_filename,
+                        display_name=display_name_for(file.previous_filename),
                         path_hint=file.previous_filename,
                     )
 
@@ -155,7 +156,7 @@ class GitHubWebhookProcessor:
                         source_type=SourceType.GITHUB,
                         artifact=SourceArtifactRef(
                             source_artifact_id=artifact_id,
-                            display_name=file.filename,
+                            display_name=display_name_for(file.filename),
                             path_hint=file.filename,
                         ),
                         previous_artifact=previous_artifact,

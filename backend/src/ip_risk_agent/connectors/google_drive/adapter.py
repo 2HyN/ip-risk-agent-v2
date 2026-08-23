@@ -32,6 +32,7 @@ from iprisk_contracts.common import (
 from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
 from ip_risk_agent.core.artifacts.dependency_files import dependency_format
+from ip_risk_agent.core.artifacts.naming import display_name_for
 from ip_risk_agent.core.artifacts.text_files import (
     NON_COMMITTAL_MIME_TYPES,
     is_text_like,
@@ -245,7 +246,7 @@ class GoogleDriveAdapter:
             source_artifact_id=file_id,
             resolved_revision=drive_file.revision_id or "unknown",
             retrieved_at=datetime.now(timezone.utc),
-            display_name=drive_file.name,
+            display_name=display_name_for(drive_file.name),
             logical_path_hint=None,
             mime_type=drive_file.mime_type,
             artifact_kind=self._infer_artifact_kind(drive_file.name, drive_file.mime_type),
@@ -309,7 +310,7 @@ class GoogleDriveAdapter:
                         source_type=SourceType.GOOGLE_DRIVE,
                         artifact=SourceArtifactRef(
                             source_artifact_id=file_id,
-                            display_name=drive_file.name,
+                            display_name=display_name_for(drive_file.name),
                         ),
                         change_type=ChangeType.CREATE,
                         revision=revision,

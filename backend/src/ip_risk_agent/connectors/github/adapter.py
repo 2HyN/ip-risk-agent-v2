@@ -26,6 +26,7 @@ from iprisk_contracts.common import (
 )
 from iprisk_contracts.source_adapter import ReconcileResult
 from iprisk_contracts.source_change import SourceChange
+from ip_risk_agent.core.artifacts.naming import display_name_for
 from ip_risk_agent.core.artifacts.dependency_files import dependency_format
 from ip_risk_agent.core.artifacts.text_files import text_kind
 from iprisk_contracts.source_snapshot import SourceSnapshot
@@ -231,7 +232,7 @@ class GitHubAdapter:
                             branch=scope.tracked_branch,
                             path=file.path,
                         ),
-                        display_name=file.path.rsplit("/", 1)[-1],
+                        display_name=display_name_for(file.path),
                         path_hint=file.path,
                     ),
                     change_type=ChangeType.CREATE,

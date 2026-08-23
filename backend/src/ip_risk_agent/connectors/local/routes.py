@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from iprisk_contracts.common import ChangeType, SourceArtifactRef, SourceType
 from iprisk_contracts.source_change import SourceChange
+from ip_risk_agent.core.artifacts.naming import display_name_for
 
 from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.change_sink import SourceChangeSink
@@ -152,11 +153,11 @@ def create_local_desktop_router(
             )
             previous_artifact = SourceArtifactRef(
                 source_artifact_id=previous_artifact_id,
-                display_name=event.previous_relative_path.rsplit("/", 1)[-1],
+                display_name=display_name_for(event.previous_relative_path),
                 path_hint=event.previous_relative_path,
             )
 
-        display_name = event.relative_path.rsplit("/", 1)[-1]
+        display_name = display_name_for(event.relative_path)
         change = SourceChange(
             contract_version="1",
             event_id=fingerprint,
