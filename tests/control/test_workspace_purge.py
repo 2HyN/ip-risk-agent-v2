@@ -219,3 +219,39 @@ def test_erasing_twice_is_safe() -> None:
         assert second == {}
 
     run(scenario())
+
+
+def test_a_deletion_stuck_at_deleting_finishes_on_retry() -> None:
+    """DELETING 에 갇힌 workspace 는 삭제를 다시 부르면 이어서 마무리된다.
+
+    eraser 가 빠졌거나 지우다 실패하면 workspace 는 DELETING 으로 남는다.
+    "ACTIVE 만 지울 수 있다" 는 규칙이 그 재시도를 막고 있었다 — 프로덕션에서
+    workspace 네 개가 그 상태로 영영 지워지지 않았다.
+    """
+
+    async def scenario() -> None:
+        store = InMemoryControlStore()
+        await _seed(store, "vws-1", "owner-1")
+        # eraser 없이 지우면 표시만 바뀐다 — 고착 상태를 그대로 만든다.
+        stuck = WorkspaceAdministrationService(
+            unit_of_work_factory=store,
+            clock=lambda: NOW + timedelta(minutes=1),
+            id_factory=lambda prefix: f"{prefix}-stuck",
+            workspace_erasers=(),
+        )
+        await stuck.request_workspace_deletion(
+            risk_workspace_id="vws-1", actor_user_id="owner-1"
+        )
+        async with store() as uow:
+            workspace = await uow.workspaces.get("vws-1")
+            assert workspace is not None
+            assert workspace.status.value == "DELETING"
+
+        # 재시도 — eraser 가 있으면 이어서 끝까지 지운다.
+        await _service(store).request_workspace_deletion(
+            risk_workspace_id="vws-1", actor_user_id="owner-1"
+        )
+        async with store() as uow:
+            assert await uow.workspaces.get("vws-1") is None
+
+    run(scenario())

@@ -922,15 +922,11 @@ def _drive_display_name(pending: PendingSourceConnection) -> str:
 
 def _drive_mount_alias(pending: PendingSourceConnection) -> str:
 
-    """VWS 안에서 유일하고 사람이 읽을 수 있는 alias.
+    """VWS 안에서 유일하고 사람이 읽을 수 있는 alias — **폴더 이름 그대로**.
 
-
-
-    alias 는 VWS 단위로 유일해야 한다. 계정 라벨(이메일)이 있으면 그대로 쓰고,
-
-    없으면 계정 subject digest 로 안정된 값을 만든다. 선택 집합에서 파생하지
-
-    않으므로 파일을 더 추가해도 alias 가 바뀌지 않는다.
+    D1 에서 라벨은 공유받은 폴더의 이름이다. GitHub 이 repo 이름을 그대로 쓰는
+    것과 같은 자리이고, 소스 종류는 화면이 따로 표시하므로 "Google Drive " 접두사는
+    이름을 길게만 만들었다. 라벨이 없으면 폴더 id digest 로 안정된 값을 만든다.
 
     """
 
@@ -938,7 +934,7 @@ def _drive_mount_alias(pending: PendingSourceConnection) -> str:
 
     if label:
 
-        return f"Google Drive {label}"
+        return label
 
     return f"Google Drive {_digest(pending.provider_subject)[:8]}"
 

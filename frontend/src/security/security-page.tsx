@@ -1,13 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../auth/session";
-import { formatBytes, formatDate, humanize, shortRevision } from "../shared/format";
 import { useResource } from "../shared/hooks/use-resource";
 import {
-  Badge,
   Button,
   Card,
-  EmptyState,
   ErrorState,
   Field,
   LoadingState,
@@ -86,15 +83,12 @@ export function SecurityPage() {
   if (access.error !== null)
     return <ErrorState error={access.error} retry={access.reload} />;
   if (settings.data === null || access.data === null) return null;
-  const mountAliases = new Map(
-    access.data.mounts.map((mount) => [mount.id, mount.alias]),
-  );
   return (
     <div className="content">
       <PageHeader
         eyebrow="Transparency & control"
         title="Security & data access"
-        description="Connected scope, protection policy, retention, and actual source reads are shown separately."
+        description="보호 정책과 보존 원칙을 관리합니다. 실제 원문 접근 기록은 Activity & audit의 Source access 탭에 있습니다."
       />
       {error === null ? null : <ErrorState error={error} />}
       {/* "Connected sources / Authorized collection scope" 섹션은 뺐다 —
@@ -182,55 +176,8 @@ export function SecurityPage() {
           </div>
         </Card>
       </div>
-      <section className="section">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Recent source access</p>
-            <h2>Actual reads recorded</h2>
-          </div>
-          <Badge tone="neutral">
-            {access.data.recent_access.length} recent
-          </Badge>
-        </div>
-        {access.data.recent_access.length === 0 ? (
-          <EmptyState
-            title="No source reads recorded"
-            description="SourceAccessEvents will appear after analysis collection begins."
-          />
-        ) : (
-          <Card className="table-card">
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Mount</th>
-                    <th>Artifact</th>
-                    <th>Access</th>
-                    <th>Bytes</th>
-                    <th>Occurred</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {access.data.recent_access.map((event) => (
-                    <tr key={event.id}>
-                      <td>
-                        {mountAliases.get(event.mount_id) ?? event.mount_id}
-                      </td>
-                      <td>
-                        {event.artifact_id}
-                        <small>Revision {shortRevision(event.revision)}</small>
-                      </td>
-                      <td>{humanize(event.access_type)}</td>
-                      <td>{formatBytes(event.content_bytes)}</td>
-                      <td>{formatDate(event.occurred_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-      </section>
+      {/* "Actual reads recorded" 섹션은 뺐다 — 같은 기록이 Activity & audit 의
+          Source access 탭에 있고, 여기서는 id 표라 사람이 읽지 못했다. */}
       {role === "OWNER" ? (
         <Card className="danger-zone">
           <p className="eyebrow">Danger zone</p>

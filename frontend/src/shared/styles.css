@@ -1548,26 +1548,6 @@ button.explorer-row__main:hover .explorer-row__name {
   gap: 10px;
 }
 
-/* 처분 버튼 — 버튼 하나가 처분 하나. 지금 처분은 primary 로 보인다. */
-.disposition-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.disposition-buttons .button {
-  flex: 1 1 auto;
-}
-/* 버튼 셋이 들어갈 만큼 오른쪽 판을 넓힌다. */
-.detail-grid {
-  grid-template-columns: minmax(0, 1fr) 360px;
-}
-@media (max-width: 1000px) {
-  .detail-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* 알림 — 항목 전체가 입구다. */
 .notification-body {
   border: 0;
@@ -1590,4 +1570,10 @@ button.explorer-row__main:hover .explorer-row__name {
 }
 .danger-zone h2 {
   color: var(--danger);
+}
+
+.compare-pane__reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }

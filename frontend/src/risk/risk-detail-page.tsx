@@ -12,6 +12,7 @@ import {
   Field,
   LoadingState,
   PageHeader,
+  Select,
   Textarea,
   toneFor,
 } from "../shared/ui";
@@ -29,13 +30,15 @@ export function RiskDetailPage() {
     () => api.risk(workspace.id, riskId),
     [api, workspace.id, riskId],
   );
+  // v1(integration) 의 Reviewer decision 형태를 그대로 쓴다 — 처분 선택,
+  // Comment, Save decision. 처분만 v3 도메인에 맞춘다 (EXCLUDED 는 시스템 전용).
+  const [disposition, setDisposition] =
+    useState<Risk["review_disposition"]>("UNREVIEWED");
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [mutationError, setMutationError] = useState<Error | null>(null);
   const [openNotice, setOpenNotice] = useState<string | null>(null);
 
-  // 처분은 버튼 하나로 끝난다 — 드롭다운에서 고르고 저장을 또 누르는 두 걸음은
-  // 검토 수십 건을 처리하는 손에 너무 느리다.
   async function review(disposition: Risk["review_disposition"]) {
     if (resource.data === null) return;
     setBusy(true);
@@ -191,44 +194,46 @@ export function RiskDetailPage() {
             <Card className="review-card">
               <p className="eyebrow">Reviewer decision</p>
               <h2>Record disposition</h2>
-              <Field
-                label="Comment"
-                hint="Optional · retained in append-only history"
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void review(disposition);
+                }}
               >
-                <Textarea
-                  rows={4}
-                  maxLength={2000}
-                  value={comment}
-                  onChange={(event) => setComment(event.target.value)}
-                />
-              </Field>
-              {/*
-                버튼 하나가 처분 하나다. 지금 처분은 눌린 모양으로 보인다.
-                Excluded 는 여기에 없다 — 그것은 파일 추적 중단처럼 사용자 판단
-                밖의 요인으로 관리가 끝났다는 뜻이라 시스템만 붙인다. 스스로
-                감시를 그만두는 것은 Accepted risk 다.
-              */}
-              <div className="disposition-buttons">
-                {(
-                  [
-                    ["UNREVIEWED", "Unreviewed"],
-                    ["MONITORING", "Monitoring"],
-                    ["ACCEPTED_RISK", "Accept risk"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <Button
-                    key={value}
-                    type="button"
-                    variant={
-                      risk.review_disposition === value ? "primary" : "secondary"
+                <Field label="Disposition">
+                  <Select
+                    value={disposition}
+                    onChange={(event) =>
+                      setDisposition(
+                        event.target.value as Risk["review_disposition"],
+                      )
                     }
-                    disabled={busy || risk.review_disposition === value}
-                    onClick={() => void review(value)}
                   >
-                    {label}
-                  </Button>
-                ))}
-              </div>
+                    {/*
+                      Excluded 는 여기에 없다. 파일 추적 중단처럼 사용자 판단 밖의
+                      요인으로 관리가 끝났다는 뜻이라 시스템만 붙인다. 스스로
+                      감시를 그만두는 것은 Accepted risk 다.
+                    */}
+                    <option value="UNREVIEWED">Unreviewed</option>
+                    <option value="MONITORING">Monitoring</option>
+                    <option value="ACCEPTED_RISK">Accepted risk</option>
+                  </Select>
+                </Field>
+                <Field
+                  label="Comment"
+                  hint="Optional · retained in append-only history"
+                >
+                  <Textarea
+                    rows={5}
+                    maxLength={2000}
+                    value={comment}
+                    onChange={(event) => setComment(event.target.value)}
+                  />
+                </Field>
+                <Button disabled={busy}>
+                  {busy ? "Saving…" : "Save decision"}
+                </Button>
+              </form>
               <p className="fine-print">
                 This changes human disposition only. Machine lifecycle is
                 controlled by authoritative analysis.
@@ -392,6 +397,9 @@ function EvidenceBlock({ evidence }: { evidence: Evidence }) {
  * 출원번호는 숫자만 남긴다 — 붙임표가 섞이면 AN 질의가 빈다.
  */
 function PatentReferenceLinks({ evidence }: { evidence: Evidence[] }) {
+  // KIPRIS 검색 화면이 URL 질의를 항상 실행해 주지는 않는다 — 링크로 화면까지
+  // 데려다 주되, 번호를 복사해 검색창에 붙여 넣을 수 있게 함께 둔다.
+  const [copied, setCopied] = useState<string | null>(null);
   const numbers = [
     ...new Set(
       evidence
@@ -403,15 +411,26 @@ function PatentReferenceLinks({ evidence }: { evidence: Evidence[] }) {
   return (
     <p className="compare-pane__link">
       {numbers.map((number) => (
-        <a
-          key={number}
-          className="text-link"
-          href={`https://www.kipris.or.kr/khome/search/searchResult.do?searchQuery=${encodeURIComponent(`AN=${number.replaceAll("-", "")}`)}&tab=patent`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          KIPRIS 출원번호 {number} ↗
-        </a>
+        <span key={number} className="compare-pane__reference">
+          <a
+            className="text-link"
+            href={`https://www.kipris.or.kr/khome/search/searchResult.do?searchQuery=${encodeURIComponent(`AN=${number.replaceAll("-", "")}`)}&tab=patent`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            KIPRIS 출원번호 {number} ↗
+          </a>
+          <button
+            type="button"
+            className="text-link"
+            onClick={() => {
+              void navigator.clipboard?.writeText(number.replaceAll("-", ""));
+              setCopied(number);
+            }}
+          >
+            {copied === number ? "복사됨" : "번호 복사"}
+          </button>
+        </span>
       ))}
     </p>
   );
