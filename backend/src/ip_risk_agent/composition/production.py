@@ -420,6 +420,9 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             # 조용히 해소되는 것을 막는다.
             patent_response_cache=patent_cache,
             previously_matched_patents=context.control_facade.previously_matched_patents,
+            # 분석기는 workspace 를 모른다. Control 이 배포 형태 축과 정책 표 판본을
+            # 읽어 주는 **함수 하나**를 넘긴다 (§3 · §5.10).
+            workspace_license_policy=context.control_facade.workspace_license_policy,
             retriever=retriever,
         ),
         # 이미 판정이 끝난 Risk 에 설명과 권고를 붙인다. 저장된 근거만 보므로

@@ -12,6 +12,7 @@ from ip_risk_agent.core.common import (
     require_chronological,
     require_non_empty,
 )
+from ip_risk_agent.core.workspaces.license_profile import LicenseDeploymentProfile
 
 
 class RiskWorkspaceStatus(StrEnum):
@@ -32,6 +33,9 @@ class RiskWorkspace:
     description: str | None = None
     status: RiskWorkspaceStatus = RiskWorkspaceStatus.ACTIVE
     global_ignore_text: str = ""
+    #: 배포 형태 축 (§5.7). 정해지기 전에는 ``None`` 이고, 그때는 라이선스 4·5 단계가
+    #: 돌지 않는다 — 축 없이 매긴 등급은 판정이 아니라 짐작이다 (§5.10).
+    license_profile: LicenseDeploymentProfile | None = None
 
     def __post_init__(self) -> None:
         for field_name in (

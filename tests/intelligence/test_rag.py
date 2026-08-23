@@ -202,7 +202,7 @@ def test_facade_runs_license_analysis_with_rag_evidence():
         create_analyzer_registry,
     )
 
-    from test_license import make_artifact
+    from test_license import _configured_policy, make_artifact
 
     facade = IntelligenceFacade(
         create_analyzer_registry(
@@ -211,6 +211,8 @@ def test_facade_runs_license_analysis_with_rag_evidence():
             ),
             model_client=None,  # 라이선스 경로는 모델 클라이언트를 쓰지 않는다
             retriever=InMemoryReferenceRetriever(CHUNKS, "2026-08-14.1"),
+            # 조항 검색은 4 단계다. 배포 형태가 정해져야 돈다 (§5.10).
+            workspace_license_policy=_configured_policy,
         )
     )
     artifact = make_artifact("PyMuPDF==1.24.0")

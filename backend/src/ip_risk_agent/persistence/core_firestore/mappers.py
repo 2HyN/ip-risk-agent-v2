@@ -63,6 +63,12 @@ from ip_risk_agent.core.risk import (
     RiskLifecycleState,
 )
 from ip_risk_agent.core.workspaces import RiskWorkspace, RiskWorkspaceStatus
+from ip_risk_agent.core.workspaces.license_profile import (
+    DistributionForm,
+    LicenseDeploymentProfile,
+    LinkingMode,
+    ModificationState,
+)
 
 from .schema import DOCUMENT_SCHEMA_VERSION
 
@@ -182,6 +188,38 @@ def workspace_to_document(value: RiskWorkspace) -> Document:
         updated_at=value.updated_at,
         status=value.status,
         global_ignore_text=value.global_ignore_text,
+        license_profile=_license_profile_to_document(value.license_profile),
+    )
+
+
+def _license_profile_to_document(
+    value: LicenseDeploymentProfile | None,
+) -> dict[str, object] | None:
+    if value is None:
+        return None
+    return {
+        "distribution_form": value.distribution_form.value,
+        "modification": value.modification.value,
+        "linking": value.linking.value,
+        "redistributes": value.redistributes,
+    }
+
+
+def _license_profile_from_document(
+    value: object,
+) -> LicenseDeploymentProfile | None:
+    """저장된 배포 형태. 없으면 **설정 안 된 것**이다.
+
+    이 필드는 나중에 추가됐다. 이미 저장된 workspace 문서에는 없고, 없다는 것이
+    "아직 정하지 않았다" 를 정확히 뜻하므로 이행이 필요 없다 (§5.10).
+    """
+    if not isinstance(value, Mapping):
+        return None
+    return LicenseDeploymentProfile(
+        distribution_form=DistributionForm(value["distribution_form"]),
+        modification=ModificationState(value["modification"]),
+        linking=LinkingMode(value["linking"]),
+        redistributes=bool(value["redistributes"]),
     )
 
 
@@ -201,6 +239,7 @@ def workspace_from_document(document: Mapping[str, object]) -> RiskWorkspace:
             "status",
             "global_ignore_text",
         ),
+        optional_fields=("license_profile",),
     )
     return RiskWorkspace(
         id=str(data["id"]),
@@ -213,6 +252,7 @@ def workspace_from_document(document: Mapping[str, object]) -> RiskWorkspace:
         updated_at=_datetime(data["updated_at"]),
         status=RiskWorkspaceStatus(data["status"]),
         global_ignore_text=str(data["global_ignore_text"]),
+        license_profile=_license_profile_from_document(data.get("license_profile")),
     )
 
 

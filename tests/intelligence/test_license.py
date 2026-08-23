@@ -24,7 +24,42 @@ from iprisk_contracts.common import (
 
 from ip_risk_agent.intelligence.common.errors import ArtifactRejectedError
 from ip_risk_agent.intelligence.license import lockfiles, manifests, policy, spdx
-from ip_risk_agent.intelligence.license.analyzer import LicenseAnalyzer
+from ip_risk_agent.core.workspaces.license_profile import (
+    DistributionForm,
+    LicenseDeploymentProfile,
+    LinkingMode,
+    ModificationState,
+    WorkspaceLicensePolicy,
+)
+from ip_risk_agent.intelligence.license.analyzer import (
+    LicenseAnalyzer as _RealLicenseAnalyzer,
+)
+
+#: 이 파일의 시험 대부분은 **배포 형태가 정해진 workspace** 를 가정한다. 축이 없으면
+#: 4·5 단계가 돌지 않아 (§5.10) 등급이 전부 확인 필요가 되고, 그러면 등급을 보는 시험이
+#: 무엇도 확인하지 못한다. 가정을 여기 한 번 적어 두고 아래에서 그대로 쓴다.
+#:
+#: 설정 **전**의 동작은 아래 "2-E" 구획이 따로 본다.
+CONFIGURED_PROFILE = LicenseDeploymentProfile(
+    distribution_form=DistributionForm.SAAS,
+    modification=ModificationState.MODIFIED,
+    linking=LinkingMode.DYNAMIC,
+    redistributes=True,
+)
+
+
+async def _configured_policy(risk_workspace_id: str) -> WorkspaceLicensePolicy:
+    return WorkspaceLicensePolicy(
+        risk_workspace_id=risk_workspace_id,
+        policy_table_version="license-policy-test",
+        profile=CONFIGURED_PROFILE,
+    )
+
+
+def LicenseAnalyzer(*args, **kwargs):
+    """설정된 workspace 를 기본으로 주는 시험용 생성자."""
+    kwargs.setdefault("workspace_license_policy", _configured_policy)
+    return _RealLicenseAnalyzer(*args, **kwargs)
 from ip_risk_agent.intelligence.license.dependency_models import (
     DependencySet,
     Ecosystem,
@@ -268,7 +303,12 @@ def test_clean_manifest_succeeds_with_complete_coverage():
     assert result.status is AnalysisStatus.SUCCEEDED
     assert result.coverage is AnalysisCoverage.COMPLETE
     assert result.candidates[0].policy_outcome is LicensePolicyOutcome.NOTICE_REQUIRED
-    assert result.versions.policy_version == policy.POLICY_VERSION
+    # 판본은 세 조각이다 — workspace · 정책표 · 배포형태축 (§5.10). 표가 바뀌어도,
+    # 사용자가 SaaS 를 사내 전용으로 바꿔도 판정이 달라지고, 원인 귀속(§7.4)이 그
+    # 차이를 읽어야 한다.
+    assert result.versions.policy_version == (
+        f"vws-1:license-policy-test:{CONFIGURED_PROFILE.axes_hash}"
+    )
 
 
 def test_empty_manifest_is_success_not_failure():
@@ -876,6 +916,102 @@ def test_a_genuinely_empty_requirements_file_still_reads_as_complete():
     )
     assert result.coverage is AnalysisCoverage.COMPLETE
     assert not result.candidates
+
+
+# ----------------------------------------------------------------- 2-E
+
+
+async def _unconfigured_policy(risk_workspace_id: str):
+    return None
+
+
+def test_no_grade_is_given_before_the_deployment_form_is_known():
+    """같은 라이선스가 배포 형태에 따라 다른 의무를 만든다 (§5.10).
+
+    LGPL 은 동적 링크면 고지로 끝나고 정적 링크면 결합 저작물이 걸린다. AGPL 은 사내
+    전용이면 조용하고 SaaS 면 네트워크 이용자에게 소스를 줘야 한다. 축을 모르는데
+    등급을 매기면 그것은 판정이 아니라 짐작이다.
+    """
+    result = run(
+        _RealLicenseAnalyzer(
+            PROVIDER, workspace_license_policy=_unconfigured_policy
+        ).analyze(make_artifact("PyMuPDF==1.24.0"))
+    )
+    assert result.status is AnalysisStatus.SUCCEEDED
+    candidate = result.candidates[0]
+    assert candidate.policy_outcome is LicensePolicyOutcome.UNKNOWN
+    assert "DEPLOYMENT_PROFILE_NOT_SET" in candidate.uncertainty_flags
+
+
+def test_the_heaviest_assumption_is_not_used_as_a_default():
+    """"재배포함 · 수정함 · 정적 링크" 로 두면 설정 전 화면이 **전부 빨강**이 된다.
+
+    그러면 사용자는 진짜 HIGH 도 함께 무시한다. 안전한 방향의 기본값이 안전을
+    떨어뜨린다 (§5.10).
+    """
+    result = run(
+        _RealLicenseAnalyzer(
+            PROVIDER, workspace_license_policy=_unconfigured_policy
+        ).analyze(make_artifact("PyMuPDF==1.24.0"))
+    )
+    # AGPL 이다. 가장 무거운 가정을 썼다면 POLICY_CONFLICT 가 나왔을 것이다.
+    assert result.candidates[0].policy_outcome is not LicensePolicyOutcome.POLICY_CONFLICT
+
+
+def test_the_first_three_stages_still_run_before_configuration():
+    """무엇을 쓰고 있는지는 설정과 무관하다 (§5.10).
+
+    파싱 · 식별 · 전문 조회는 그대로 돌고, 미루는 것은 조항 검색과 의무 판정뿐이다.
+    """
+    result = run(
+        _RealLicenseAnalyzer(
+            PROVIDER, workspace_license_policy=_unconfigured_policy
+        ).analyze(make_artifact("PyMuPDF==1.24.0"))
+    )
+    candidate = result.candidates[0]
+    assert candidate.normalized_package_name == "pymupdf"
+    assert candidate.normalized_license_expression == "AGPL-3.0-only"
+    assert candidate.evidence_ids, "패키지 메타데이터 근거는 그대로 남는다"
+
+
+def test_no_clause_search_happens_before_configuration():
+    """4 단계를 미룬다는 것은 **검색하지 않는다**는 뜻이다.
+
+    돌려놓고 버리면 corpus 판본이 기록되어 (0-H) "물어봤다" 로 읽힌다.
+    """
+    retriever = FakeRetriever()
+    result = run(
+        _RealLicenseAnalyzer(
+            PROVIDER,
+            retriever=retriever,
+            workspace_license_policy=_unconfigured_policy,
+        ).analyze(make_artifact("PyMuPDF==1.24.0"))
+    )
+    assert result.versions.rag_corpus_version is None
+
+
+def test_the_version_says_the_form_was_not_set_yet():
+    """설정 전에 낸 결과와 설정 후에 낸 결과가 구별되어야 한다 (§7.4)."""
+    result = run(
+        _RealLicenseAnalyzer(
+            PROVIDER, workspace_license_policy=_unconfigured_policy
+        ).analyze(make_artifact("PyMuPDF==1.24.0"))
+    )
+    assert result.versions.policy_version.endswith(":unset")
+
+
+def test_a_lookup_that_is_not_wired_is_treated_as_not_configured():
+    """배선을 잊었을 때 등급이 조용히 틀리는 것보다 확인 필요로 보이는 편이 낫다."""
+    result = run(_RealLicenseAnalyzer(PROVIDER).analyze(make_artifact("PyMuPDF==1.24.0")))
+    assert result.candidates[0].policy_outcome is LicensePolicyOutcome.UNKNOWN
+
+
+def test_changing_the_deployment_form_changes_the_version():
+    """사용자가 SaaS 를 사내 전용으로 바꾸면 판정이 달라진다. 버전이 그것을 말해야 한다."""
+    from dataclasses import replace as _replace
+
+    other = _replace(CONFIGURED_PROFILE, distribution_form=DistributionForm.INTERNAL_ONLY)
+    assert other.axes_hash != CONFIGURED_PROFILE.axes_hash
 
 # ----------------------------------------------------------------- 0-H
 

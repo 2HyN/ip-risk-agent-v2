@@ -105,6 +105,7 @@ def create_analyzer_registry(
     patent_candidate_cap: int = 6,
     patent_response_cache=None,
     previously_matched_patents=None,
+    workspace_license_policy=None,
 ) -> AnalyzerRegistry:
     """Analyzer 를 조립한다.
 
@@ -112,7 +113,13 @@ def create_analyzer_registry(
     특허 검색기를 넣지 않으면 라이선스만 등록된다.
     """
     analyzers: list[Analyzer] = [
-        LicenseAnalyzer(metadata_provider, retriever=retriever)
+        LicenseAnalyzer(
+            metadata_provider,
+            retriever=retriever,
+            # 배포 형태를 모르면 4·5 단계를 돌리지 않는다 (§5.10). 넣지 않으면
+            # **설정 안 된 것**으로 다뤄져 등급 대신 확인 필요가 나온다.
+            workspace_license_policy=workspace_license_policy,
+        )
     ]
     if search_provider is not None:
         analyzers.append(

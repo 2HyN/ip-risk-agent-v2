@@ -32,6 +32,10 @@ from ..common.analyzer import ResultBuilder
 from ..common.errors import FailureCategory, ProviderFailureError
 from ..common.evidence import package_metadata_id, rag_chunk_id
 from ..common.validation import validate_artifact
+from typing import Protocol
+
+from ip_risk_agent.core.workspaces.license_profile import WorkspaceLicensePolicy
+
 from . import lockfiles, manifests, policy, spdx
 from .dependency_models import (
     DependencyDeclaration,
@@ -138,6 +142,16 @@ def _input_was_cut(artifact: AnalysisArtifact) -> bool:
     return artifact.content_scope is not ContentScope.FULL_TEXT
 
 
+class WorkspaceLicensePolicyLookup(Protocol):
+    """Control 이 넘겨 주는 함수 하나 (§3 · §5.10).
+
+    Intelligence 는 이것이 어디서 오는지 모른다. 특허 쪽
+    ``previously_matched_patents`` 와 같은 모양이고, 그래서 계약을 고칠 필요가 없다.
+    """
+
+    async def __call__(self, risk_workspace_id: str) -> WorkspaceLicensePolicy | None: ...
+
+
 class LicenseAnalyzer:
     """``AnalysisType.LICENSE`` 담당."""
 
@@ -148,9 +162,14 @@ class LicenseAnalyzer:
         metadata_provider: PackageMetadataProvider,
         *,
         retriever: ReferenceRetriever | None = None,
+        workspace_license_policy: WorkspaceLicensePolicyLookup | None = None,
     ) -> None:
         self._metadata = metadata_provider
         self._retriever = retriever
+        # Control 이 workspace 에서 읽어 주는 **함수 하나**다. 이 plane 은 그것이
+        # 어디서 오는지 모른다 (§3 · §5.10). 특허 쪽 `previously_matched_patents` 와
+        # 같은 모양이다.
+        self._workspace_policy = workspace_license_policy
 
     def supports(self, artifact: AnalysisArtifact) -> bool:
         """의존성 파일만 본다. 소스 코드에는 의존성 선언이 없다."""
@@ -162,7 +181,11 @@ class LicenseAnalyzer:
     async def analyze(self, artifact: AnalysisArtifact):
         validate_artifact(artifact, self.analysis_type)
         builder = ResultBuilder(artifact, self.analysis_type, ANALYZER_VERSION)
-        versions: dict[str, str | None] = {"policy_version": policy.POLICY_VERSION}
+
+        workspace_policy = await self._resolve_workspace_policy(
+            artifact.risk_workspace_id
+        )
+        versions: dict[str, str | None] = {"policy_version": workspace_policy.version}
 
         parser = _select_parser(artifact.logical_path)
         if parser is None:
@@ -221,7 +244,9 @@ class LicenseAnalyzer:
         candidates: list[LicenseCandidate] = []
         partial = False
         for declaration in dependencies.items():
-            candidate, degraded = await self._evaluate(declaration, builder, versions)
+            candidate, degraded = await self._evaluate(
+                declaration, builder, versions, workspace_policy
+            )
             if candidate is not None:
                 candidates.append(candidate)
             partial = partial or degraded
@@ -244,11 +269,31 @@ class LicenseAnalyzer:
 
     # ------------------------------------------------------------ 개별 평가
 
+    async def _resolve_workspace_policy(
+        self, risk_workspace_id: str
+    ) -> WorkspaceLicensePolicy:
+        """이 workspace 의 라이선스 정책. 물을 곳이 없으면 **설정 안 된 것**이다.
+
+        조회가 실패해도 마찬가지다. 실패를 "설정됐다" 로 읽으면 4·5 단계가 근거 없는
+        축으로 돌고, 그렇게 나온 등급은 판정이 아니라 짐작이다.
+        """
+        if self._workspace_policy is None:
+            return WorkspaceLicensePolicy(
+                risk_workspace_id=risk_workspace_id,
+                policy_table_version=policy.POLICY_VERSION,
+            )
+        found = await self._workspace_policy(risk_workspace_id)
+        return found or WorkspaceLicensePolicy(
+            risk_workspace_id=risk_workspace_id,
+            policy_table_version=policy.POLICY_VERSION,
+        )
+
     async def _evaluate(
         self,
         declaration: DependencyDeclaration,
         builder: ResultBuilder,
         versions: dict[str, str | None],
+        workspace_policy: WorkspaceLicensePolicy,
     ) -> tuple[LicenseCandidate | None, bool]:
         """의존성 하나를 평가한다. 두 번째 값은 coverage 를 낮춰야 하는지."""
         uncertainty = declaration.uncertainty_flags()
@@ -298,6 +343,29 @@ class LicenseAnalyzer:
                 },
             )
         )
+
+        # 4·5 단계는 배포 형태를 알아야 돈다. LGPL 은 동적 링크면 고지로 끝나고 정적
+        # 링크면 결합 저작물이 걸린다. AGPL 은 사내 전용이면 조용하고 SaaS 면 소스를
+        # 줘야 한다. 축이 없는데 등급을 매기면 그것은 판정이 아니라 짐작이다 (§5.10).
+        #
+        # 가장 무거운 쪽으로 가정하지 않는다. 설정 전 workspace 가 전부 빨강이 되면
+        # 사용자는 진짜 HIGH 도 함께 무시한다.
+        if not workspace_policy.is_configured:
+            uncertainty.append("DEPLOYMENT_PROFILE_NOT_SET")
+            return (
+                LicenseCandidate(
+                    ecosystem=declaration.ecosystem.value,
+                    normalized_package_name=declaration.name,
+                    resolved_version=declaration.version,
+                    normalized_license_expression=fact.license_expression,
+                    # 등급이 아니라 "아직 하지 않았다" 다. `UNKNOWN` 은
+                    # `INDETERMINATE` 로 가고 (§5.12), 이유는 위 표시가 말한다.
+                    policy_outcome=policy.LicensePolicyOutcome.UNKNOWN,
+                    evidence_ids=evidence_ids,
+                    uncertainty_flags=uncertainty,
+                ),
+                False,
+            )
 
         degraded = await self._attach_reference_evidence(
             declaration, fact.license_expression, outcome, evidence_ids, builder, versions

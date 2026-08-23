@@ -64,6 +64,8 @@ from ip_risk_agent.core.mounts import (
     WorkspaceMount,
 )
 from ip_risk_agent.core.workspaces import RiskWorkspaceStatus
+from ip_risk_agent.core.workspaces.license_profile import WorkspaceLicensePolicy
+from ip_risk_agent.intelligence.license import policy as license_policy
 
 from .models import (
     AnalysisArtifactBuildResult,
@@ -293,6 +295,29 @@ class ControlPlaneFacade:
         self._observer.event(
             "analysis_reanalysis_requested",
             correlation=CorrelationIds(event_id=change_event_id),
+        )
+
+    async def workspace_license_policy(
+        self, risk_workspace_id: str
+    ) -> WorkspaceLicensePolicy | None:
+        """이 workspace 의 라이선스 판정 정책 (§5.10).
+
+        분석기 안에서 값이 필요한데 **분석기는 workspace 를 모른다.** 계약을 고치지
+        않고 다리를 놓는 방법이 이미 있다 — 특허 쪽 ``previously_matched_patents`` 와
+        같은 모양으로 함수 하나를 넘긴다.
+
+        workspace 를 못 찾으면 ``None`` 이다. 그때 분석기는 **설정 안 된 것**으로 보고
+        4·5 단계를 돌리지 않는다. 못 찾은 것을 "설정됐다" 로 읽으면 근거 없는 축으로
+        등급이 매겨진다.
+        """
+        async with self._unit_of_work_factory() as uow:
+            workspace = await uow.workspaces.get(risk_workspace_id)
+        if workspace is None:
+            return None
+        return WorkspaceLicensePolicy(
+            risk_workspace_id=workspace.id,
+            policy_table_version=license_policy.POLICY_VERSION,
+            profile=workspace.license_profile,
         )
 
     async def previously_matched_patents(
