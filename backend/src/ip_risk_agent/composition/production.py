@@ -282,6 +282,10 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
             control_facade=context.control_facade,
             adapter=source.drive_adapter,
             change_sink=sink,
+            # 6 시간 주기 갱신만 있으면 방금 붙인 폴더가 그때까지 밀어주는 알림
+            # 없이 남는다 (결함 39). 붙이는 자리에서 채널을 건다.
+            watch_address=settings.drive_webhook_base_url,
+            watch_channel_token=settings.drive_watch_channel_token,
         ),
         connection_authz_dependency=connection_auth,
         mount_authz_dependency=mount_auth,
