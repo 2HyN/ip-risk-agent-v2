@@ -429,6 +429,9 @@ def _control_api(
         # 재검사는 canonical 상태를 되돌리고 큐에 다시 넣는다. facade 가 그 경계를
         # 소유하므로 security 서비스는 호출만 한다.
         reanalysis_requester=facade.request_reanalysis,
+        # 배포 형태가 바뀌면 판정이 바뀐다. 저장으로 끝내면 화면의 등급이 이미
+        # 바뀐 설정과 어긋난 채로 남는다 (§5.10).
+        license_revalidator=facade.revalidate_mount_licenses,
     )
     cursor = CursorCodec(settings.session_secret)
     parsed_host = settings.public_base_url.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]

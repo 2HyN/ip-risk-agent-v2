@@ -10,6 +10,12 @@ from fastapi import APIRouter, Depends, Query, Response
 from iprisk_contracts import SourceAccessType
 from pydantic import Field
 
+from ip_risk_agent.core.workspaces.license_profile import (
+    DistributionForm,
+    LicenseDeploymentProfile,
+    LinkingMode,
+    ModificationState,
+)
 from ip_risk_agent.application.auth import AuthenticationService
 from ip_risk_agent.application.history.safety import (
     HistorySafetyPolicy,
@@ -41,6 +47,23 @@ class SecurityPolicyUpdateRequest(StrictApiModel):
 
 class SecurityPolicyUpdateResponse(StrictApiModel):
     settings: SecuritySettingsResponse
+    changed: bool
+
+
+class LicenseProfileRequest(StrictApiModel):
+    """배포 형태 축 넷 (§5.7).
+
+    기본값을 두지 않는다. 정하지 않은 것과 "SaaS 라고 골랐다" 는 다르고, 기본값이
+    있으면 화면을 넘기기만 해도 정해진 것이 된다 (§5.10).
+    """
+
+    distribution_form: DistributionForm
+    modification: ModificationState
+    linking: LinkingMode
+    redistributes: bool
+
+
+class LicenseProfileResponse(StrictApiModel):
     changed: bool
 
 
@@ -177,6 +200,30 @@ def create_security_router(deps: SecurityRouterDependencies) -> APIRouter:
             result.settings.policy_version,
         )
         return result
+
+    @router.put("/license-profile", response_model=LicenseProfileResponse)
+    async def update_license_profile(
+        vws_id: str,
+        body: LicenseProfileRequest,
+        principal: CurrentPrincipal = Depends(current),
+        _csrf: None = Depends(csrf),
+    ):
+        """배포 형태를 정한다 (§13-9).
+
+        이것이 정해지기 전에는 라이선스 4·5 단계가 돌지 않아 Risk 가 전부 확인
+        필요다. 바꾸면 판정이 달라지므로 저장 뒤 재평가가 이어진다 (§5.10).
+        """
+        changed = await deps.security.update_license_profile(
+            risk_workspace_id=vws_id,
+            actor_user_id=principal.user.id,
+            profile=LicenseDeploymentProfile(
+                distribution_form=body.distribution_form,
+                modification=body.modification,
+                linking=body.linking,
+                redistributes=body.redistributes,
+            ),
+        )
+        return LicenseProfileResponse(changed=changed)
 
     @router.post("/reanalyze", status_code=202)
     async def request_reanalysis(

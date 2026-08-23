@@ -24,6 +24,7 @@ from ip_risk_agent.application.repositories import (
     RecordNotFoundError,
 )
 from ip_risk_agent.application.security_gate import parse_ipriskignore
+from ip_risk_agent.core.workspaces.license_profile import LicenseDeploymentProfile
 from ip_risk_agent.core.audit import AuditEvent, AuditEventType, SourceAccessEvent
 from ip_risk_agent.core.common import ActorType, DomainInvariantError, normalize_utc
 from ip_risk_agent.core.memberships import (
@@ -109,11 +110,14 @@ class WorkspaceSecurityService:
         clock: Clock,
         id_factory: IdFactory,
         reanalysis_requester: ReanalysisRequester | None = None,
+        license_revalidator=None,
     ) -> None:
         self._unit_of_work_factory = unit_of_work_factory
         self._clock = clock
         self._id_factory = id_factory
         self._reanalysis_requester = reanalysis_requester
+        # 배포 형태가 바뀌면 판정이 바뀐다. 결함 24 가 만든 것과 같은 경로다.
+        self._license_revalidator = license_revalidator
 
     async def request_reanalysis(
         self,
@@ -221,6 +225,76 @@ class WorkspaceSecurityService:
             )
             await uow.commit()
         return SecurityPolicyUpdate(_settings(workspace), changed=True)
+
+    async def update_license_profile(
+        self,
+        *,
+        risk_workspace_id: str,
+        actor_user_id: str,
+        profile: LicenseDeploymentProfile,
+    ) -> bool:
+        """배포 형태 축을 정한다 (§5.7 · §5.10 · §13-9). 바뀌었으면 ``True``.
+
+        ## 왜 이 자리인가
+
+        같은 라이선스가 배포 형태에 따라 다른 의무를 만든다. 이것이 정해지기 전에는
+        4·5 단계가 돌지 않아 라이선스 Risk 가 전부 확인 필요다.
+
+        ``global_ignore_text`` 와 같은 성격의 **workspace 정책**이라 같은 권한
+        (``VWS_SECURITY_MANAGE``)과 같은 감사 기록을 쓴다.
+
+        ## 바꾸면 판정이 달라진다
+
+        SaaS 를 사내 전용으로 바꾸면 AGPL 의 의무가 사라지고, 동적 링크를 정적으로
+        바꾸면 LGPL 의 의무가 생긴다. 그래서 **저장으로 끝내지 않고 다시 평가한다** —
+        그러지 않으면 화면의 등급이 이미 바뀐 설정과 어긋난 채로 남는다.
+
+        재평가는 결함 24 가 만든 것과 **같은 경로**다. 파일을 건드리지 않으므로 §7.4
+        가 원인을 정책 변경으로 귀속할 수 있다 — 판정 버전의 셋째 조각이 달라진 것으로
+        남는다 (§5.10).
+        """
+        async with self._unit_of_work_factory() as uow:
+            workspace = await _authorize_and_workspace(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                actor_user_id=actor_user_id,
+                action=VwsAction.VWS_SECURITY_MANAGE,
+            )
+            if workspace.license_profile == profile:
+                return False
+            occurred_at = max(
+                normalize_utc(self._clock(), "security_policy.clock"),
+                workspace.updated_at,
+            )
+            await uow.workspaces.save(
+                replace(workspace, license_profile=profile, updated_at=occurred_at)
+            )
+            await uow.audit.append(
+                AuditEvent(
+                    id=self._id_factory("audit"),
+                    risk_workspace_id=risk_workspace_id,
+                    event_type=AuditEventType.SECURITY_POLICY_CHANGED,
+                    actor_type=ActorType.USER,
+                    actor_user_id=actor_user_id,
+                    occurred_at=occurred_at,
+                    metadata_safe={
+                        # 축 값 자체는 남기지 않는다. 해시로 충분하고, 판정 버전에
+                        # 실리는 것도 해시다 (§5.10).
+                        "license_axes_hash": profile.axes_hash,
+                    },
+                )
+            )
+            mounts = await uow.mounts.list_for_workspace(risk_workspace_id)
+            mount_ids = [mount.id for mount in mounts]
+            await uow.commit()
+
+        if self._license_revalidator is not None:
+            for mount_id in mount_ids:
+                try:
+                    await self._license_revalidator(mount_id)
+                except Exception:  # noqa: BLE001 - 저장은 끝났다. 재평가는 예약이 다시 한다
+                    continue
+        return True
 
     async def get_data_access_summary(
         self,
