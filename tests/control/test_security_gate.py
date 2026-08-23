@@ -209,24 +209,43 @@ def make_gate(
     )
 
 
-def test_ipriskignore_is_deny_only_mount_absolute_and_case_conservative() -> None:
+def test_ipriskignore_is_deny_only_and_relative_to_the_mount_root() -> None:
+    """패턴은 **마운트 뿌리 기준**이다. 별칭은 대조하지 않는다 (§9.1).
+
+    예전에는 별칭에 고정돼 있었다. 그래서 저장소가 스스로 쓴 `.ipriskignore` 는
+    게이트에서 **영영 맞지 않았다** — 저장소 저자는 우리 마운트 별칭을 모른다. 같은
+    파일을 커넥터는 저장소 상대 경로로, 게이트는 별칭 포함 경로로 봤다.
+    """
     rules = parse_ipriskignore(
         """
         # secrets
-        /backend/**/.env*
-        /backend/**/secrets/**
-        /design/private-hr/?ata.txt
+        **/.env*
+        secrets/
+        design/private-hr/?ata.txt
         """
     )
+    # 아래 경로의 첫 조각은 마운트 별칭이다.
     assert is_ignored("/Backend/.env", rules)
-    assert is_ignored("/backend/app/.env.production", rules)
-    assert is_ignored("/backend/app/secrets/token.txt", rules)
-    assert is_ignored("/design/private-hr/data.txt", rules)
-    assert not is_ignored("/backend/src/main.py", rules)
+    assert is_ignored("/Backend/app/.env.production", rules)
+    assert is_ignored("/Backend/secrets/token.txt", rules)
+    assert is_ignored("/Backend/design/private-hr/data.txt", rules)
+    assert not is_ignored("/Backend/src/main.py", rules)
+    # 별칭이 달라도 같게 걸린다. 그러지 않으면 마운트 이름이 정책을 바꾼다.
+    assert is_ignored("/another-mount/app/.env.production", rules)
+
     with pytest.raises(IgnorePolicyError, match="negation"):
-        parse_ipriskignore("!/backend/public/**")
-    with pytest.raises(IgnorePolicyError, match="mount-absolute"):
-        parse_ipriskignore("backend/private/**")
+        parse_ipriskignore("!public/**")
+
+
+def test_the_word_a_person_would_write_is_no_longer_an_error() -> None:
+    """선행 `/` 를 요구하던 것이 `node_modules` 를 오류로 만들었다 (결함 25).
+
+    한쪽은 오류로 보여 주기라도 했지만 커넥터 쪽은 조용히 통과시켰다. **두 곳 모두에서
+    동작하는 문자열이 하나도 없었다.**
+    """
+    rules = parse_ipriskignore("node_modules\n")
+    assert is_ignored("/Backend/frontend/node_modules/x/y.js", rules)
+    assert not is_ignored("/Backend/src/main.py", rules)
 
 
 def test_secret_redaction_is_deterministic_and_counts_each_match() -> None:
@@ -329,13 +348,13 @@ def test_gate_approves_minimized_redacted_input_and_records_access_once() -> Non
     ("global_ignore", "source_scope", "expected"),
     (
         (
-            "/backend/**/.env*",
+            "**/.env*",
             SourceScopeDecision(),
             SecurityGateDenialReason.GLOBAL_IGNORE_DENIED,
         ),
         (
             "",
-            SourceScopeDecision(ignore_text="/backend/**/.env*"),
+            SourceScopeDecision(ignore_text="**/.env*"),
             SecurityGateDenialReason.SOURCE_IGNORE_DENIED,
         ),
         (
@@ -393,7 +412,8 @@ def test_canonical_workspace_policy_text_overrides_static_gate_template() -> Non
                 replace(
                     workspace,
                     security_policy_version="security-v2",
-                    global_ignore_text="/Backend/private/**\n",
+                    # 마운트 뿌리 기준이다. 별칭(`Backend`)은 적지 않는다.
+                    global_ignore_text="private/**\n",
                     updated_at=NOW + timedelta(seconds=1),
                 )
             )

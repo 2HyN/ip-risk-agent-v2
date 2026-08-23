@@ -1,32 +1,33 @@
-"""Source-level .ipriskignore 파싱/매칭. Agent 2 Spec §18(GitHub), §28(Local).
+"""소스에 들어 있는 ``.ipriskignore``.
 
-VWS 전역 .ipriskignore(Agent 1 SecurityGate 책임)와는 다른, source 자체에
-내장된 optional deny 목록이다. 우리가 재구현하는 건 이 source-level 것뿐이다.
-
-gitignore와 완전히 동일한 문법(!negation, 디렉토리 전용 트레일링 슬래시 등)을
-전부 구현하진 않고, 기존 tracking_scope에서 이미 쓰고 검증된 fnmatch 기반
-글롭 매칭으로 통일했다 — 일관성 유지가 목적. 필요해지면 나중에 확장 가능.
+문법과 매칭은 :mod:`ip_risk_agent.core.security.ignore_patterns` 가 정한다. 예전에는
+여기서 ``fnmatch`` 로 따로 판단했고, 그래서 **같은 파일이 두 번 다르게 평가됐다** —
+커넥터는 저장소 상대 경로로 ``fnmatch``, 게이트는 마운트 절대 경로로 정규식이었다.
+사람이 ``node_modules`` 라고 적으면 커넥터는 조용히 아무것도 거르지 않았다 (§9.1).
 """
 
 from __future__ import annotations
 
-import fnmatch
+from ip_risk_agent.core.security.ignore_patterns import (
+    IgnorePatternError,
+    IgnoreRule,
+    is_ignored,
+    parse_patterns,
+)
 
 
-def parse_ipriskignore(content: str) -> list[str]:
-    """.ipriskignore 텍스트를 패턴 목록으로 파싱한다.
-    빈 줄과 '#'로 시작하는 주석 줄은 무시한다."""
-
-    patterns: list[str] = []
-    for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        patterns.append(stripped)
-    return patterns
+def parse_ipriskignore(content: str) -> tuple[IgnoreRule, ...]:
+    """본문을 규칙으로 읽는다. 읽을 수 없는 줄은 :class:`IgnorePatternError` 다."""
+    return parse_patterns(content)
 
 
-def is_denied_by_ipriskignore(path: str, patterns: list[str]) -> bool:
-    """path가 patterns 중 하나라도 매치되면 deny."""
+def is_denied_by_ipriskignore(path: str, rules: tuple[IgnoreRule, ...]) -> bool:
+    """저장소 뿌리 기준의 상대 경로가 걸리는가."""
+    return is_ignored(path, rules)
 
-    return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
+
+__all__ = [
+    "IgnorePatternError",
+    "is_denied_by_ipriskignore",
+    "parse_ipriskignore",
+]
