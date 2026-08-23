@@ -1,0 +1,3 @@
+[[package]]
+name = "pyarmor"
+version = "9.2.6"

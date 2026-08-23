@@ -1,0 +1,4 @@
+{
+  "name": "version-that-does-not-exist",
+  "dependencies": { "chalk": "99.99.99" }
+}

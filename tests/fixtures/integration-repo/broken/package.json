@@ -1,0 +1,4 @@
+{
+  "name": "deliberately-unreadable",
+  "dependencies": {
+    "chalk": "5.3.0",

@@ -1,0 +1,4 @@
+[project]
+name = "iprisk-integration-fixture"
+version = "1.0.0"
+dependencies = ["mysqlclient==2.2.4"]

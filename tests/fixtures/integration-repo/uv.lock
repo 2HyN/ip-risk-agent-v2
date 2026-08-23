@@ -1,0 +1,5 @@
+version = 1
+
+[[package]]
+name = "nvidia-cudnn-cu12"
+version = "9.24.0.43"
