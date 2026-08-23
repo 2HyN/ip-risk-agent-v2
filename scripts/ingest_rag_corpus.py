@@ -29,9 +29,9 @@ import json
 import sys
 from pathlib import Path
 
+import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "backend" / "src"))
-sys.path.insert(0, str(ROOT / "shared" / "contracts" / "python"))
 
 from ip_risk_agent.intelligence.rag.corpus_manifest import load_manifest  # noqa: E402
 from ip_risk_agent.intelligence.rag.ingestion import (  # noqa: E402

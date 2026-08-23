@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
+import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON_CONTRACTS = ROOT / "shared" / "contracts" / "python"
-if str(PYTHON_CONTRACTS) not in sys.path:
-    sys.path.insert(0, str(PYTHON_CONTRACTS))
 
 from iprisk_contracts import (  # noqa: E402
     AnalysisArtifact,

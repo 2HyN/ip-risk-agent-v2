@@ -26,6 +26,8 @@ import argparse
 import asyncio
 import sys
 
+import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+
 from ip_risk_agent.gcp.operational_eraser import FirestoreOperationalEraser
 from ip_risk_agent.gcp_contract import FIRESTORE_DATABASE, PROJECT_ID
 from ip_risk_agent.persistence.core_firestore.eraser import FirestoreWorkspaceEraser

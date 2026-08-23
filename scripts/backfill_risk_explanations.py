@@ -20,6 +20,8 @@ import asyncio
 import os
 import sys
 
+import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+
 from ip_risk_agent.application.risk_explanation import RiskExplanationService
 from ip_risk_agent.gcp_contract import FIRESTORE_DATABASE, PROJECT_ID
 from ip_risk_agent.intelligence.explain import GeminiRiskExplainer

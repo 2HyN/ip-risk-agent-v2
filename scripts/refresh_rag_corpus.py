@@ -45,9 +45,10 @@ import json
 import sys
 from pathlib import Path
 
+import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "backend" / "src"))
-sys.path.insert(0, str(ROOT / "shared" / "contracts" / "python"))
+# 이웃 스크립트(`build_rag_corpus` · `ingest_rag_corpus`)를 들이기 위해서다.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from build_rag_corpus import build  # noqa: E402

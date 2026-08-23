@@ -205,3 +205,48 @@ def test_rag_ingestion_dry_run_is_manifest_bounded_and_write_free() -> None:
     assert report["corpus_version"] == manifest["corpus_version"]
     assert report["checksums_verified"] is True
     assert report["external_write_performed"] is False
+
+
+def test_every_script_reads_the_code_it_ships_beside() -> None:
+    """스크립트가 다른 체크아웃의 ``ip_risk_agent`` 를 읽지 않는다.
+
+    작업 트리가 여럿이고 가상 환경 하나를 함께 쓴다. 그 환경의 editable 설치가
+    가리키는 곳은 이 저장소가 아니다. ``python scripts/foo.py`` 는 ``sys.path`` 에
+    저장소의 ``backend/src`` 를 올리지 않으므로, 부트스트랩이 없으면 editable
+    finder 가 답하고 스크립트는 **다른 체크아웃**을 읽는다.
+
+    ``scripts/validate_gcp_deployment.py`` 가 실제로 그렇게 돌았다. 배포 관문이
+    배포될 코드가 아닌 것을 검사했고, 통과했더라면 알 방법이 없었다.
+
+    수입 순서까지 본다. ``_repo_path`` 가 뒤에 오면 경로가 이미 결정된 다음이라
+    있으나 마나다.
+    """
+    offenders: list[str] = []
+    for path in sorted((ROOT / "scripts").glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        first_package = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if line.startswith(("from ip_risk_agent", "import ip_risk_agent"))
+                or line.startswith(("from iprisk_contracts", "import iprisk_contracts"))
+            ),
+            None,
+        )
+        if first_package is None:
+            continue
+        bootstrap = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if line.startswith("import _repo_path")
+            ),
+            None,
+        )
+        if bootstrap is None:
+            offenders.append(f"{path.name}: no _repo_path bootstrap")
+        elif bootstrap > first_package:
+            offenders.append(f"{path.name}: _repo_path comes after the package import")
+    assert offenders == []

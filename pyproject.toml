@@ -57,7 +57,10 @@ testpaths = [
   "tests/integration",
   "tests/e2e",
 ]
-pythonpath = ["shared/contracts/python", "backend/src", "."]
+# `scripts` 는 스크립트들이 자기 저장소를 경로에 올리려고 들이는 `_repo_path` 때문이다.
+# 스크립트로 직접 부를 때는 `sys.path[0]` 이 그 폴더라 저절로 찾지만, 시험은
+# `scripts.purge_workspace` 처럼 패키지로 들여서 그 경로가 없다.
+pythonpath = ["shared/contracts/python", "backend/src", ".", "scripts"]
 addopts = "--strict-config --strict-markers -ra -p no:cacheprovider"
 asyncio_mode = "strict"
 markers = [

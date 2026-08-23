@@ -20,6 +20,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+
 from iprisk_contracts import AnalysisArtifact
 from iprisk_contracts.analysis_artifact import AnalysisSecurityContext
 from iprisk_contracts.common import AnalysisType, ArtifactKind, ContentScope

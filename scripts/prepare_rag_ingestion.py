@@ -7,6 +7,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+
 from ip_risk_agent.intelligence.rag.ingestion import InMemoryCorpusUploader, ingest
 
 ROOT = Path(__file__).resolve().parents[1]
