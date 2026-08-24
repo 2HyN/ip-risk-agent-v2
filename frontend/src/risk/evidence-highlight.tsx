@@ -10,7 +10,13 @@
  *
  * 값이 이상하면 강조하지 않고 원문을 그대로 보여 준다. 잘못된 구간으로 엉뚱한 곳을
  * 강조하면 사람이 그것을 근거로 읽는다 — 강조가 없는 것보다 나쁘다.
+ *
+ * 강조 색은 Risk 등급을 따른다 (HIGH 빨강 · MEDIUM 주황). 구간 밖의 본문은
+ * `keywords` 를 켠 경우에 한해 낱말 강조를 받는다 — 라이선스처럼 검증된 인용
+ * 구간이 없는 근거에서 "어느 조항이 문제인가" 를 짚어 주기 위한 것이다.
  */
+
+import { RiskText, prioritySlug } from "./risk-emphasis.js";
 
 type Span = { readonly start: number; readonly end: number };
 
@@ -35,17 +41,30 @@ export function quoteSpan(
 export function EvidenceExcerpt({
   excerpt,
   metadata,
+  priority,
+  keywords = false,
 }: {
   excerpt: string;
   metadata: Record<string, unknown> | null | undefined;
+  priority?: string | null;
+  keywords?: boolean;
 }) {
   const span = quoteSpan(metadata, excerpt.length);
-  if (span === null) return <blockquote>{excerpt}</blockquote>;
+  const slug = prioritySlug(priority);
+  // 낱말 강조는 등급을 알 때만. 구간 강조와 규칙이 같다 — 등급 없이 칠하면
+  // 없는 심각도를 만들어 낸다.
+  const rest = (text: string) =>
+    keywords ? <RiskText text={text} priority={priority} /> : text;
+  if (span === null) return <blockquote>{rest(excerpt)}</blockquote>;
   return (
     <blockquote>
-      {excerpt.slice(0, span.start)}
-      <mark className="evidence-quote">{excerpt.slice(span.start, span.end)}</mark>
-      {excerpt.slice(span.end)}
+      {rest(excerpt.slice(0, span.start))}
+      <mark
+        className={`evidence-quote${slug === "" ? "" : ` evidence-quote--${slug}`}`}
+      >
+        {excerpt.slice(span.start, span.end)}
+      </mark>
+      {rest(excerpt.slice(span.end))}
     </blockquote>
   );
 }

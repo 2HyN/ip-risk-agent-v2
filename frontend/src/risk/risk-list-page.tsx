@@ -11,6 +11,7 @@ import {
   ErrorState,
   LoadingState,
   PageHeader,
+  PriorityBadge,
   Select,
   toneFor,
 } from "../shared/ui";
@@ -260,9 +261,7 @@ export function RiskListPage() {
                               </Link>
                             </td>
                             <td>
-                              <Badge tone={toneFor(risk.review_priority)}>
-                                {risk.review_priority}
-                              </Badge>
+                              <PriorityBadge value={risk.review_priority} />
                             </td>
                             <td>
                               <Badge tone={toneFor(risk.lifecycle_state)}>

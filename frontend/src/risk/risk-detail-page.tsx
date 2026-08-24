@@ -12,12 +12,14 @@ import {
   Field,
   LoadingState,
   PageHeader,
+  PriorityBadge,
   Select,
   Textarea,
   toneFor,
 } from "../shared/ui";
 import type { Evidence, Risk, RiskDetail } from "../shared/api/types";
 import { EvidenceExcerpt } from "./evidence-highlight.js";
+import { RiskText, keywordEmphasisApplies } from "./risk-emphasis.js";
 import { useWorkspace } from "../workspace/workspace-context";
 import { useIntegration } from "../app/integration-context";
 
@@ -94,6 +96,9 @@ export function RiskDetailPage() {
   const detail = resource.data;
   if (detail === null) return null;
   const risk = detail.risk;
+  // 라이선스는 검증된 인용 구간이 오지 않는 대신 의무를 만드는 낱말이 정해져
+  // 있다. 특허는 그 반대라 낱말 강조를 겹치지 않는다 — 구간이 이미 근거다.
+  const emphasis = keywordEmphasisApplies(risk.analysis_type);
   const openLabel =
     risk.source_type === "GOOGLE_DRIVE"
       ? "Open in Google Drive"
@@ -134,7 +139,10 @@ export function RiskDetailPage() {
       <div className="detail-main">
         <Card>
           <div className="status-grid">
-            <Status label="Priority" value={risk.review_priority} />
+            <div>
+              <span>Priority</span>
+              <PriorityBadge value={risk.review_priority} />
+            </div>
             <Status label="Machine lifecycle" value={risk.lifecycle_state} />
             <Status
               label="Reviewer decision"
@@ -166,13 +174,23 @@ export function RiskDetailPage() {
             {risk.explanation_safe === null ? null : (
               <>
                 <h2>왜 검토가 필요한가</h2>
-                <p>{risk.explanation_safe}</p>
+                <p>
+                  <RiskText
+                    text={risk.explanation_safe}
+                    priority={emphasis ? risk.review_priority : null}
+                  />
+                </p>
               </>
             )}
             {risk.recommendation_safe === null ? null : (
               <>
                 <h2>무엇을 하면 되는가</h2>
-                <p>{risk.recommendation_safe}</p>
+                <p>
+                  <RiskText
+                    text={risk.recommendation_safe}
+                    priority={emphasis ? risk.review_priority : null}
+                  />
+                </p>
               </>
             )}
             <p className="fine-print">
@@ -277,6 +295,8 @@ function EvidenceComparison({
   onOpenOriginal: () => void;
 }) {
   const risk = detail.risk;
+  const priority = risk.review_priority;
+  const keywords = keywordEmphasisApplies(risk.analysis_type);
   const source = detail.evidence.filter(
     (item) => item.evidence_type === "SOURCE_EXCERPT",
   );
@@ -318,7 +338,12 @@ function EvidenceComparison({
       <section className="compare-pane">
         <h3>원본 문서</h3>
         {originalEvidence.map((evidence) => (
-          <EvidenceBlock key={evidence.id} evidence={evidence} />
+          <EvidenceBlock
+            key={evidence.id}
+            evidence={evidence}
+            priority={priority}
+            keywords={keywords}
+          />
         ))}
         {originalEvidence.length === 0 ? (
           <p className="fine-print">원본 쪽 발췌가 남아 있지 않습니다.</p>
@@ -341,7 +366,12 @@ function EvidenceComparison({
           <section className="compare-pane">
             <h3>근거 문서 (특허)</h3>
             {patent.map((evidence) => (
-              <EvidenceBlock key={evidence.id} evidence={evidence} />
+              <EvidenceBlock
+                key={evidence.id}
+                evidence={evidence}
+                priority={priority}
+                keywords={keywords}
+              />
             ))}
             {patent.length === 0 ? (
               <p className="fine-print">특허 쪽 발췌가 남아 있지 않습니다.</p>
@@ -365,7 +395,12 @@ function EvidenceComparison({
             {/* 전문은 길다 — 스크롤 상자에 가두고 문제가 된 조항만 하이라이트로 짚는다. */}
             <div className="license-text">
               {license.map((evidence) => (
-                <EvidenceBlock key={evidence.id} evidence={evidence} />
+                <EvidenceBlock
+                  key={evidence.id}
+                  evidence={evidence}
+                  priority={priority}
+                  keywords={keywords}
+                />
               ))}
             </div>
           </section>
@@ -380,14 +415,27 @@ function EvidenceComparison({
   );
 }
 
-function EvidenceBlock({ evidence }: { evidence: Evidence }) {
+function EvidenceBlock({
+  evidence,
+  priority,
+  keywords,
+}: {
+  evidence: Evidence;
+  priority: string;
+  keywords: boolean;
+}) {
   return (
     <article className="evidence-block">
       <div className="card-row">
         <Badge tone="info">{evidence.evidence_type}</Badge>
         <small>Revision {shortRevision(evidence.source_revision)}</small>
       </div>
-      <EvidenceExcerpt excerpt={evidence.excerpt} metadata={evidence.metadata_safe} />
+      <EvidenceExcerpt
+        excerpt={evidence.excerpt}
+        metadata={evidence.metadata_safe}
+        priority={priority}
+        keywords={keywords}
+      />
       <p className="evidence-block__reference">{evidence.reference}</p>
     </article>
   );
