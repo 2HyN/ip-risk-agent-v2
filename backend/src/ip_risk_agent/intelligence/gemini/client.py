@@ -10,6 +10,7 @@ Analyzer 는 SDK 를 모른다. 여기서만 안다 (Agent 3 Spec 9). 그래야 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,52 @@ from pydantic import BaseModel, ValidationError
 from ..common.errors import FailureCategory, MalformedProviderOutputError, ProviderFailureError
 from .retry import RetryBudget, with_retry
 
+logger = logging.getLogger(__name__)
+
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
+
+
+def _record_usage(model_id: str, task: str, usage: object) -> None:
+    """Gemini 호출 한 번이 소비한 토큰을 남긴다.
+
+    비용은 토큰 수 × 단가인데, SDK 응답의 ``usage_metadata`` 를 지금까지 버려 왔다.
+    분석 한 건에 얼마가 드는지 물으면 답할 숫자가 없었다 — 여기서 줍는다.
+
+    프롬프트 본문과 응답 본문은 남기지 않는다. 남기는 것은 개수와 식별자뿐이다.
+    ``task`` 는 출력 스키마의 클래스 이름이라 사용자 문서에서 파생된 값이 아니다.
+
+    필드가 없거나 형태가 다르면 조용히 0 이 아니라 **로그를 내지 않는다** —
+    0 토큰 호출이 실재하는 것처럼 집계되면 안 된다. 로그 실패가 분석을 막지 않는
+    것은 캐시와 같은 원칙이다.
+    """
+    if usage is None:
+        return
+
+    def _count(name: str) -> int | None:
+        value = getattr(usage, name, None)
+        return value if isinstance(value, int) else None
+
+    prompt_tokens = _count("prompt_token_count")
+    output_tokens = _count("candidates_token_count")
+    if prompt_tokens is None and output_tokens is None:
+        return
+    logger.info(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "event": "gemini_usage",
+                "model_id": model_id,
+                "task": task,
+                "prompt_tokens": prompt_tokens or 0,
+                "output_tokens": output_tokens or 0,
+                "total_tokens": _count("total_token_count") or 0,
+                "cached_tokens": _count("cached_content_token_count") or 0,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
 
 # 파일 앞의 YAML 머리말에서 버전을 읽는다.
 _FRONT_MATTER = re.compile(r"\A---\s*\n(?P<body>.*?)\n---\s*\n", re.S)
@@ -176,6 +222,15 @@ class GoogleGenAIClient:
                 raise ProviderFailureError(
                     "GEMINI", FailureCategory.UNAVAILABLE, type(exc).__name__
                 ) from exc
+
+            try:
+                _record_usage(
+                    self._model_id,
+                    output_model.__name__,
+                    getattr(response, "usage_metadata", None),
+                )
+            except Exception:  # noqa: BLE001 - 로그 실패가 분석을 막지 않는다
+                pass
 
             return _parse(response.text, output_model)
 

@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,6 +20,32 @@ import httpx
 from . import spdx
 from .dependency_models import Ecosystem
 from ..common.errors import FailureCategory, ProviderFailureError
+
+logger = logging.getLogger(__name__)
+
+
+def _record_call(provider: str) -> None:
+    """레지스트리를 실제로 불렀다는 사실을 남긴다.
+
+    특허 쪽 ``kipris_call`` 과 같은 목적이다 — 분석 한 건이 외부 조회를 몇 번
+    쓰는지는 세어 봐야 안다. 레지스트리 메타데이터는 캐시하지 않으므로(재분석 시
+    항상 최신) 여기의 호출 수가 곧 실호출 수다.
+
+    URL 과 패키지 이름은 남기지 않는다 — 패키지 이름은 사용자 의존성 파일에서
+    파생된 값이다. provider 는 셋 중 하나인 상수다.
+    """
+    logger.info(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "event": "registry_call",
+                "provider": provider,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
 
 DEPS_DEV_BASE_URL = "https://api.deps.dev/v3"
 PYPI_BASE_URL = "https://pypi.org/pypi"
@@ -232,6 +260,7 @@ class HttpPackageMetadataProvider:
 
     async def _get(self, url: str, provider: str) -> dict | None:
         """404 는 정상적인 '없음'이고, 그 외 실패는 provider 장애다."""
+        _record_call(provider)
         try:
             response = await self._client.get(url)
         except httpx.TimeoutException as exc:
