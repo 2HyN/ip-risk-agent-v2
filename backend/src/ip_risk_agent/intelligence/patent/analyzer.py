@@ -220,9 +220,9 @@ class PatentAnalyzer:
         # 아닌 값을 넘긴 경우)가 계획보다 우선하고, 아니면 계획이 정한다.
         self._search_rows = search_rows if search_rows != 5 else self._plan.rows
         # 3단어 질의를 2단어 부분조합으로도 검색 (extraction.expand_queries).
-        # AND 전문검색의 어휘 민감성을 깎는다. 검색 호출이 늘므로 기본은 끔 —
-        # 골든셋 평가로 효과를 확인한 뒤에 기본값을 논한다.
-        self._query_expansion = query_expansion
+        # AND 전문검색의 어휘 민감성을 깎는다. 직접 인자(평가 스크립트) 또는
+        # 계획(fielded_v1)이 켠다 — 기본은 둘 다 꺼져 있어 현행 그대로다.
+        self._query_expansion = query_expansion or self._plan.expand_queries
         # 같은 문서면 같은 검색어를 쓴다. 없으면 매번 다시 뽑는다.
         self._cache = response_cache
         # 이 artifact 에서 이미 매칭된 출원번호. 검색과 무관하게 다시 대조한다.

@@ -7,29 +7,40 @@
 from __future__ import annotations
 
 import asyncio
+from xml.etree.ElementTree import fromstring
 
 import pytest
+
+from iprisk_contracts.common import AnalysisStatus, AnalysisType, ArtifactKind
 
 from ip_risk_agent.intelligence.common.errors import (
     FailureCategory,
     ProviderFailureError,
 )
+from ip_risk_agent.intelligence.gemini.client import ScriptedModelClient
+from ip_risk_agent.intelligence.gemini.schemas import TechnicalExtraction
+from ip_risk_agent.intelligence.patent.analyzer import PatentAnalyzer
 from ip_risk_agent.intelligence.patent.candidate_rank import (
     rank_candidates,
     rank_candidates_rrf,
 )
 from ip_risk_agent.intelligence.patent.extraction import clamp_queries
-from ip_risk_agent.intelligence.patent.kipris import PatentSearchHit
+from ip_risk_agent.intelligence.patent.kipris import (
+    ADVANCED_SEARCH_PATH,
+    KiprisClient,
+    PatentSearchHit,
+)
 from ip_risk_agent.intelligence.patent.query_builder import run_searches
 from ip_risk_agent.intelligence.patent.rate_limit import TokenBucket
 from ip_risk_agent.intelligence.patent.search_strategy import (
     BASELINE_PLAN,
     EXPANDED_V1_PLAN,
+    FIELDED_V1_PLAN,
     plan_for,
     require_compare_strategy,
 )
 
-from test_license import run
+from test_license import make_artifact, run
 
 
 def hit(number: str, query: str, *, ipc: str = "", relaxed: bool = False):
@@ -262,3 +273,131 @@ def test_token_bucket_paces_requests_with_injected_clock():
 def test_token_bucket_rejects_nonpositive_rate():
     with pytest.raises(ValueError):
         TokenBucket(0)
+
+
+# ------------------------------------------------------------------ fielded
+
+
+def test_fielded_plan_constants():
+    plan = plan_for("fielded_v1")
+    assert plan is FIELDED_V1_PLAN
+    assert plan.search_fields == ("inventionTitle", "astrtCont")
+    assert plan.expand_queries is True
+    assert plan.rows == 20  # getAdvancedSearch 가 존중하는 실측 상한
+    assert plan.relax_zero_hits is False  # 확장이 어휘 민감성을 앞단에서 깎는다
+    assert plan.use_rrf is True
+    assert plan.version == "search_fielded_v1"
+
+
+def test_baseline_and_expanded_plans_do_not_switch_channels():
+    # 기존 두 계획의 동작 보존 — 필드 검색·질의 확장은 기본 꺼짐이다.
+    assert BASELINE_PLAN.search_fields is None
+    assert BASELINE_PLAN.expand_queries is False
+    assert EXPANDED_V1_PLAN.search_fields is None
+    assert EXPANDED_V1_PLAN.expand_queries is False
+
+
+def _search_response(*numbers: str):
+    items = "".join(
+        f"<item><applicationNumber>{number}</applicationNumber>"
+        f"<inventionTitle>특허 {number}</inventionTitle></item>"
+        for number in numbers
+    )
+    return fromstring(
+        "<response><header><resultCode>00</resultCode></header>"
+        f"<body><items>{items}</items></body></response>"
+    )
+
+
+def test_fielded_search_merges_title_first_and_dedupes():
+    client = KiprisClient(
+        "test-key", client=object(), search_fields=("inventionTitle", "astrtCont")
+    )
+    calls: list[tuple[str, dict]] = []
+    responses = [
+        _search_response("1020200000001", "1020200000002"),  # 제목 필드
+        _search_response("1020200000002", "1020200000003"),  # 초록 필드
+    ]
+
+    async def fake_get(path: str, params: dict):
+        calls.append((path, dict(params)))
+        return responses.pop(0)
+
+    client._get = fake_get
+
+    hits = run(client.search("셔터 연동", rows=20))
+
+    # 제목 결과가 앞, 초록은 새 번호만 뒤에 붙는다 (인용 문헌 제목 4위 실측 근거).
+    assert [hit.application_number for hit in hits] == [
+        "1020200000001",
+        "1020200000002",
+        "1020200000003",
+    ]
+    assert [path for path, _ in calls] == [ADVANCED_SEARCH_PATH, ADVANCED_SEARCH_PATH]
+    assert calls[0][1]["inventionTitle"] == "셔터 연동"
+    assert calls[1][1]["astrtCont"] == "셔터 연동"
+    # getAdvancedSearch 는 docsCount 를 20 까지 존중한다 — 실측 상한 그대로.
+    assert calls[0][1]["docsCount"] == "20"
+
+
+def test_fielded_plan_expands_queries_and_uses_plan_rows():
+    model = ScriptedModelClient(
+        [
+            TechnicalExtraction(
+                is_technical=True,
+                technical_elements=["셔터 CCTV 연동"],
+                search_queries=["셔터 CCTV 연동"],
+                source_segment_ids=["seg-1"],
+            )
+        ]
+    )
+    provider = SpyProvider()  # 모든 질의 0건 — 상세조회에 닿지 않는다
+    analyzer = PatentAnalyzer(
+        provider,
+        model,
+        search_plan=FIELDED_V1_PLAN,
+        compare_strategy="rag",
+    )
+    artifact = make_artifact(
+        "셔터와 CCTV 를 연동하는 설계.",
+        logical_path="/Google Drive user@example.com/docs/plan.md",
+        kind=ArtifactKind.DOCUMENT_TEXT,
+        analyzers=[AnalysisType.PATENT],
+    )
+
+    result = run(analyzer.analyze(artifact))
+
+    assert result.status is AnalysisStatus.SUCCEEDED
+    queries = [query for query, _ in provider.calls]
+    # 원 질의가 앞(정밀 우선), 2단어 부분조합이 뒤따른다.
+    assert queries[0] == "셔터 CCTV 연동"
+    assert {"셔터 CCTV", "셔터 연동", "CCTV 연동"} <= set(queries)
+    assert all(rows == FIELDED_V1_PLAN.rows for _, rows in provider.calls)
+    # 기록 문자열에 전략 버전이 연접된다 — "그때의 후보 풀"을 되짚는 지문.
+    assert "search_fielded_v1" in result.versions.prompt_version
+
+
+def test_prior_art_cutoff_drops_future_hits_but_keeps_unknown_dates():
+    from ip_risk_agent.intelligence.patent.analyzer import _drop_future_hits
+
+    past = PatentSearchHit(
+        application_number="1020190000001",
+        title="과거 출원",
+        query="q",
+        metadata={"applicationDate": "2019.03.01"},
+    )
+    future = PatentSearchHit(
+        application_number="1020230000002",
+        title="미래 출원",
+        query="q",
+        metadata={"applicationDate": "20230501"},
+    )
+    unknown = PatentSearchHit(
+        application_number="1020000000003", title="날짜 미상", query="q", metadata={}
+    )
+    hits_by_query = {"q": [past, future, unknown]}
+
+    _drop_future_hits(hits_by_query, "20200601")
+
+    # 미래 문서만 치운다 — 날짜를 모르는 히트는 정보 부족이지 탈락 사유가 아니다.
+    assert hits_by_query["q"] == [past, unknown]

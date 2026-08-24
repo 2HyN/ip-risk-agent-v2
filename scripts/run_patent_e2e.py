@@ -103,7 +103,7 @@ def _model_client() -> GoogleGenAIClient:
     )
 
 
-def _search_provider(kind: str):
+def _search_provider(kind: str, plan):
     if kind == "corpus":
         corpus = load_corpus(CORPUS, acknowledge_synthetic=True)
         return offline_kipris_client(corpus, acknowledge_synthetic=True)
@@ -114,6 +114,8 @@ def _search_provider(kind: str):
     return KiprisClient(
         access_key,
         rate_limiter=TokenBucket(float(max_rps)) if max_rps else None,
+        # 검색 채널은 클라이언트 속성이다 — fielded 계획이면 항목별검색으로 간다.
+        search_fields=plan.search_fields,
     )
 
 
@@ -140,11 +142,12 @@ async def run(args: argparse.Namespace) -> int:
     if not document.is_file():
         raise SystemExit(f"document not found: {document}")
 
-    provider = _search_provider(args.kipris)
+    plan = plan_for(args.search_strategy)
+    provider = _search_provider(args.kipris, plan)
     analyzer = PatentAnalyzer(
         provider,
         _model_client(),
-        search_plan=plan_for(args.search_strategy),
+        search_plan=plan,
         compare_strategy=require_compare_strategy(args.compare_strategy),
     )
 
@@ -196,7 +199,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--search-strategy",
-        choices=("baseline", "expanded_v1"),
+        choices=("baseline", "expanded_v1", "fielded_v1"),
         default="expanded_v1",
     )
     parser.add_argument(

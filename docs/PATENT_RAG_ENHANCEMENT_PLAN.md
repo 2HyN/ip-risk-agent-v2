@@ -188,6 +188,44 @@ baseline 이 매칭한 2건(스팸차단·음성 구간 분리)이 rag 에서 �
 
 미실행: getAdvancedSearch probe(§2 조건부), 골든셋 하네스(E2).
 
+## 7.2 E2 진행 기록 (2026-08-25)
+
+### E2-0 — ui-change 병합 (완료)
+
+팀원 B 의 `origin/ui-change`(골든셋 스크립트 5종 · opt-in 검색 실험 · UI 강조)를
+advanced_rag 에 병합했다. 백엔드 3파일(analyzer·extraction·kipris) 충돌은 B 의
+opt-in 손잡이(prior_art_cutoff · search_rows · query_expansion · search_fields)를
+**생성자 인자 표면 그대로 유지**한 채 SearchPlan 체계와 공존시키는 방향으로
+해소 — 평가 스크립트(evaluate_golden.py)는 직접 인자로, 전략 경로는 계획으로
+같은 손잡이를 잡는다. 전체 스위트 1,205건 통과.
+
+B 의 골든셋 실측이 §2 판정 하나를 뒤집었다: **getAdvancedSearch(항목별검색)는
+probe 조건부가 아니라 핵심 채널이다.** 전문(getWordSearch) AND 검색은 2단어
+질의("셔터 연동")도 8,166건 속에 심사관 인용 문헌을 묻지만(60위 밖), 같은
+질의를 제목 필드로 좁히면 19건 중 4위, 초록 필드는 394건 중 9위였다. 또한
+getAdvancedSearch 는 getWordSearch 와 달리 **docsCount 를 20 까지 존중한다** —
+엔드포인트별 파라미터 차이는 `kipris.py` 주석으로 명문화했다.
+
+### E2-1 — `fielded_v1` 전략 프리셋 (완료)
+
+B 의 최적 조건(필드별 검색 × 질의 확장)을 세 번째 정식 전략으로 승격:
+
+| 손잡이 | 값 | 근거 |
+|---|---|---|
+| search_fields | (inventionTitle, astrtCont) | 제목 정밀 우선 병합 + 초록 재현 보충 (실측) |
+| expand_queries | true — 2단어 부분조합, cap 15, 질의별 라운드로빈 | AND 검색 어휘 민감성 완화 |
+| rows | 20 | getAdvancedSearch 실측 상한 |
+| relax_zero_hits | false | 확장이 같은 문제를 앞단에서 깎는다 — 겹치면 호출만 는다 |
+| use_rrf | true | 다질의 융합 (완화 채널 없음) |
+| 기록 | `search_fielded_v1` 연접 | 후보 풀 지문 |
+
+배선: 검색 채널은 KiprisClient 속성이므로 조립부(public.py ·
+run_patent_e2e.py)가 계획의 search_fields 를 클라이언트에 넘긴다. 신규 시험 5건
+(계획 상수 · 채널 보존 · 필드 병합/중복 제거 · 계획發 확장 · 컷오프 필터).
+
+남은 E2: 골든셋 하네스 러너(Layer R — B 셋 59건 recall · Layer C — A 셋 157쌍
+대조 A/B · Layer G — 라벨×evidence_strength 분포) 및 전략별 paired 비교.
+
 ## 8. 사용자 결정 필요 항목 (기록)
 
 1. SPEC §4 "후보 집합 구성 층" 문단 추가 (원칙 명문화)

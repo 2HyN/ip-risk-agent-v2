@@ -173,6 +173,8 @@ def create_facade_from_env(
         api_key=config.gemini_api_key,
         vertex_config=config.vertex_config,
     )
+    # 검색 채널(전문 vs 항목별)은 클라이언트 속성이라 여기서 계획을 읽어 넘긴다.
+    plan = plan_for(config.patent_search_strategy)
     search_provider = (
         KiprisClient(
             config.kipris_access_key,
@@ -181,6 +183,7 @@ def create_facade_from_env(
                 if config.kipris_max_rps
                 else None
             ),
+            search_fields=plan.search_fields,
         )
         if config.kipris_access_key
         else None
