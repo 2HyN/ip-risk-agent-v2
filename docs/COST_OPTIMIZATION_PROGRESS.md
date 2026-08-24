@@ -70,8 +70,8 @@ GCP 배포 없이 로컬에서 실제 API(Gemini·KIPRIS·deps.dev·PyPI)를 호
 
 ## 남은 일
 
-1. 30건 기준 재측정 마무리 — `cost_measure.py`(토큰·비용), `eval_risk_explain.py`
-   (규칙 준수) 재실행 후 리포트 v5로 정리.
+1. **30건 기준 재측정 마무리** (아래 "다음 사람이 할 일" 참고) — `cost_measure.py`
+   (토큰·비용), `eval_risk_explain.py`(규칙 준수) 재실행 후 리포트 v5로 정리.
 2. 인프라 비용(GCP billing, SKU별) 정리 — Gemini 외 비용(Secret Manager, Cloud Run
    등) 확인 중.
 3. **코드 반영 (미착수)**: `GEMINI_MODEL_ID` 단일 설정을 작업별로 분리 —
@@ -79,6 +79,52 @@ GCP 배포 없이 로컬에서 실제 API(Gemini·KIPRIS·deps.dev·PyPI)를 호
    Frozen Contract 대상은 아니라 팀 합의만으로 가능할 것으로 보이나 팀장님 확인 필요.
 4. main 병합·배포 후 운영 로그로 실사용 기준 재측정, RAG 조항 검색 비용 포함,
    반복 프롬프트 대상 컨텍스트 캐싱 실험.
+
+## 다음 사람이 할 일 — 30건 재측정 실행 방법
+
+이은우가 여기까지 하고 넘깁니다. 아래 순서대로 돌리고 나온 콘솔 출력을 그대로
+저장해서 공유해주세요 (결과 해석·리포트 정리는 제가 이어서 합니다).
+
+### 준비물
+
+- `GEMINI_API_KEY` (AI Studio 발급 키), `KIPRIS_ACCESS_KEY` 환경변수가 `.env`에
+  설정돼 있어야 합니다. 없으면 해당 구간이 생략됩니다.
+- venv 활성화 후 `pip install pydantic httpx google-genai defusedxml` (이미 돼
+  있으면 생략).
+- Windows/Git Bash라면 `export PYTHONUTF8=1` 먼저 실행 — 안 하면 리포트 출력에서
+  인코딩 에러가 납니다.
+
+### 실행 명령 (저장소 루트에서)
+
+```bash
+export PYTHONUTF8=1
+
+# 1) TechnicalExtraction + PatentComparison 토큰·비용 측정 (모델별로 따로 실행)
+python scripts/cost_measure.py --model gemini-3.5-flash-lite --max-docs 30 --runs 2 --skip-license --compare-out compare-30-lite.jsonl --out cost-log-30.jsonl
+python scripts/cost_measure.py --model gemini-3.6-flash --max-docs 30 --runs 2 --skip-license --compare-out compare-30-flash.jsonl --out cost-log-30.jsonl
+
+# 2) risk_explain 회귀 평가 (규칙 준수 여부 + 토큰)
+python scripts/eval_risk_explain.py --models gemini-3.6-flash,gemini-3.5-flash-lite --out risk-explain-eval-30.jsonl --cost-out cost-log-risk-explain-30.jsonl
+
+# 3) 집계 (단가는 넣지 않음 — 토큰 수만 보고 비용은 이은우가 계산)
+python scripts/cost_report.py cost-log-30.jsonl
+python scripts/cost_report.py cost-log-risk-explain-30.jsonl
+```
+
+`eval_extraction.py`(TechnicalExtraction 정답 대조)는 30건 기준으로 이미 완료돼
+있습니다(두 모델 다 30/30, 100%) — 다시 안 돌려도 됩니다.
+
+### 주의할 점
+
+- KIPRIS 검색·상세 조회가 호출 사이 0.5초씩 걸립니다(레이트리밋 대응, 위 "지금까지
+  한 일 §4" 참고) — 1번 명령 두 개가 예전보다 오래 걸리는 게 정상입니다.
+- `kipris 검색 실패 (ProviderFailureError)`가 간헐적으로 몇 건 나오는 건
+  있을 수 있습니다. 그래도 대부분 성공하면 그대로 진행하면 되고, **거의 다
+  실패한다면 중단하고 알려주세요** — KIPRIS 월 호출 한도(무료 1,000회) 소진
+  가능성을 그때 같이 확인합니다.
+- 결과로 생기는 `*.jsonl`, `cost-report*.md` 파일은 `.gitignore`에 이미
+  등록돼 있어 커밋 대상이 아닙니다. 콘솔 출력(또는 파일 내용)을 그대로
+  캡처해서 공유해주시면 됩니다.
 
 ## 관련 파일
 
