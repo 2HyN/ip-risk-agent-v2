@@ -109,24 +109,183 @@ IP Risk 를 근거 기반으로 분석함으로써, 사용자가 장기적으로
 | `deploy/` | 리소스·IAM·빌드 계약 (검증 스크립트가 대조) |
 | `scripts/` | RAG corpus 구축·적재, 배포 검증, 백필 등 운영 도구 |
 
-## 설치
+---
 
-고정 툴체인: **CPython 3.14.7 · Node 24.19.0 · pnpm 11.19.0**
-(`.python-version` / `.node-version` / lock 파일이 기준) · 배포·운영 시 gcloud CLI.
+# 빠른 시작 — 블록을 위에서 아래로 복사-실행
+
+규칙은 셋뿐이다.
+
+- **모든 블록은 bash 기준이다.** Windows 는 **Git Bash** 를 연다 (PowerShell ✗).
+- **저장소 루트에서 실행한다.** 새 터미널을 열었으면 `cd ip-risk-agent-v2` 부터.
+- 블록 안의 명령은 실패하면 거기서 멈추고, 끝까지 가면 `... OK` 를 찍는다.
+  `OK` 가 안 보이면 그 블록의 마지막 출력이 원인이다.
+
+각 블록 첫 줄의 `PY=...` 는 OS 에 맞는 가상환경 파이썬을 자동으로 고르는
+한 줄이다 — 신경 쓰지 말고 같이 복사하면 된다.
+
+## 0) 도구 준비 (기계당 1회)
+
+[Python 3.14.7](https://www.python.org/downloads/) 과
+[Node.js 24.19.0](https://nodejs.org/) 을 설치한 뒤 (Windows 는 Git Bash 포함
+[Git](https://git-scm.com/) 도), 아래로 pnpm 을 맞추고 버전을 확인한다.
+
+```bash
+corepack enable && corepack prepare pnpm@11.19.0 --activate
+python --version   # Python 3.14.x
+node --version     # v24.x
+pnpm --version     # 11.x
+```
+
+## 1) 받기
 
 ```bash
 git clone https://github.com/2HyN/ip-risk-agent-v2.git
 cd ip-risk-agent-v2
-
-# 백엔드 — Dockerfile 과 같은 순서
-python -m venv .venv
-.venv/Scripts/pip install -r requirements.lock   # (macOS/Linux: .venv/bin/pip)
-.venv/Scripts/pip install --no-deps -e .
-
-# 프런트엔드 · 데스크톱 (pnpm workspace)
-pnpm install
-pnpm --filter @iprisk/contracts build
 ```
+
+## 2) 설치 (백엔드 + 프런트엔드 + 데스크톱)
+
+```bash
+python -m venv .venv
+PY=.venv/bin/python; [ -e .venv/Scripts/python.exe ] && PY=.venv/Scripts/python
+$PY -m pip install -q -r requirements.lock \
+&& $PY -m pip install -q --no-deps -e . \
+&& $PY -c "import ip_risk_agent, iprisk_contracts" \
+&& pnpm install \
+&& pnpm --filter @iprisk/contracts build \
+&& echo "INSTALL OK"
+```
+
+## 3) 로컬 실행
+
+**터미널 1 — 백엔드** (GCP 없이 in-memory 로 돈다. `SESSION_SECRET` 은 즉석
+생성 — 아무 값이든 32자 이상이면 된다):
+
+```bash
+PY=.venv/bin/python; [ -e .venv/Scripts/python.exe ] && PY=.venv/Scripts/python
+APP_ROLE=api APP_ENV=local \
+SESSION_SECRET=$($PY -c "import secrets;print(secrets.token_hex(32))") \
+  $PY -m uvicorn ip_risk_agent.main:create_app --factory --port 8000
+```
+
+**터미널 2 — 프런트엔드** (저장소 루트에서):
+
+```bash
+pnpm --filter @iprisk/frontend dev
+```
+
+- 화면: http://localhost:5173 (dev 서버가 `/api` 를 8000 으로 프록시)
+- 서버 확인: `curl http://127.0.0.1:8000/health/ready` →
+  `"status":"ready"` 면 정상
+
+**터미널 3 — 데스크톱 앱** (선택, 로컬 서버 대상):
+
+```bash
+pnpm --filter @iprisk/desktop build && pnpm --filter @iprisk/desktop start
+```
+
+로컬 실행에서 로그인·Drive·GitHub 같은 외부 연동은 동작하지 않는다(해당 환경
+변수 묶음과 GCP 자원이 필요 — 아래 [환경 변수](#환경-변수) 참고). 전체 기능은
+배포된 운영 서비스에서 확인하는 것이 가장 빠르다.
+
+## 4) 테스트 — 전체 게이트 한 블록
+
+배포 전 게이트 전부다. 마지막에 `ALL GATES PASSED` 가 나와야 한다.
+최종 릴리스(v1.0.0) 기준 **백엔드 1,137건 · 프런트엔드 55건 · 데스크톱 83건**
+통과 — 새로 clone 한 환경에서도 같은 결과를 재검증했다.
+
+```bash
+PY=.venv/bin/python; [ -e .venv/Scripts/python.exe ] && PY=.venv/Scripts/python
+$PY -m compileall -q backend/src shared/contracts/python scripts \
+&& $PY -m pip check \
+&& $PY -m pytest tests -m "not live" -q --basetemp .pytest-tmp \
+&& $PY scripts/generate_contracts.py \
+&& git diff --exit-code -- shared/contracts \
+&& pnpm run typecheck && pnpm run build && pnpm run verify:resolution \
+&& pnpm --filter @iprisk/frontend test \
+&& pnpm --filter @iprisk/desktop test \
+&& $PY scripts/validate_gcp_deployment.py \
+&& echo "ALL GATES PASSED"
+```
+
+(백엔드 pytest 가 5~10분으로 가장 길다. 외부 API 실호출 시험은 `-m live` 로
+분리되어 있고, KIPRIS 월 1,000회 한도 때문에 실제 자격증명과 명시적 opt-in
+없이는 실행하지 않는다.)
+
+## 5) 데이터 준비 — RAG corpus
+
+라이선스 조항 근거는 SPDX 라이선스 전문 672편 + 의무 해설 3편(총 675편)이다.
+**①~③은 자격증명 없이 돈다** (SPDX 목록을 내려받으므로 네트워크만 필요):
+
+```bash
+PY=.venv/bin/python; [ -e .venv/Scripts/python.exe ] && PY=.venv/Scripts/python
+$PY scripts/generate_spdx_data.py \
+&& $PY scripts/build_rag_corpus.py \
+&& $PY scripts/prepare_rag_ingestion.py \
+&& echo "CORPUS READY"
+```
+
+**④ 실제 적재는 팀 GCP 프로젝트 권한이 필요하다** (Vertex AI RAG Engine).
+운영 corpus 는 이미 적재되어 있으므로(판본 `2026-08-23.4`) 판본을 갱신할 때만
+실행한다:
+
+```bash
+gcloud auth application-default login
+PY=.venv/bin/python; [ -e .venv/Scripts/python.exe ] && PY=.venv/Scripts/python
+$PY scripts/ingest_rag_corpus.py
+# SPDX 갱신 확인부터 재적재·검증까지 한 명령: $PY scripts/refresh_rag_corpus.py
+```
+
+적재 후 `RAG_CORPUS_ID` / `RAG_CORPUS_VERSION` 을 새 판본으로 올린다. corpus
+판본은 조항 검색 캐시 키에 포함되므로 갱신해도 무효화가 필요 없고, 되돌리면
+이전 캐시가 그대로 살아 있다.
+
+## 6) 배포 — 팀 GCP 프로젝트 권한 필요
+
+배포는 팀 프로젝트(`proj-aj22-211200020328`)에서만 가능하다. 계정에 **Cloud
+Build 제출 권한, 빌드 identity(`iprisk-v2-deploy`) 사용 권한(actAs), Cloud Run
+배포 권한**이 있어야 한다 — 없으면 아래 블록은 권한 오류로 멈춘다.
+
+**⑴ 인증·프로젝트 지정** (기계당 1회):
+
+```bash
+gcloud auth login
+gcloud config set project proj-aj22-211200020328
+```
+
+**⑵ 빌드 → digest 조회 → API·Worker 동일 digest 배포** (한 블록):
+
+```bash
+SHA=$(git rev-parse --short HEAD)
+IMG="asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application"
+gcloud builds submit --config=deploy/cloudbuild.yaml \
+  --substitutions=SHORT_SHA=$SHA --region asia-northeast3 \
+&& DIGEST=$(gcloud artifacts docker images describe "$IMG:$SHA" \
+     --format="value(image_summary.digest)") \
+&& gcloud run deploy ip-risk-agent-v2-api    --image "$IMG@$DIGEST" --region asia-northeast3 --quiet \
+&& gcloud run deploy ip-risk-agent-v2-worker --image "$IMG@$DIGEST" --region asia-northeast3 --quiet \
+&& echo "DEPLOYED $SHA @ $DIGEST"
+```
+
+**⑶ 배포 확인**:
+
+```bash
+curl -s https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app/health/ready
+```
+
+**⑷ 데스크톱 릴리스** (선택 — zip 을 만들어 GitHub Releases 에 올린다):
+
+```bash
+pnpm --filter @iprisk/desktop build && pnpm --filter @iprisk/desktop package
+ls apps/desktop/release/
+```
+
+Scheduler 5종·Cloud Tasks 큐·색인·IAM 은 `deploy/` 의 계약 파일이 기준이다.
+v2 는 v1 과 프로젝트를 공유하므로 **v1 자원(`(default)` Firestore, `ipra-*`
+Secret 등)의 재사용·IAM 변경은 금지**이며 검증기와 프로덕션 스타트업이
+fail-closed 로 막는다. 롤백은 revision 지정 트래픽 전환.
+
+---
 
 ## 환경 변수
 
@@ -156,22 +315,6 @@ Secret Manager 경유이며 서비스 계정 key 파일은 쓰지 않는다. 로
 데스크톱 앱: 포장본은 설정이 필요 없다. 개발 실행은 기본이 로컬 서버
 (`http://127.0.0.1:8000`)이며 `IPRISK_SERVER_BASE_URL` 로 바꾼다.
 
-## 실행
-
-```bash
-# 백엔드 API (로컬, in-memory) — SESSION_SECRET 은 32자 이상이면 아무 값이나 된다
-APP_ROLE=api APP_ENV=local \
-SESSION_SECRET=$(python -c "import secrets;print(secrets.token_hex(32))") \
-  .venv/Scripts/python -m uvicorn ip_risk_agent.main:create_app --factory --port 8000
-
-# 프런트엔드 개발 서버
-pnpm --filter @iprisk/frontend dev
-
-# 데스크톱 앱 (로컬 서버 대상)
-pnpm --filter @iprisk/desktop build
-pnpm --filter @iprisk/desktop start
-```
-
 **`.env` 파일은 자동으로 읽히지 않는다** — `main.py` 가
 `Settings.from_env(os.environ)` 으로 OS 환경변수만 보므로(`load_dotenv` 없음),
 파일로 관리하려면 셸에서 직접 export 한다:
@@ -179,96 +322,14 @@ pnpm --filter @iprisk/desktop start
 ```bash
 cp .env.example .env        # SESSION_SECRET= 뒤에 32자 이상 값을 채운다
 set -a; source .env; set +a
-.venv/Scripts/python -m uvicorn ip_risk_agent.main:create_app --factory --port 8000
+PY=.venv/bin/python; [ -e .venv/Scripts/python.exe ] && PY=.venv/Scripts/python
+$PY -m uvicorn ip_risk_agent.main:create_app --factory --port 8000
 ```
 
 외부 연동 변수는 **묶음 단위 전부-또는-전무** 검사를 받는다(Google 로그인 ·
 Drive watch · GitHub App · Cloud Tasks · RAG). 일부만 채우면 기동 시
 `SettingsError` 가 나므로, 로컬은 `SESSION_SECRET` 만 넣고 나머지는 전부
-비워 두고 시작한다. 로그인·Drive·GitHub 등 외부 연동 기능은 해당 묶음과 GCP
-자원이 있어야 동작하며, 전체 기능은 배포된 운영 서비스에서 확인하는 것이 가장
-빠르다.
-
-## 데이터 준비 (RAG corpus)
-
-라이선스 조항 근거는 SPDX 라이선스 전문 672편 + 의무 해설 3편(총 675편)으로
-구성되며, 판본 단위로 적재한다.
-
-```bash
-# ① SPDX 목록에서 라이선스 데이터 파생
-.venv/Scripts/python scripts/generate_spdx_data.py
-
-# ② corpus 문서 생성 → ③ 적재 전 검증(외부 쓰기 없음) → ④ RAG Engine 적재
-.venv/Scripts/python scripts/build_rag_corpus.py
-.venv/Scripts/python scripts/prepare_rag_ingestion.py
-.venv/Scripts/python scripts/ingest_rag_corpus.py
-
-# SPDX 갱신 확인부터 재적재·검증까지 한 명령으로
-.venv/Scripts/python scripts/refresh_rag_corpus.py
-```
-
-적재 후 `RAG_CORPUS_ID` / `RAG_CORPUS_VERSION` 을 새 판본으로 올린다. corpus
-판본은 조항 검색 캐시 키에 포함되므로 갱신해도 무효화가 필요 없고, 되돌리면 이전
-캐시가 그대로 살아 있다. Firestore 복합 색인·TTL 은
-`deploy/firestore.indexes.json` 이 기준이고 배포 검증기가 대조한다.
-
-## 테스트
-
-배포 전 게이트는 아래 전부다. 최종 릴리스(v1.0.0) 기준 **백엔드 1,137건 ·
-프런트엔드 55건 · 데스크톱 83건** 통과.
-
-```bash
-# 컴파일·의존성 무결성
-.venv/Scripts/python -m compileall -q backend/src shared/contracts/python scripts
-.venv/Scripts/python -m pip check
-
-# 백엔드 — 외부 API(live) 표식 제외 (KIPRIS 는 월 1,000회 한도이므로 live 는 신중히)
-.venv/Scripts/python -m pytest tests -m "not live"
-
-# 계약 생성물이 커밋과 일치하는지
-pnpm run generate && git diff --exit-code -- shared/contracts
-
-# 타입·빌드·의존성 해석
-pnpm run typecheck && pnpm run build && pnpm run verify:resolution
-
-# 프런트엔드 · 데스크톱
-pnpm --filter @iprisk/frontend test
-pnpm --filter @iprisk/desktop build && pnpm --filter @iprisk/desktop test
-
-# 배포 계약 검증 (리소스·IAM·색인·이미지 계약의 일관성)
-.venv/Scripts/python scripts/validate_gcp_deployment.py
-```
-
-외부 API 실호출 시험은 `-m live` 로 분리되어 있고, 실제 자격증명과 명시적
-opt-in 없이는 실행하지 않는다.
-
-## 배포 핵심 순서
-
-Cloud Build 로 이미지 하나를 만들어 API·Worker 에 **같은 digest** 를 얹는다.
-
-```bash
-# ① 계약 검증
-python scripts/validate_gcp_deployment.py
-
-# ② 이미지 빌드 (smoke import 포함)
-gcloud builds submit --config=deploy/cloudbuild.yaml --substitutions=SHORT_SHA=<커밋 SHA>
-
-# ③ digest 조회
-gcloud artifacts docker images describe \
-  asia-northeast3-docker.pkg.dev/<PROJECT>/ip-risk-agent-v2/application:<SHORT_SHA> \
-  --format="value(image_summary.digest)"
-
-# ④ 두 서비스에 동일 digest 배포
-gcloud run deploy ip-risk-agent-v2-api    --image <image@digest> --region asia-northeast3
-gcloud run deploy ip-risk-agent-v2-worker --image <image@digest> --region asia-northeast3
-```
-
-Scheduler 5종·Cloud Tasks 큐·색인·IAM 은 `deploy/` 의 계약 파일이 기준이다.
-v2 는 v1 과 프로젝트를 공유하므로 **v1 자원(`(default)` Firestore, `ipra-*`
-Secret 등)의 재사용·IAM 변경은 금지**이며 검증기와 프로덕션 스타트업이
-fail-closed 로 막는다. 롤백은 revision 지정 트래픽 전환. 데스크톱 릴리스는
-`pnpm --filter @iprisk/desktop package` 로 zip 을 만들어 GitHub Releases 에
-올린다.
+비워 두고 시작한다.
 
 ## 보안 원칙
 
