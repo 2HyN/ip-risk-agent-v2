@@ -20,11 +20,12 @@ BASELINE = "baseline"
 EXPANDED_V1 = "expanded_v1"
 FIELDED_V1 = "fielded_v1"
 FIELDED_V2 = "fielded_v2"
+FIELDED_V3 = "fielded_v3"
 
 COMPARE_BASELINE = "baseline"
 COMPARE_RAG = "rag"
 
-_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1, FIELDED_V2)
+_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1, FIELDED_V2, FIELDED_V3)
 _COMPARE_STRATEGIES = (COMPARE_BASELINE, COMPARE_RAG)
 
 
@@ -57,6 +58,14 @@ class SearchPlan:
     #: 순위를 BM25 어휘 재순위로 한다 (candidate_rank.rank_candidates_bm25).
     #: use_rrf 보다 우선한다. 근거는 candidate_rank.RANK_VERSION_BM25 주석.
     use_bm25: bool = False
+    #: 정밀꼬리 판정 확장 — cap 아래 이 순위까지 내려가며 "제목 필드 ×
+    #: 결과집합 ≤ judge_tail_total_cap 질의" 적중 후보를 판정 대상에 추가한다.
+    #: 0 이면 끔. 근거: 고정 풀 실측에서 놓친 인용들이 9~24위의 정밀 제목
+    #: 적중에 몰려 있었고(순위 16·19·23), 이 필터는 그 구간에서 문서당 평균
+    #: +2.7건만 통과시키며 recall@판정 10→13/83 (+30%). 단순 cap 확대는
+    #: cap 16 에도 +1 뿐이라 비효율이 실측됐다.
+    judge_tail_to: int = 0
+    judge_tail_total_cap: int = 30
 
 
 #: 현행 그대로. 질의 5 × rows 5, 적중수·위치 정렬, cap 6.
@@ -126,9 +135,35 @@ FIELDED_V2_PLAN = SearchPlan(
     use_bm25=True,
 )
 
+#: fielded_v2 + 정밀꼬리 판정 확장. 검색·순위는 v2 그대로 두고(깊이 120 은
+#: 실측에서 오히려 잡음 — rows 60 유지), 판정 대상만 9~24위의 정밀 제목
+#: 적중으로 넓힌다. 4-렌즈 분석과 고정 풀 재현으로 확정된 조합이다.
+FIELDED_V3_PLAN = SearchPlan(
+    name=FIELDED_V3,
+    version="search_fielded_v3",
+    extract_prompt="patent_extract_v3",
+    max_queries=8,
+    rows=60,
+    relax_zero_hits=False,
+    use_rrf=False,
+    compare_cap=8,
+    stage_deadline_seconds=90.0,
+    search_fields=("inventionTitle", "astrtCont"),
+    expand_queries=True,
+    use_bm25=True,
+    judge_tail_to=24,
+    judge_tail_total_cap=30,
+)
+
 _PLANS = {
     plan.name: plan
-    for plan in (BASELINE_PLAN, EXPANDED_V1_PLAN, FIELDED_V1_PLAN, FIELDED_V2_PLAN)
+    for plan in (
+        BASELINE_PLAN,
+        EXPANDED_V1_PLAN,
+        FIELDED_V1_PLAN,
+        FIELDED_V2_PLAN,
+        FIELDED_V3_PLAN,
+    )
 }
 
 
@@ -161,6 +196,8 @@ __all__ = [
     "FIELDED_V1_PLAN",
     "FIELDED_V2",
     "FIELDED_V2_PLAN",
+    "FIELDED_V3",
+    "FIELDED_V3_PLAN",
     "SearchPlan",
     "plan_for",
     "require_compare_strategy",

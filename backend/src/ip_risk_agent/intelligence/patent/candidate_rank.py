@@ -263,6 +263,8 @@ def rank_candidates_bm25(
     ipc_signal: bool = True,
     family_of: dict[str, str] | None = None,
     exclude: frozenset[str] | None = None,
+    judge_tail_to: int = 0,
+    judge_tail_total_cap: int = 30,
 ) -> list[RankedCandidate]:
     """어휘 재순위 — 원문↔후보(제목+초록) BM25 가 1차 점수다.
 
@@ -278,12 +280,20 @@ def rank_candidates_bm25(
     내면서, 초록이 비어 BM25 가 0 인 후보의 순서를 검색 신호로 지탱한다.
     BM25 가 전부 0 이면(원문 토큰 공유 전무) RRF 점수로 정렬이 넘어간다.
 
+    ``judge_tail_to`` 가 0 보다 크면 **정밀꼬리 판정 확장**을 한다: cap 아래
+    그 순위까지 내려가며 "제목 필드에서 결과집합 ≤ judge_tail_total_cap 인
+    질의로 걸린" 후보를 결과에 덧붙인다(순서 유지, judge_tail 표식). 근거는
+    고정 풀 실측 — 놓친 인용들이 9~24위의 정밀 제목 적중에 몰려 있었고
+    이 필터는 문서당 평균 +2.7건으로 recall 을 10→13/83 로 올린다. 단순
+    cap 확대(16 에 +1)보다 효율이 실측으로 앞선다.
+
     동점 사슬(bm25 → ipc → 적중 수 → 위치 → 출원번호)까지 순수 산술이라
     같은 입력이면 같은 순서다.
     """
     merged: dict[str, RankedCandidate] = {}
     family_scores: dict[str, dict[str, float]] = {}
     abstracts: dict[str, str] = {}
+    title_precise: set[str] = set()
 
     for query in sorted(hits_by_query):
         family = (family_of or {}).get(query, query)
@@ -295,6 +305,13 @@ def rank_candidates_bm25(
             per_family[family] = max(per_family.get(family, 0.0), contribution)
             if hit.abstract and not abstracts.get(hit.application_number):
                 abstracts[hit.application_number] = hit.abstract
+            total = hit.metadata.get("search_total", "")
+            if (
+                hit.metadata.get("search_field") == "inventionTitle"
+                and total.isdigit()
+                and int(total) <= judge_tail_total_cap
+            ):
+                title_precise.add(hit.application_number)
 
             existing = merged.get(hit.application_number)
             if existing is None:
@@ -405,4 +422,11 @@ def rank_candidates_bm25(
             c.application_number,
         ),
     )
-    return ordered[:cap]
+    selected = ordered[:cap]
+    if judge_tail_to > cap:
+        for candidate in ordered[cap:judge_tail_to]:
+            if candidate.application_number in title_precise:
+                # 진단용 표식 — 이 후보는 정밀꼬리로 합류했다.
+                candidate.metadata["judge_tail"] = "true"
+                selected.append(candidate)
+    return selected

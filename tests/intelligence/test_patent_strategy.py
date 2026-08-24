@@ -39,6 +39,7 @@ from ip_risk_agent.intelligence.patent.search_strategy import (
     EXPANDED_V1_PLAN,
     FIELDED_V1_PLAN,
     FIELDED_V2_PLAN,
+    FIELDED_V3_PLAN,
     plan_for,
     require_compare_strategy,
 )
@@ -606,3 +607,62 @@ def test_fielded_v2_version_string_names_the_rank_machine():
     assert result.status is AnalysisStatus.SUCCEEDED
     assert "search_fielded_v2" in result.versions.prompt_version
     assert "patent_rank_bm25_v1" in result.versions.prompt_version
+
+
+# ------------------------------------------------------------------ 정밀꼬리
+
+
+def test_fielded_v3_plan_adds_judge_tail():
+    plan = plan_for("fielded_v3")
+    assert plan is FIELDED_V3_PLAN
+    assert plan.judge_tail_to == 24
+    assert plan.judge_tail_total_cap == 30
+    assert plan.rows == 60  # 깊이 120 은 실측에서 잡음 — 60 유지
+    # 기존 계획들은 정밀꼬리를 켜지 않는다.
+    assert FIELDED_V2_PLAN.judge_tail_to == 0
+    assert BASELINE_PLAN.judge_tail_to == 0
+
+
+def test_judge_tail_appends_precise_title_hits_below_cap():
+    """cap 밖 후보라도 정밀 제목 적중이면 판정 대상에 덧붙는다."""
+    src = frozenset(tokenize("방화셔터 연동 제어"))
+    hits_by_query = {}
+    # cap(2)을 채울 상위 후보 둘 — 원문 어휘와 겹치는 초록.
+    hits_by_query["질의 상위"] = [
+        _hit_with_abstract("100", "질의 상위", "방화셔터 연동", "방화셔터를 연동 제어"),
+        _hit_with_abstract("200", "질의 상위", "방화셔터 제어", "방화셔터를 제어"),
+    ]
+    # 어휘 겹침 없는 후보 — BM25 0. 정밀 제목 질의(전체 7건)로 걸렸다.
+    precise = _hit_with_abstract("300", "정밀 질의", "무관 제목", "무관 본문")
+    precise.metadata.update({"search_field": "inventionTitle", "search_total": "7"})
+    # 같은 순위권의 광역 질의 적중 — 꼬리 자격 없음.
+    broad = _hit_with_abstract("400", "광역 질의", "다른 제목", "다른 본문")
+    broad.metadata.update({"search_field": "astrtCont", "search_total": "2000"})
+    hits_by_query["정밀 질의"] = [precise]
+    hits_by_query["광역 질의"] = [broad]
+
+    selected = rank_candidates_bm25(
+        hits_by_query,
+        source_tokens=src,
+        cap=2,
+        ipc_signal=False,
+        judge_tail_to=10,
+        judge_tail_total_cap=30,
+    )
+    numbers = [c.application_number for c in selected]
+    assert numbers[:2] == ["100", "200"]  # 상위는 그대로
+    assert "300" in numbers  # 정밀꼬리 합류
+    assert "400" not in numbers  # 광역 적중은 합류하지 않는다
+    tail = next(c for c in selected if c.application_number == "300")
+    assert tail.metadata.get("judge_tail") == "true"
+
+
+def test_judge_tail_off_by_default():
+    src = frozenset(tokenize("방화셔터"))
+    precise = _hit_with_abstract("300", "질의", "무관", "무관")
+    precise.metadata.update({"search_field": "inventionTitle", "search_total": "7"})
+    top = _hit_with_abstract("100", "질의", "방화셔터", "방화셔터 장치")
+    selected = rank_candidates_bm25(
+        {"질의": [top, precise]}, source_tokens=src, cap=1, ipc_signal=False
+    )
+    assert [c.application_number for c in selected] == ["100"]

@@ -199,7 +199,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--search-strategy",
-        choices=("baseline", "expanded_v1", "fielded_v1", "fielded_v2"),
+        choices=("baseline", "expanded_v1", "fielded_v1", "fielded_v2", "fielded_v3"),
         default="expanded_v1",
     )
     parser.add_argument(

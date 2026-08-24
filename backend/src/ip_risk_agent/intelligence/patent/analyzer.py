@@ -343,6 +343,8 @@ class PatentAnalyzer:
                 cap=self._cap,
                 family_of=families,
                 exclude=self._exclude or None,
+                judge_tail_to=self._plan.judge_tail_to,
+                judge_tail_total_cap=self._plan.judge_tail_total_cap,
             )
         elif self._plan.use_rrf:
             candidates = rank_candidates_rrf(
