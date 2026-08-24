@@ -65,6 +65,10 @@ SAMPLES = REPO_ROOT / "samples"
 # 여기서는 측정 단위를 고정하기 위해 상한을 둔다. 값은 인자로 바꿀 수 있다.
 DEFAULT_DOC_CHARS = 6000
 
+# 표본 5편에서는 문제없었으나 30편으로 늘리자 연속 호출이 쌓여 KIPRIS 쪽에서
+# ProviderFailureError(레이트리밋으로 추정)가 다발했다. 호출 사이 최소 간격.
+KIPRIS_THROTTLE_SECONDS = 0.5
+
 
 class CompareLogWriter:
     """PatentComparison 의 실제 내용을 모델·문서별로 남긴다.
@@ -198,6 +202,10 @@ async def _run_patent(
         if not extraction.is_technical or kipris is None:
             continue
         for query in extraction.search_queries[:max_queries]:
+            # 표본을 30편으로 늘리면서 문서당 최대 max_queries회씩 연속 호출이
+            # 쌓여 KIPRIS 쪽에서 ProviderFailureError(레이트리밋으로 추정)가
+            # 다발했다 — 호출 사이에 짧은 간격을 둬 부담을 낮춘다.
+            await asyncio.sleep(KIPRIS_THROTTLE_SECONDS)
             try:
                 hits = await kipris.search(query, rows=rows)
             except Exception as exc:  # noqa: BLE001
@@ -205,6 +213,7 @@ async def _run_patent(
                 continue
             if not hits:
                 continue
+            await asyncio.sleep(KIPRIS_THROTTLE_SECONDS)
             try:
                 document = await kipris.fetch_detail(hits[0].application_number)
             except Exception as exc:  # noqa: BLE001
