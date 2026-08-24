@@ -60,9 +60,13 @@ from ip_risk_agent.intelligence.patent.kipris import (
     KiprisClient,
     normalize_application_number,
 )
+from ip_risk_agent.intelligence.patent.rate_limit import TokenBucket
+from ip_risk_agent.intelligence.patent.search_strategy import plan_for
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN = ROOT / "labels" / "golden"
+# 골든셋이 저장소 밖(팀 공유 폴더)에 있으면 GOLDEN_DIR 로 가리킨다.
+# 기본값은 수집 스크립트의 산출 위치 그대로다.
+GOLDEN = Path(os.environ.get("GOLDEN_DIR") or (ROOT / "labels" / "golden"))
 RAW_DIR = GOLDEN / "raw"
 EVAL_DIR = GOLDEN / "eval"
 
@@ -157,6 +161,27 @@ def _application_date_of(number: str) -> str | None:
     return digits[:8] or None
 
 
+def _model_client() -> GoogleGenAIClient:
+    """Gemini 클라이언트. API 키가 없으면 Vertex(ADC) 로 폴백한다."""
+    model_id = os.environ.get("GEMINI_MODEL_ID") or os.environ.get(
+        "GEMINI_MODEL", "gemini-3.6-flash"
+    )
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if gemini_key:
+        return GoogleGenAIClient(model_id, api_key=gemini_key)
+    project = os.environ.get("GCP_PROJECT_ID", "").strip()
+    if not project:
+        raise SystemExit("GEMINI_API_KEY 또는 GCP_PROJECT_ID(Vertex ADC) 가 필요하다")
+    return GoogleGenAIClient(
+        model_id,
+        vertex_config={
+            "vertexai": True,
+            "project": project,
+            "location": os.environ.get("VERTEX_LOCATION", "global"),
+        },
+    )
+
+
 async def run(
     limit: int,
     labels: set[int],
@@ -165,14 +190,12 @@ async def run(
     expand: bool = False,
     fielded: bool = False,
     cited_only: bool = False,
+    search_strategy: str | None = None,
+    compare_strategy: str = "baseline",
 ) -> int:
     key = os.environ.get("KIPRIS_ACCESS_KEY", "").strip()
-    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not key or not gemini_key:
-        raise SystemExit("KIPRIS_ACCESS_KEY 와 GEMINI_API_KEY 가 모두 필요하다")
-    model_id = os.environ.get("GEMINI_MODEL_ID") or os.environ.get(
-        "GEMINI_MODEL", "gemini-3.6-flash"
-    )
+    if not key:
+        raise SystemExit("KIPRIS_ACCESS_KEY 가 필요하다")
 
     rows = [
         json.loads(line)
@@ -185,15 +208,28 @@ async def run(
         suffix = "eval-improved-expand" if expand else "eval-improved"
     if fielded:
         suffix = "eval-fielded-expand" if expand else "eval-fielded"
+    # 전략 프리셋 모드 — 개별 플래그 대신 SearchPlan 이 손잡이를 정한다.
+    plan = plan_for(search_strategy) if search_strategy else None
+    if plan is not None:
+        suffix = f"eval-plan-{plan.name}"
+        if compare_strategy == "rag":
+            suffix += "-rag"
     out_dir = GOLDEN / suffix
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    max_rps = os.environ.get("KIPRIS_MAX_RPS", "").strip()
     kipris = KiprisClient(
         access_key=key,
-        # 항목별검색 — 제목(정밀) 먼저, 초록(재현) 으로 보강.
-        search_fields=("inventionTitle", "astrtCont") if fielded else None,
+        # 항목별검색 — 제목(정밀) 먼저, 초록(재현) 으로 보강. 전략 프리셋
+        # 모드에서는 계획이 채널을 정한다.
+        search_fields=(
+            plan.search_fields
+            if plan is not None
+            else (("inventionTitle", "astrtCont") if fielded else None)
+        ),
+        rate_limiter=TokenBucket(float(max_rps)) if max_rps else None,
     )
-    model = GoogleGenAIClient(model_id, api_key=gemini_key)
+    model = _model_client()
 
     done = 0
     try:
@@ -214,16 +250,28 @@ async def run(
                 continue
             # 개선 모드: 그 출원의 출원일을 컷오프로, 검색 풀 20건.
             # 기본 모드: 운영과 동일 (컷오프 없음, 5건).
-            analyzer = PatentAnalyzer(
-                kipris,
-                model,
-                candidate_cap=6,
-                prior_art_cutoff=(
-                    _application_date_of(number) if improved else None
-                ),
-                search_rows=20 if improved else 5,
-                query_expansion=expand,
-            )
+            # 전략 프리셋 모드: 계획이 손잡이를 정하고, 컷오프는 항상 켠다 —
+            # 평가에서는 출원일 이후 문서가 정의상 선행기술이 아니기 때문.
+            if plan is not None:
+                analyzer = PatentAnalyzer(
+                    kipris,
+                    model,
+                    candidate_cap=6,
+                    search_plan=plan,
+                    compare_strategy=compare_strategy,
+                    prior_art_cutoff=_application_date_of(number),
+                )
+            else:
+                analyzer = PatentAnalyzer(
+                    kipris,
+                    model,
+                    candidate_cap=6,
+                    prior_art_cutoff=(
+                        _application_date_of(number) if improved else None
+                    ),
+                    search_rows=20 if improved else 5,
+                    query_expansion=expand,
+                )
             result = await analyzer.analyze(_artifact(number, abstract))
             candidates = [
                 {
@@ -242,6 +290,7 @@ async def run(
             record = {
                 "application_number": number,
                 "label": row["label"],
+                "condition": suffix,
                 "status": result.status.value,
                 "candidates": candidates,
                 "examiner_cited": row.get("examiner_cited") or [],
@@ -284,11 +333,21 @@ def main() -> None:
                         help="질의 확장까지 켬 (improved 와 함께) - eval-improved-expand/")
     parser.add_argument("--fielded", action="store_true",
                         help="항목별검색(제목+초록) - eval-fielded/")
+    parser.add_argument("--search-strategy",
+                        choices=("baseline", "expanded_v1", "fielded_v1"),
+                        default=None,
+                        help="SearchPlan 프리셋으로 평가 (개별 플래그 대신) "
+                             "- eval-plan-<이름>[-rag]/")
+    parser.add_argument("--compare-strategy", choices=("baseline", "rag"),
+                        default="baseline",
+                        help="--search-strategy 와 함께 쓰는 대조 전략")
     args = parser.parse_args()
     sys.exit(asyncio.run(run(args.limit, set(args.labels),
                              improved=args.improved, expand=args.expand,
                              fielded=args.fielded,
-                             cited_only=args.cited_only)))
+                             cited_only=args.cited_only,
+                             search_strategy=args.search_strategy,
+                             compare_strategy=args.compare_strategy)))
 
 
 if __name__ == "__main__":
