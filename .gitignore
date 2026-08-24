@@ -16,3 +16,5 @@ dist/
 *-env.local.yaml
 labels/
 .rag-corpus-cache/
+*.jsonl
+cost-report-baseline.md
