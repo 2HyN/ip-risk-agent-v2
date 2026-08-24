@@ -13,8 +13,19 @@ substitutions:
   _REPOSITORY: ip-risk-agent-v2
   _IMAGE: application
 serviceAccount: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
-timeout: 1500s
+timeout: 2700s
 steps:
+  # 테스트가 게이트다 — pytest 를 통과하지 못한 커밋은 이미지를 만들지도,
+  # 배포하지도 않는다. PR 검증(cloudbuild-ci.yaml)과 같은 환경·같은 명령이다.
+  - id: pytest
+    name: python:3.14.7-slim-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        pip install -q -r requirements.lock
+        pip install -q --no-deps -e .
+        python -m pytest tests -m "not live" -q
   - id: build
     name: gcr.io/cloud-builders/docker
     args:
@@ -64,3 +75,4 @@ steps:
         echo "deployed $${DIGEST}"
 options:
   logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
