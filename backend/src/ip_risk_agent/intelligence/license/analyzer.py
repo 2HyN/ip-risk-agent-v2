@@ -58,6 +58,29 @@ ANALYZER_VERSION = "license-analyzer-1.0.0"
 logger = logging.getLogger(__name__)
 
 
+def _record_clause_search(*, cached: bool) -> None:
+    """조항 검색을 캐시가 받았는지 남긴다.
+
+    특허 쪽 ``kipris_call`` 과 같은 목적이다 — 조항 캐시(§9.2)가 실제로 RAG 실호출을
+    얼마나 받아 주는지는 세어 봐야 안다. ``cached=false`` 만 세면 RAG Engine 실호출
+    수이고, 둘을 나란히 보면 적중률이 나온다.
+
+    캐시 키와 라이선스 표현식은 남기지 않는다 — 표현식은 사용자 의존성 파일에서
+    파생된 값이다.
+    """
+    logger.info(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "event": "rag_clause_search",
+                "cached": cached,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
+
 def _log_analysis(
     artifact: AnalysisArtifact,
     *,
@@ -441,8 +464,10 @@ class LicenseAnalyzer:
         )
 
         if cached is not None:
+            _record_clause_search(cached=True)
             chunks = list(cached.chunks)
         else:
+            _record_clause_search(cached=False)
             try:
                 chunks = await self._retriever.retrieve(
                     reference_query(expression, outcome, profile), top_k=3
