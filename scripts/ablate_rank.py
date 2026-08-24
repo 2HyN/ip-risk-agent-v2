@@ -31,6 +31,7 @@ from defusedxml.ElementTree import fromstring
 
 from ip_risk_agent.intelligence.patent.candidate_rank import (
     rank_candidates,
+    rank_candidates_bm25,
     rank_candidates_rrf,
 )
 from ip_risk_agent.intelligence.patent.ephemeral_index import tokenize
@@ -69,8 +70,7 @@ async def _pool_for(
     number: str, queries: list[str], kipris: KiprisClient, rows: int
 ) -> dict[str, list[PatentSearchHit]]:
     """출원당 검색 풀. 파일 캐시 — 같은 풀로 몇 번이든 재순위한다."""
-    suffix = "" if rows == 20 else f"-r{rows}"
-    path = POOL_DIR / f"pool-{number}{suffix}.json"
+    path = POOL_DIR / f"poolv2-{number}-r{rows}.json"
     if path.exists():
         data = json.loads(path.read_text(encoding="utf-8"))
         return {
@@ -80,6 +80,7 @@ async def _pool_for(
                     title=h["title"],
                     query=query,
                     metadata=h["metadata"],
+                    abstract=h.get("abstract", ""),
                 )
                 for h in hits
             ]
@@ -99,6 +100,7 @@ async def _pool_for(
                         "application_number": h.application_number,
                         "title": h.title,
                         "metadata": h.metadata,
+                        "abstract": h.abstract,
                     }
                     for h in hits
                 ]
@@ -168,9 +170,13 @@ def variants(pool, *, families, source_tokens, exclude):
         _strip_metadata(pool, ("search_total", "search_field")), cap=CAP,
         source_tokens=source_tokens, exclude=exclude,
     )
+    yield "bm25(운영, fielded_v2)", lambda: rank_candidates_bm25(
+        pool, cap=CAP, source_tokens=source_tokens,
+        family_of=families, exclude=exclude,
+    )
 
 
-async def run(rows: int = 20) -> int:
+async def run(rows: int = 20, all_cited: bool = False) -> int:
     key = os.environ.get("KIPRIS_ACCESS_KEY", "").strip()
     if not key:
         raise SystemExit("KIPRIS_ACCESS_KEY 가 필요하다 (풀 캐시 미스에만 쓴다)")
@@ -188,11 +194,29 @@ async def run(rows: int = 20) -> int:
         for row in [json.loads(line)]
     }
 
-    # 대상: 질의 캐시가 있는 출원 (diagnose 가 만든 것)
-    apps = sorted(
-        path.stem.replace("queries-", "")
-        for path in DIAG_DIR.glob("queries-*.json")
-    )
+    if all_cited:
+        # 인용 있는 모든 출원. 질의·번호 해석 캐시가 없으면 그 자리에서 만든다
+        # (질의는 Gemini 1회 후 고정 — 비결정성 차단이 이 하네스의 요점이다).
+        import diagnose_golden_misses as diag
+
+        model = diag._model_client()
+        apps = sorted(
+            number for number, row in pairs.items() if row.get("examiner_cited")
+        )
+        for number in apps:
+            if not (DIAG_DIR / f"queries-{number}.json").exists():
+                abstract = _biblio_text(number, "astrtCont")
+                if abstract:
+                    await diag._queries_for(number, abstract, model, DIAG_DIR)
+            for citation in pairs[number]["examiner_cited"]:
+                digits = normalize_application_number(citation)
+                diag._resolve_citation(digits, key, DIAG_DIR)
+    else:
+        # 질의 캐시가 이미 있는 출원만 (diagnose 가 만든 것)
+        apps = sorted(
+            path.stem.replace("queries-", "")
+            for path in DIAG_DIR.glob("queries-*.json")
+        )
     if not apps:
         raise SystemExit("질의 캐시가 없다 — diagnose_golden_misses.py 를 먼저 돌려라")
 
@@ -271,8 +295,10 @@ def main() -> None:
         stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", type=int, default=20)
+    parser.add_argument("--all-cited", action="store_true",
+                        help="인용 있는 모든 출원을 대상 (질의 캐시 자동 생성)")
     args = parser.parse_args()
-    sys.exit(asyncio.run(run(args.rows)))
+    sys.exit(asyncio.run(run(args.rows, args.all_cited)))
 
 
 if __name__ == "__main__":

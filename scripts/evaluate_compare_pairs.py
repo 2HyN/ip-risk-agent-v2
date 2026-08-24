@@ -134,7 +134,8 @@ async def _cited_document(
         return None
     document = await kipris.fetch_detail(number)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache.write_text(
+    tmp = cache.with_suffix(f".tmp-{os.getpid()}")
+    tmp.write_text(
         json.dumps(
             {
                 "application_number": document.application_number,
@@ -148,6 +149,7 @@ async def _cited_document(
         ),
         encoding="utf-8",
     )
+    os.replace(tmp, cache)
     return document
 
 
@@ -176,8 +178,10 @@ def _model_client() -> GoogleGenAIClient:
     )
 
 
-async def run(pairs_csv: Path, limit: int, strategies: tuple[str, ...]) -> int:
-    rows = _load_pairs(pairs_csv)
+async def run(
+    pairs_csv: Path, limit: int, strategies: tuple[str, ...], offset: int = 0
+) -> int:
+    rows = _load_pairs(pairs_csv)[offset:]
     model = _model_client()
 
     key = os.environ.get("KIPRIS_ACCESS_KEY", "").strip()
@@ -330,6 +334,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pairs", default=str(DEFAULT_PAIRS))
     parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--offset", type=int, default=0,
+                        help="앞의 N행을 건너뛴다 — 병렬 분할용. "
+                             "겹쳐도 건너뛰기(결과 파일 존재)로 안전하다")
     parser.add_argument(
         "--compare-strategy",
         choices=("baseline", "rag", "both"),
@@ -343,7 +350,7 @@ def main() -> None:
     strategies = (
         STRATEGIES if args.compare_strategy == "both" else (args.compare_strategy,)
     )
-    sys.exit(asyncio.run(run(Path(args.pairs), args.limit, strategies)))
+    sys.exit(asyncio.run(run(Path(args.pairs), args.limit, strategies, args.offset)))
 
 
 if __name__ == "__main__":
