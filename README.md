@@ -1,4 +1,5 @@
 # IP Risk Agent
+추가 수정
 
 **여러 협업 Source Workspace(Local · GitHub · Google Drive)를 하나의 Risk
 Workspace 에 연결하고, 변경을 지속적으로 감지해 Patent·License 중심의 잠재적
