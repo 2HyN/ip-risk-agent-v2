@@ -33,11 +33,13 @@ def render_segments(artifact: AnalysisArtifact) -> str:
     )
 
 
-def clamp_queries(queries: list[str]) -> list[str]:
+def clamp_queries(queries: list[str], *, max_queries: int = MAX_QUERIES) -> list[str]:
     """검색어를 2~3 단어로 자른다.
 
     KIPRIS 의 anySearch 는 넣은 단어를 모두 포함하는 문서만 찾는다. 다섯 단어를
     넣으면 결과가 0건이 된다. 모델이 길게 만들어도 여기서 줄인다.
+
+    상한은 검색 전략(plan)이 정한다. 기본값은 현행 그대로다.
     """
     cleaned: list[str] = []
     for raw in queries:
@@ -47,26 +49,35 @@ def clamp_queries(queries: list[str]) -> list[str]:
         candidate = " ".join(words[:MAX_QUERY_WORDS])
         if candidate not in cleaned:
             cleaned.append(candidate)
-    return cleaned[:MAX_QUERIES]
+    return cleaned[:max_queries]
 
 
 class TechnicalExtractor:
-    """모델을 호출해 기술 요소와 검색어를 얻는다."""
+    """모델을 호출해 기술 요소와 검색어를 얻는다.
+
+    프롬프트와 검색어 상한은 검색 전략이 주입한다. 기본값이 현행 상수라 아무것도
+    넘기지 않으면 지금까지와 같은 동작이다.
+    """
 
     def __init__(
         self,
         client: StructuredModelClient,
         prompts: PromptLibrary | None = None,
+        *,
+        prompt_name: str = PROMPT_NAME,
+        max_queries: int = MAX_QUERIES,
     ) -> None:
         self._client = client
         self._prompts = prompts or PromptLibrary()
+        self._prompt_name = prompt_name
+        self._max_queries = max_queries
 
     @property
     def prompt_version(self) -> str:
-        return self._prompts.get(PROMPT_NAME).prompt_version
+        return self._prompts.get(self._prompt_name).prompt_version
 
     async def extract(self, artifact: AnalysisArtifact) -> TechnicalExtraction:
-        prompt = self._prompts.get(PROMPT_NAME)
+        prompt = self._prompts.get(self._prompt_name)
         rendered = prompt.render(segments=render_segments(artifact))
         result = await self._client.generate(rendered, TechnicalExtraction)
 
@@ -74,7 +85,9 @@ class TechnicalExtractor:
         return TechnicalExtraction(
             is_technical=result.is_technical,
             technical_elements=result.technical_elements,
-            search_queries=clamp_queries(result.search_queries),
+            search_queries=clamp_queries(
+                result.search_queries, max_queries=self._max_queries
+            ),
             # 입력에 없는 segment 를 지목했다면 그 참조만 버린다.
             source_segment_ids=[s for s in result.source_segment_ids if s in known],
         )

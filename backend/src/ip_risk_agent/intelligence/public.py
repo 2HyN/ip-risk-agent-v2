@@ -30,6 +30,8 @@ from .license.package_metadata import (
 )
 from .patent.analyzer import PatentAnalyzer
 from .patent.kipris import KiprisClient, PatentSearchProvider
+from .patent.rate_limit import TokenBucket
+from .patent.search_strategy import plan_for, require_compare_strategy
 
 __all__ = [
     "Analyzer",
@@ -57,16 +59,26 @@ class IntelligenceConfig:
     vertex_config: dict[str, str] | None = None
     kipris_access_key: str | None = None
     patent_candidate_cap: int = 6
+    #: 특허 고도화 전략 스위치 (`docs/PATENT_RAG_ENHANCEMENT_PLAN.md` §3).
+    #: 기본값이 baseline 이라 설정하지 않으면 현행 그대로다.
+    patent_search_strategy: str = "baseline"
+    patent_compare_strategy: str = "baseline"
+    #: KIPRIS 초당 호출 상한. 유료 등급의 남은 제약이다. 미설정이면 버킷 없음.
+    kipris_max_rps: float | None = None
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> "IntelligenceConfig":
         model_id = env.get("GEMINI_MODEL_ID")
         if not model_id:
             raise ValueError("GEMINI_MODEL_ID is required")
+        max_rps = env.get("KIPRIS_MAX_RPS")
         return cls(
             gemini_model_id=model_id,
             gemini_api_key=env.get("GEMINI_API_KEY"),
             kipris_access_key=env.get("KIPRIS_ACCESS_KEY"),
+            patent_search_strategy=env.get("PATENT_SEARCH_STRATEGY", "baseline"),
+            patent_compare_strategy=env.get("PATENT_COMPARE_STRATEGY", "baseline"),
+            kipris_max_rps=float(max_rps) if max_rps else None,
         )
 
 
@@ -107,11 +119,16 @@ def create_analyzer_registry(
     previously_matched_patents=None,
     workspace_license_policy=None,
     clause_cache=None,
+    patent_search_strategy: str = "baseline",
+    patent_compare_strategy: str = "baseline",
 ) -> AnalyzerRegistry:
     """Analyzer 를 조립한다.
 
     provider 를 전부 인자로 받는다. 테스트는 대역을 넣고 배포는 실제 구현을 넣는다.
     특허 검색기를 넣지 않으면 라이선스만 등록된다.
+
+    특허 전략 스위치의 기본값은 baseline 이다 — 오타가 조용히 베이스라인으로
+    떨어지지 않도록 이름은 화이트리스트로 검증한다.
     """
     analyzers: list[Analyzer] = [
         LicenseAnalyzer(
@@ -133,6 +150,8 @@ def create_analyzer_registry(
                 candidate_cap=patent_candidate_cap,
                 response_cache=patent_response_cache,
                 previously_matched=previously_matched_patents,
+                search_plan=plan_for(patent_search_strategy),
+                compare_strategy=require_compare_strategy(patent_compare_strategy),
             )
         )
     return AnalyzerRegistry(analyzers)
@@ -155,7 +174,16 @@ def create_facade_from_env(
         vertex_config=config.vertex_config,
     )
     search_provider = (
-        KiprisClient(config.kipris_access_key) if config.kipris_access_key else None
+        KiprisClient(
+            config.kipris_access_key,
+            rate_limiter=(
+                TokenBucket(config.kipris_max_rps)
+                if config.kipris_max_rps
+                else None
+            ),
+        )
+        if config.kipris_access_key
+        else None
     )
     return IntelligenceFacade(
         create_analyzer_registry(
@@ -164,5 +192,7 @@ def create_facade_from_env(
             search_provider=search_provider,
             retriever=retriever,
             patent_candidate_cap=config.patent_candidate_cap,
+            patent_search_strategy=config.patent_search_strategy,
+            patent_compare_strategy=config.patent_compare_strategy,
         )
     )

@@ -30,14 +30,30 @@ from ..common.errors import MalformedProviderOutputError, ProviderFailureError
 from ..common.evidence import source_reference, source_segment_id
 from ..common.validation import validate_artifact
 from ..gemini.client import PromptLibrary, StructuredModelClient
-from ..gemini.schemas import PatentComparison, TechnicalExtraction
+from ..gemini.schemas import PatentComparison, PatentComparisonV3, TechnicalExtraction
 from . import evidence_builder, grounding
-from .candidate_rank import DEFAULT_CANDIDATE_CAP, RankedCandidate, rank_candidates
+from .candidate_rank import (
+    DEFAULT_CANDIDATE_CAP,
+    RANK_VERSION_RRF,
+    RankedCandidate,
+    rank_candidates,
+    rank_candidates_rrf,
+)
+from .claims import CLAIMS_VERSION, chunk_claims, parse_claims
+from .ephemeral_index import INDEX_VERSION, select_context
 from .extraction import TechnicalExtractor, render_segments
 from .cache import CachedExtraction, EXTRACTION_TTL, extraction_cache_key
 from .kipris import PatentDocument, PatentSearchProvider
 from .score import evidence_strength
 from .query_builder import run_searches
+from .search_strategy import (
+    BASELINE,
+    BASELINE_PLAN,
+    COMPARE_BASELINE,
+    COMPARE_RAG,
+    SearchPlan,
+    require_compare_strategy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +88,7 @@ def _priority_diagnostic(
     segment_count: int,
     distinct_segments: int,
     priority: str,
+    **extra_counts: int | bool | str,
 ) -> None:
     """후보 하나의 등급이 **왜** 그 값이 되었는지 남긴다.
 
@@ -96,6 +113,7 @@ def _priority_diagnostic(
                 "segment_count": segment_count,
                 "distinct_segments": distinct_segments,
                 "priority": priority,
+                **extra_counts,
             },
             ensure_ascii=True,
             separators=(",", ":"),
@@ -117,7 +135,13 @@ async def _safe_cache(awaitable):
 
 
 ANALYZER_VERSION = "patent-analyzer-1.0.0"
+#: 확장 전략(검색 또는 대조)이 하나라도 켜지면 이 버전이 기록된다.
+ANALYZER_VERSION_ENHANCED = "patent-analyzer-1.1.0"
 COMPARE_PROMPT = "patent_compare_v2"
+COMPARE_PROMPT_V3 = "patent_compare_v3"
+
+#: rag 대조의 병렬 폭. 모델 429 관측 시 조립에서 낮춘다.
+_RAG_COMPARE_CONCURRENCY = 3
 
 # 기획·설계 문서만 본다. 의존성 파일에는 발명이 없다.
 _DOCUMENT_KINDS = frozenset(
@@ -139,32 +163,82 @@ class PatentAnalyzer:
         candidate_cap: int = DEFAULT_CANDIDATE_CAP,
         response_cache=None,
         previously_matched=None,
+        search_plan: SearchPlan | None = None,
+        compare_strategy: str = COMPARE_BASELINE,
     ) -> None:
         self._search = search_provider
         self._client = model_client
         self._prompts = prompts or PromptLibrary()
-        self._extractor = TechnicalExtractor(model_client, self._prompts)
-        self._cap = candidate_cap
+        # 전략 스위치. 아무것도 넘기지 않으면 현행 그대로다 — 베이스라인 보존이
+        # 코드 경로 분기가 아니라 기본 인자로 성립한다.
+        self._plan = search_plan or BASELINE_PLAN
+        self._compare_strategy = require_compare_strategy(compare_strategy)
+        self._extractor = TechnicalExtractor(
+            model_client,
+            self._prompts,
+            prompt_name=self._plan.extract_prompt,
+            max_queries=self._plan.max_queries,
+        )
+        # cap: 베이스라인은 기존 인자를 그대로 존중하고, 확장 계획은 계획이 정한다.
+        self._cap = (
+            candidate_cap if self._plan.name == BASELINE else self._plan.compare_cap
+        )
         # 같은 문서면 같은 검색어를 쓴다. 없으면 매번 다시 뽑는다.
         self._cache = response_cache
         # 이 artifact 에서 이미 매칭된 출원번호. 검색과 무관하게 다시 대조한다.
         self._previously_matched = previously_matched
+
+    @property
+    def _is_baseline(self) -> bool:
+        return (
+            self._plan.name == BASELINE
+            and self._compare_strategy == COMPARE_BASELINE
+        )
+
+    def _prompt_version(self) -> str:
+        """결과에 남길 판정 기계의 지문.
+
+        baseline 조합은 현행 문자열 그대로다 — 여기에 무엇이든 연접하면 배포
+        직후 모든 재검사의 원인 귀속이 MODEL 로 오염된다 (계획 문서 §6-1).
+        비-baseline 은 전략 버전을 연접해 "그때의 후보 풀·대조가 어떤 기계에서
+        나왔는가"를 되짚을 수 있게 한다 (§4.2 의 연장).
+        """
+        compare_prompt = (
+            COMPARE_PROMPT
+            if self._compare_strategy == COMPARE_BASELINE
+            else COMPARE_PROMPT_V3
+        )
+        version = (
+            f"{self._extractor.prompt_version}+"
+            f"{self._prompts.get(compare_prompt).prompt_version}"
+        )
+        suffixes: list[str] = []
+        if self._plan.version:
+            suffixes.append(self._plan.version)
+            if self._plan.use_rrf:
+                suffixes.append(RANK_VERSION_RRF)
+        if self._compare_strategy == COMPARE_RAG:
+            suffixes.append(f"{CLAIMS_VERSION}+{INDEX_VERSION}")
+        if suffixes:
+            version = version + "+" + "+".join(suffixes)
+        return version
 
     def supports(self, artifact: AnalysisArtifact) -> bool:
         return artifact.artifact_kind in _DOCUMENT_KINDS
 
     async def analyze(self, artifact: AnalysisArtifact):
         validate_artifact(artifact, self.analysis_type)
-        builder = ResultBuilder(artifact, self.analysis_type, ANALYZER_VERSION)
+        builder = ResultBuilder(
+            artifact,
+            self.analysis_type,
+            ANALYZER_VERSION if self._is_baseline else ANALYZER_VERSION_ENHANCED,
+        )
         versions: dict[str, str | None] = {
             "model_id": self._client.model_id,
             # 등급을 정하는 것은 대조 프롬프트이므로 함께 남긴다. 규칙이나 프롬프트가
             # 바뀌면 과거 판정의 뜻이 조용히 달라지는데, 무엇이 판정했는지 남아 있지
             # 않으면 "그때의 상" 이 무엇이었는지 설명할 수 없다.
-            "prompt_version": (
-                f"{self._extractor.prompt_version}+"
-                f"{self._prompts.get(COMPARE_PROMPT).prompt_version}"
-            ),
+            "prompt_version": self._prompt_version(),
         }
 
         # ── 1. 기술 요소 추출
@@ -182,7 +256,13 @@ class PatentAnalyzer:
             return builder.inconclusive(**versions)
 
         # ── 2. 검색
-        outcome = await run_searches(self._search, extraction.search_queries)
+        outcome = await run_searches(
+            self._search,
+            extraction.search_queries,
+            rows=self._plan.rows,
+            relax_zero_hits=self._plan.relax_zero_hits,
+            stage_deadline_seconds=self._plan.stage_deadline_seconds,
+        )
         for failure in outcome.failures:
             builder.record_failure(failure)
 
@@ -190,7 +270,10 @@ class PatentAnalyzer:
             # 모든 검색어가 실패했다. 후보 0건이 아니라 모르는 상태다.
             return builder.failed(**versions)
 
-        candidates = rank_candidates(outcome.hits_by_query, cap=self._cap)
+        if self._plan.use_rrf:
+            candidates = rank_candidates_rrf(outcome.hits_by_query, cap=self._cap)
+        else:
+            candidates = rank_candidates(outcome.hits_by_query, cap=self._cap)
         # 검색이 데려오지 않았어도, 이 문서에서 이미 매칭된 특허는 다시 대조한다.
         #
         # 그러지 않으면 검색어가 조금만 달라져도 이전 후보가 결과에서 빠지고,
@@ -199,13 +282,21 @@ class PatentAnalyzer:
         # 같은 문서를 재검사했더니 특허 2 건이 그렇게 조용히 해소됐다.
         carried = await self._carried_forward(artifact, candidates)
         candidates = [*candidates, *carried]
-        _diagnostic(
+        search_counts = dict(
             query_count=len(extraction.search_queries),
             queries_answered=len(outcome.hits_by_query),
             hit_total=sum(len(hits) for hits in outcome.hits_by_query.values()),
             ranked_candidates=len(candidates),
             search_failures=len(outcome.failures),
         )
+        if not self._is_baseline:
+            # 확장 전략의 손잡이가 실제로 무엇을 했는지 개수만 남긴다.
+            search_counts.update(
+                zero_hit_queries=outcome.zero_hit_queries,
+                relaxed_queries=len(outcome.relaxations),
+                relax_recovered=outcome.relax_recovered,
+            )
+        _diagnostic(**search_counts)
         if not candidates:
             # 검색은 정상이고 결과가 없었다. 이것은 성공이다.
             coverage = (
@@ -240,22 +331,32 @@ class PatentAnalyzer:
         results: list[PatentCandidate] = []
         assessed = 0
 
-        for candidate in candidates:
-            document = documents.get(candidate.application_number)
-            if document is None or not document.has_content:
-                continue
-            evaluated = await self._compare(
-                artifact,
-                candidate,
-                document,
-                builder,
-                extracted_elements=len(extraction.technical_elements),
-                total_queries=len(extraction.search_queries),
+        if self._compare_strategy == COMPARE_RAG:
+            evaluations = await self._compare_all_rag(
+                artifact, candidates, documents, builder, extraction
             )
-            if evaluated is not None:
-                assessed += 1
-                if evaluated.matched_elements:
-                    results.append(evaluated.candidate)
+            for evaluated in evaluations:
+                if evaluated is not None:
+                    assessed += 1
+                    if evaluated.matched_elements:
+                        results.append(evaluated.candidate)
+        else:
+            for candidate in candidates:
+                document = documents.get(candidate.application_number)
+                if document is None or not document.has_content:
+                    continue
+                evaluated = await self._compare(
+                    artifact,
+                    candidate,
+                    document,
+                    builder,
+                    extracted_elements=len(extraction.technical_elements),
+                    total_queries=len(extraction.search_queries),
+                )
+                if evaluated is not None:
+                    assessed += 1
+                    if evaluated.matched_elements:
+                        results.append(evaluated.candidate)
 
         _diagnostic(
             ranked_candidates=len(candidates),
@@ -452,6 +553,200 @@ class PatentAnalyzer:
                     },
                     **strength.as_metadata(),
                     "has_claim_evidence": grounded.has_claim_evidence,
+                    **self._rank_metadata(candidate),
+                },
+            ),
+        )
+
+    def _rank_metadata(self, candidate: RankedCandidate) -> dict:
+        """RRF 전략일 때만 순위 근거를 후보 메타데이터에 남긴다. 베이스라인은 빈 값."""
+        if not self._plan.use_rrf:
+            return {}
+        return {
+            "rank_version": RANK_VERSION_RRF,
+            "rrf_score": f"{candidate.rrf_score:.9f}",
+            "ipc_consistent": candidate.ipc_consistent,
+        }
+
+    async def _compare_all_rag(
+        self,
+        artifact: AnalysisArtifact,
+        candidates: list[RankedCandidate],
+        documents: dict[str, PatentDocument],
+        builder: ResultBuilder,
+        extraction,
+    ):
+        """rag 전략의 후보별 대조. 후보 순서를 보존한 목록을 돌려준다.
+
+        준비(파싱·청킹·선별·원장 등록)는 후보 순서대로 **동기** 수행한다 — 원장의
+        등록 순서가 코루틴 스케줄링에 흔들리면 결과가 실행마다 달라진다 (계획
+        문서 §6). 모델 호출만 병렬이다.
+        """
+        elements = list(extraction.technical_elements)
+        prepared: list[tuple | None] = []
+        for candidate in candidates:
+            document = documents.get(candidate.application_number)
+            if document is None or not document.has_content:
+                prepared.append(None)
+                continue
+            parsed = parse_claims(document.claims)
+            chunks = chunk_claims(
+                candidate.application_number, parsed, document.abstract
+            )
+            selection = select_context(chunks, elements)
+            if not selection.chunks:
+                prepared.append(None)
+                continue
+            dependencies = {
+                claim.number: claim.depends_on for claim in parsed if claim.depends_on
+            }
+            evidence = evidence_builder.build_rag_evidence(
+                document,
+                selection.chunks,
+                builder.ledger,
+                dependencies=dependencies,
+            )
+            prepared.append((candidate, document, selection, evidence))
+
+        semaphore = asyncio.Semaphore(_RAG_COMPARE_CONCURRENCY)
+
+        async def one(item):
+            if item is None:
+                return None
+            candidate, document, selection, evidence = item
+            async with semaphore:
+                return await self._compare_rag(
+                    artifact,
+                    candidate,
+                    document,
+                    selection,
+                    evidence,
+                    builder,
+                    elements=elements,
+                    total_queries=len(extraction.search_queries),
+                )
+
+        return await asyncio.gather(*(one(item) for item in prepared))
+
+    async def _compare_rag(
+        self,
+        artifact: AnalysisArtifact,
+        candidate: RankedCandidate,
+        document: PatentDocument,
+        selection,
+        evidence,
+        builder: ResultBuilder,
+        *,
+        elements: list[str],
+        total_queries: int,
+    ):
+        """요소 색인 대조. 검증 원칙(폐기·재질의 1회)은 v2 경로와 같다."""
+        prompt = self._prompts.get(COMPARE_PROMPT_V3).render(
+            segments=render_segments(artifact),
+            elements="\n".join(
+                f"[E{index}] {element}" for index, element in enumerate(elements)
+            ),
+            patent_evidence=evidence_builder.render_rag_evidence(
+                evidence, selection.chunks
+            ),
+        )
+        evidence_bodies = {
+            **{
+                source_segment_id(segment.segment_id): segment.text
+                for segment in artifact.text_segments
+            },
+            **evidence.text_by_id,
+        }
+        allowed_segment_ids = {item.segment_id for item in artifact.text_segments}
+
+        truncated = builder.ledger.truncated_ids
+        if selection.incomplete:
+            # 예산 때문에 필수 조각(독립항·앞 3개·초록)을 다 싣지 못했다.
+            # "대조가 본 것이 전부가 아니다"는 코드가 아는 사실이므로, 원장의
+            # 잘림과 같은 기제로 강등 입력에 태운다 (§4.3 의 동형 확장).
+            truncated = truncated | frozenset(evidence.evidence_ids)
+
+        grounded = None
+        for remaining in (1, 0):
+            try:
+                comparison = await self._client.generate(prompt, PatentComparisonV3)
+            except ProviderFailureError as failure:
+                builder.record_failure(failure)
+                return None
+            try:
+                grounded = grounding.validate_comparison_v3(
+                    comparison,
+                    element_count=len(elements),
+                    allowed_segment_ids=allowed_segment_ids,
+                    evidence_types=evidence.types,
+                    truncated_evidence_ids=truncated,
+                    evidence_bodies=evidence_bodies,
+                )
+                break
+            except MalformedProviderOutputError as failure:
+                if not remaining:
+                    builder.record_failure(failure)
+                    return None
+        assert grounded is not None
+
+        priority = grounding.suggested_priority(grounded)
+        strength = evidence_strength(
+            matched_elements=grounded.match_count,
+            extracted_elements=len(elements),
+            claim_backed_evidence=sum(
+                1
+                for evidence_id in grounded.evidence_ids
+                if evidence.types.get(evidence_id) is EvidenceType.PATENT_CLAIM
+            ),
+            patent_evidence=sum(
+                1
+                for evidence_id in grounded.evidence_ids
+                if evidence_id in evidence.types
+            ),
+            answered_queries=len(candidate.matched_queries),
+            total_queries=total_queries,
+        )
+        _priority_diagnostic(
+            match_count=grounded.match_count,
+            has_claim_evidence=grounded.has_claim_evidence,
+            caveat_count=len(grounded.review_caveats),
+            evidence_truncated=grounded.evidence_truncated,
+            segment_count=len(artifact.text_segments),
+            distinct_segments=sum(
+                1 for value in grounded.evidence_ids if value.startswith("src:")
+            ),
+            priority=priority.value,
+            evidence_strength=strength.score,
+            compare_strategy="rag",
+            chunks_selected=len(selection.chunks),
+            retrieved_chunks=len(selection.retrieved_ids),
+            context_incomplete=selection.incomplete,
+        )
+        return _Evaluated(
+            matched_elements=grounded.matched_elements,
+            candidate=PatentCandidate(
+                normalized_application_number=candidate.application_number,
+                title=document.title or candidate.title,
+                suggested_review_priority=priority,
+                matched_elements=grounded.matched_elements,
+                evidence_ids=grounded.evidence_ids,
+                provider_metadata_safe={
+                    "query_hits": candidate.query_hits,
+                    "matched_queries": candidate.matched_queries,
+                    "review_caveats": grounded.review_caveats,
+                    "evidence_truncated": grounded.evidence_truncated,
+                    "quote_spans": {
+                        evidence_id: {"start": span.start, "end": span.end}
+                        for evidence_id, span in grounded.quote_spans.items()
+                    },
+                    **strength.as_metadata(),
+                    "has_claim_evidence": grounded.has_claim_evidence,
+                    "compare_strategy": "rag",
+                    "distinct_match_count": grounded.match_count,
+                    "context_chunks": len(selection.chunks),
+                    "context_incomplete": selection.incomplete,
+                    "retrieved_chunks": len(selection.retrieved_ids),
+                    **self._rank_metadata(candidate),
                 },
             ),
         )

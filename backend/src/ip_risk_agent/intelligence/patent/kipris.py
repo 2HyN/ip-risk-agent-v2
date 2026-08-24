@@ -177,6 +177,7 @@ class KiprisClient:
         retry_attempts: int = _RETRY_ATTEMPTS,
         retry_backoff_seconds: float = _RETRY_BACKOFF_SECONDS,
         client: httpx.AsyncClient | None = None,
+        rate_limiter=None,
     ) -> None:
         self._access_key = access_key
         self._retry_attempts = max(1, retry_attempts)
@@ -189,6 +190,9 @@ class KiprisClient:
         )
         # 공공 API 는 동시 호출에 민감하다. 스스로 조인다.
         self._gate = asyncio.Semaphore(max_concurrency)
+        # 유료 등급의 남은 제약은 초당 호출이다. 버킷이 있으면 요청마다 지난다 —
+        # 재시도 경로(_get)도 같은 관문을 지나므로 재시도가 한도를 뚫지 않는다.
+        self._rate_limiter = rate_limiter
 
     async def aclose(self) -> None:
         """직접 만든 연결만 닫는다. 주입받은 것은 호출자 소유다."""
@@ -202,32 +206,50 @@ class KiprisClient:
         await self.aclose()
 
     async def search(self, query: str, *, rows: int = 5) -> list[PatentSearchHit]:
-        root = await self._get(
-            SEARCH_PATH,
-            {
-                "word": query,
-                "year": "0",
-                "patent": "true",
-                "utility": "true",
-                "docsStart": "1",
-                "docsCount": str(rows),
-            },
-        )
+        # 페이지 파라미터 실측 (2026-08-24, 유료 키):
+        #
+        #   * ``docsStart``/``docsCount`` 는 이 경로에서 **무시된다** — 5 를 보내도
+        #     30 을 보내도 서버 기본 10 건이 온다. 지금까지의 "rows=5" 는 사실
+        #     10 건을 받고 있었다.
+        #   * 실제로 듣는 것은 ``pageNo``/``numOfRows`` 다 — numOfRows=30 에
+        #     30 건 유니크, pageNo=2 에 다음 페이지가 실측으로 확인됐다.
+        #
+        # 기본값(rows=5, 베이스라인)은 **요청 모양을 바꾸지 않는다** — 서버가
+        # 무시하는 파라미터라도 바꾸면 관측 동작(기본 10 건)이 5 건으로 줄어
+        # 운영 결과가 조용히 달라진다. 확장 전략(rows≠5)만 실측 파라미터를 쓴다.
+        params = {
+            "word": query,
+            "year": "0",
+            "patent": "true",
+            "utility": "true",
+        }
+        if rows == 5:
+            params.update({"docsStart": "1", "docsCount": str(rows)})
+        else:
+            params.update({"pageNo": "1", "numOfRows": str(rows)})
+        root = await self._get(SEARCH_PATH, params)
         hits: list[PatentSearchHit] = []
         for element in root.iter("item"):
             number = normalize_application_number(_text(element, "applicationNumber"))
             if not number:
                 continue
+            metadata = {
+                "applicationDate": _text(element, "applicationDate"),
+                "openDate": _text(element, "openDate"),
+                "ipc": _text(element, "ipcNumber"),
+            }
+            # 골든셋의 인용 번호가 공개/공고번호 표기로 올 수 있다. 매칭에
+            # 필요한 번호 체계를 있을 때만 함께 수집한다 (계획 문서 §4).
+            for tag in ("openNumber", "publicationNumber", "registerStatus"):
+                value = _text(element, tag)
+                if value:
+                    metadata[tag] = value
             hits.append(
                 PatentSearchHit(
                     application_number=number,
                     title=_text(element, "inventionTitle"),
                     query=query,
-                    metadata={
-                        "applicationDate": _text(element, "applicationDate"),
-                        "openDate": _text(element, "openDate"),
-                        "ipc": _text(element, "ipcNumber"),
-                    },
+                    metadata=metadata,
                 )
             )
         return hits
@@ -287,6 +309,8 @@ class KiprisClient:
     async def _get_once(self, path: str, params: dict[str, str]) -> Element:
         url = f"{self._base_url}/{path}"
         async with self._gate:
+            if self._rate_limiter is not None:
+                await self._rate_limiter.acquire()
             try:
                 response = await self._client.get(
                     url, params={**params, KEY_PARAM: self._access_key}

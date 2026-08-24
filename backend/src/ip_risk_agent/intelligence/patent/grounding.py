@@ -16,7 +16,7 @@ from iprisk_contracts.common import EvidenceType, ReviewPriority
 
 from ..common.errors import MalformedProviderOutputError
 from .quote import QuoteSpan, locate_quote
-from ..gemini.schemas import PatentComparison
+from ..gemini.schemas import PatentComparison, PatentComparisonV3
 
 
 @dataclass(frozen=True)
@@ -33,9 +33,15 @@ class GroundedComparison:
     evidence_truncated: bool = False
     #: 근거 ID -> 그 근거 본문 안에서 강조할 구간. 실재가 확인된 것만 담긴다.
     quote_spans: dict[str, QuoteSpan] = dataclass_field(default_factory=dict)
+    #: 요소 단위 대조(v3)에서만 채워진다 — 겹친 **서로 다른 기술 요소**의 수.
+    #: 같은 요소를 표현만 바꿔 반복해도 부풀지 않고, 상한이 추출 요소 수로
+    #: 묶인다. v2 경로에서는 ``None`` 이라 기존 의미가 그대로다.
+    distinct_match_count: int | None = None
 
     @property
     def match_count(self) -> int:
+        if self.distinct_match_count is not None:
+            return self.distinct_match_count
         return len(self.matched_elements)
 
 
@@ -109,6 +115,88 @@ def validate_comparison(
             evidence_id in truncated_evidence_ids for evidence_id in evidence_ids
         ),
         quote_spans=spans,
+    )
+
+
+def validate_comparison_v3(
+    comparison: PatentComparisonV3,
+    *,
+    element_count: int,
+    allowed_segment_ids: set[str],
+    evidence_types: dict[str, EvidenceType],
+    truncated_evidence_ids: frozenset[str] = frozenset(),
+    evidence_bodies: dict[str, str] | None = None,
+) -> GroundedComparison:
+    """요소 단위 대조(v3)의 검증. 원칙은 v2 와 같다 — 통과 못하면 전체 폐기.
+
+    추가 검증은 ``element_index`` 의 범위 하나다. 목록에 없는 요소 번호를 만들면
+    지어낸 근거와 같은 취급이다. ``match_count`` 는 겹친 **서로 다른 요소**의
+    수로 계산한다 (계획 문서 §5 "match_count 재정의").
+    """
+    matched: list[str] = []
+    evidence_ids: list[str] = []
+    matched_indexes: set[int] = set()
+    has_claim = False
+    bodies = evidence_bodies or {}
+    spans: dict[str, QuoteSpan] = {}
+
+    for element in comparison.matched_elements:
+        if not 0 <= element.element_index < element_count:
+            raise MalformedProviderOutputError(
+                "GEMINI",
+                f"comparison referenced unknown technical element for "
+                f"{comparison.application_number}",
+            )
+        if element.source_segment_id not in allowed_segment_ids:
+            raise MalformedProviderOutputError(
+                "GEMINI",
+                f"comparison referenced unknown source segment for "
+                f"{comparison.application_number}",
+            )
+        evidence_type = evidence_types.get(element.patent_evidence_id)
+        if evidence_type is None:
+            raise MalformedProviderOutputError(
+                "GEMINI",
+                f"comparison referenced unknown patent evidence for "
+                f"{comparison.application_number}",
+            )
+        if evidence_type is EvidenceType.PATENT_CLAIM:
+            has_claim = True
+
+        matched_indexes.add(element.element_index)
+        matched.append(element.explanation.strip())
+        source_evidence_id = f"src:{element.source_segment_id}"
+        for evidence_id, quote in (
+            (source_evidence_id, element.source_quote),
+            (element.patent_evidence_id, element.patent_quote),
+        ):
+            if evidence_id not in evidence_ids:
+                evidence_ids.append(evidence_id)
+            if not quote.strip():
+                continue
+            body = bodies.get(evidence_id)
+            if body is None:
+                continue
+            span = locate_quote(body, quote)
+            if span is None:
+                raise MalformedProviderOutputError(
+                    "GEMINI",
+                    f"comparison quoted text that is not in the evidence for "
+                    f"{comparison.application_number}",
+                )
+            spans.setdefault(evidence_id, span)
+
+    return GroundedComparison(
+        application_number=comparison.application_number,
+        matched_elements=matched,
+        evidence_ids=evidence_ids,
+        review_caveats=list(comparison.review_caveats),
+        has_claim_evidence=has_claim,
+        evidence_truncated=any(
+            evidence_id in truncated_evidence_ids for evidence_id in evidence_ids
+        ),
+        quote_spans=spans,
+        distinct_match_count=len(matched_indexes),
     )
 
 

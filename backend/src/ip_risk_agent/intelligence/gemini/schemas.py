@@ -70,6 +70,43 @@ class PatentComparison(_Output):
     )
 
 
+class MatchedElementV3(_Output):
+    """겹침 하나 — 요소 단위 대조(rag 전략)용.
+
+    v2 와 다른 점은 ``element_index`` 하나다. 기술 요소가 ``[E0]..[En]`` 으로
+    열거되어 오고, 모델은 **요소 번호 단위로** 겹침을 적는다. 여러 요소를 한
+    항목에 묶는 것이 스키마 수준에서 불가능해진다 — MEDIUM 47건 중 38건이
+    match_count==1 로 뭉친 원인(자유 대조의 서술 뭉침)에 대한 구조적 처방이다.
+    """
+
+    element_index: int = Field(description="기술 요소 목록의 [E숫자] 에서 그 숫자")
+    source_segment_id: str
+    patent_evidence_id: str
+    explanation: str
+    source_quote: str = Field(
+        default="",
+        description="문서 조각에서 그대로 옮긴 구절. 한 글자도 바꾸지 않는다",
+    )
+    patent_quote: str = Field(
+        default="",
+        description="특허 근거에서 그대로 옮긴 구절. 한 글자도 바꾸지 않는다",
+    )
+
+
+class PatentComparisonV3(_Output):
+    """특허 한 건과의 대조 결과 — 요소 단위(rag 전략)."""
+
+    application_number: str
+    matched_elements: list[MatchedElementV3] = Field(default_factory=list)
+    distinct_elements: list[str] = Field(
+        default_factory=list, description="문서에만 있는 구성"
+    )
+    review_caveats: list[str] = Field(
+        default_factory=list,
+        description="검토자가 알아야 할 한계. 등급을 바꾸지 않는다",
+    )
+
+
 class RiskExplanationOutput(_Output):
     """이미 만들어진 Risk 에 붙일 설명과 권고.
 
