@@ -337,7 +337,7 @@ def main() -> None:
     parser.add_argument("--fielded", action="store_true",
                         help="항목별검색(제목+초록) - eval-fielded/")
     parser.add_argument("--search-strategy",
-                        choices=("baseline", "expanded_v1", "fielded_v1"),
+                        choices=("baseline", "expanded_v1", "fielded_v1", "fielded_v2"),
                         default=None,
                         help="SearchPlan 프리셋으로 평가 (개별 플래그 대신) "
                              "- eval-plan-<이름>[-rag]/")

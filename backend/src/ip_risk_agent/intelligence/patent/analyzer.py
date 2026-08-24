@@ -34,9 +34,11 @@ from ..gemini.schemas import PatentComparison, PatentComparisonV3, TechnicalExtr
 from . import evidence_builder, grounding
 from .candidate_rank import (
     DEFAULT_CANDIDATE_CAP,
+    RANK_VERSION_BM25,
     RANK_VERSION_RRF,
     RankedCandidate,
     rank_candidates,
+    rank_candidates_bm25,
     rank_candidates_rrf,
 )
 from .claims import CLAIMS_VERSION, chunk_claims, parse_claims
@@ -264,7 +266,9 @@ class PatentAnalyzer:
         suffixes: list[str] = []
         if self._plan.version:
             suffixes.append(self._plan.version)
-            if self._plan.use_rrf:
+            if self._plan.use_bm25:
+                suffixes.append(RANK_VERSION_BM25)
+            elif self._plan.use_rrf:
                 suffixes.append(RANK_VERSION_RRF)
         if self._compare_strategy == COMPARE_RAG:
             suffixes.append(f"{CLAIMS_VERSION}+{INDEX_VERSION}")
@@ -326,18 +330,26 @@ class PatentAnalyzer:
             # 모든 검색어가 실패했다. 후보 0건이 아니라 모르는 상태다.
             return builder.failed(**versions)
 
-        if self._plan.use_rrf:
+        # 확장 변형을 원 질의 계열로 묶고(가짜 합의 방지), 원문 어휘와 겹치는
+        # 후보를 앞세운다 — 손실 회계가 가리킨 순위 신호들 (계획 문서 §7.2).
+        families = query_families(extraction.search_queries, queries)
+        source_tokens = frozenset(
+            tokenize("\n".join(s.text for s in artifact.text_segments))
+        )
+        if self._plan.use_bm25:
+            candidates = rank_candidates_bm25(
+                outcome.hits_by_query,
+                source_tokens=source_tokens,
+                cap=self._cap,
+                family_of=families,
+                exclude=self._exclude or None,
+            )
+        elif self._plan.use_rrf:
             candidates = rank_candidates_rrf(
                 outcome.hits_by_query,
                 cap=self._cap,
-                # 확장 변형을 원 질의 계열로 묶는다 — 가짜 합의 방지 (rank v2).
-                family_of=query_families(extraction.search_queries, queries),
-                # 원문 어휘와 제목이 겹치는 후보를 앞세운다 (rank v2).
-                source_tokens=frozenset(
-                    tokenize(
-                        "\n".join(s.text for s in artifact.text_segments)
-                    )
-                ),
+                family_of=families,
+                source_tokens=source_tokens,
                 exclude=self._exclude or None,
             )
         else:
@@ -632,7 +644,14 @@ class PatentAnalyzer:
         )
 
     def _rank_metadata(self, candidate: RankedCandidate) -> dict:
-        """RRF 전략일 때만 순위 근거를 후보 메타데이터에 남긴다. 베이스라인은 빈 값."""
+        """확장 순위 전략일 때만 순위 근거를 후보 메타데이터에 남긴다. 베이스라인은 빈 값."""
+        if self._plan.use_bm25:
+            return {
+                "rank_version": RANK_VERSION_BM25,
+                "bm25_score": f"{candidate.bm25_score:.9f}",
+                "rrf_score": f"{candidate.rrf_score:.9f}",
+                "ipc_consistent": candidate.ipc_consistent,
+            }
         if not self._plan.use_rrf:
             return {}
         return {

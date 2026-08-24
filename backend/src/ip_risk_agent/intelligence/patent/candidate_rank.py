@@ -36,12 +36,22 @@ RRF_K = 60
 #:      44위 → 4위로 올라 cap 안에 들었다.
 RANK_VERSION_RRF = "patent_rank_rrf_v2"
 
+#: BM25 어휘 재순위 (rank_candidates_bm25). v2 대비 진전의 근거 — 검색
+#: 응답에 초록이 실려 오는 것이 실측으로 확인되어, 상세조회 없이 후보
+#: 전문(제목+초록)과 원문의 어휘 유사도를 잴 수 있게 됐다. 고정 풀
+#: ablation(11출원·인용 25건)에서 recall@8 이 v2(제목유사도) 2건 → 4건.
+#: 위치·적중수 기반 신호(RRF)는 보조 배수로만 쓴다.
+RANK_VERSION_BM25 = "patent_rank_bm25_v1"
+
 #: 완화 검색으로 회수된 히트는 원 질의의 직접 결과보다 가볍게 센다.
 _RELAXED_WEIGHT = 0.7
 #: 초록 필드 적중은 제목 적중보다 가볍다 (제목 4위 vs 초록 9위 실측).
 _ABSTRACT_FIELD_WEIGHT = 0.7
 #: 제목-원문 유사도 배수의 기울기. score × (1 + λ·sim), sim ∈ [0,1].
 _TITLE_SIM_GAIN = 2.0
+#: BM25 표준 상수 (ephemeral_index 와 동일).
+_BM25_K1 = 1.2
+_BM25_B = 0.75
 
 _IPC_SUBCLASS = re.compile(r"([A-H]\d{2}[A-Z])")
 
@@ -72,6 +82,8 @@ class RankedCandidate:
     #: RRF 전략에서만 채워진다. 기본값이라 기존 생성부는 그대로다.
     rrf_score: float = 0.0
     ipc_consistent: bool = False
+    #: BM25 전략에서만 채워진다 — 원문↔(제목+초록) 어휘 유사도.
+    bm25_score: float = 0.0
 
     @property
     def query_hits(self) -> int:
@@ -234,6 +246,159 @@ def rank_candidates_rrf(
         merged.values(),
         key=lambda c: (
             -c.rrf_score,
+            -int(c.ipc_consistent),
+            -c.query_hits,
+            c.best_position,
+            c.application_number,
+        ),
+    )
+    return ordered[:cap]
+
+def rank_candidates_bm25(
+    hits_by_query: dict[str, list[PatentSearchHit]],
+    *,
+    source_tokens: frozenset[str],
+    cap: int = DEFAULT_CANDIDATE_CAP,
+    k: int = RRF_K,
+    ipc_signal: bool = True,
+    family_of: dict[str, str] | None = None,
+    exclude: frozenset[str] | None = None,
+) -> list[RankedCandidate]:
+    """어휘 재순위 — 원문↔후보(제목+초록) BM25 가 1차 점수다.
+
+    골든셋 손실 회계가 근거다: 놓친 인용의 지배적 사망 지점은 "풀에는
+    있는데 순위에서 밀림"이었고, 위치·적중수 기반 신호(RRF)로는 광역
+    질의의 21~60위 구간에서 회수한 후보를 구별할 수 없다. 후보의 제목·초록은
+    검색 응답에 이미 실려 오므로(추가 호출 0회), 원문 어휘와의 BM25 유사도로
+    풀 전체를 재순위한다. IDF 는 이 풀을 코퍼스로 계산한다 — 풀 안에서
+    흔한 말은 가볍고 원문과만 공유하는 말은 무겁다.
+
+    검색 합의(계열별 최대 RRF, v2 가중치)는 보조 배수 ``×(1 + rrf/rrf_max)``
+    로만 쓴다 — 고정 풀 ablation 에서 이 결합이 BM25 단독과 같은 recall 을
+    내면서, 초록이 비어 BM25 가 0 인 후보의 순서를 검색 신호로 지탱한다.
+    BM25 가 전부 0 이면(원문 토큰 공유 전무) RRF 점수로 정렬이 넘어간다.
+
+    동점 사슬(bm25 → ipc → 적중 수 → 위치 → 출원번호)까지 순수 산술이라
+    같은 입력이면 같은 순서다.
+    """
+    merged: dict[str, RankedCandidate] = {}
+    family_scores: dict[str, dict[str, float]] = {}
+    abstracts: dict[str, str] = {}
+
+    for query in sorted(hits_by_query):
+        family = (family_of or {}).get(query, query)
+        for position, hit in enumerate(hits_by_query[query]):
+            if exclude and hit.application_number in exclude:
+                continue
+            contribution = _hit_weight(hit) / (k + position + 1)
+            per_family = family_scores.setdefault(hit.application_number, {})
+            per_family[family] = max(per_family.get(family, 0.0), contribution)
+            if hit.abstract and not abstracts.get(hit.application_number):
+                abstracts[hit.application_number] = hit.abstract
+
+            existing = merged.get(hit.application_number)
+            if existing is None:
+                merged[hit.application_number] = RankedCandidate(
+                    application_number=hit.application_number,
+                    title=hit.title,
+                    matched_queries=[query],
+                    best_position=position,
+                    metadata=dict(hit.metadata),
+                )
+                continue
+            if query not in existing.matched_queries:
+                existing.matched_queries.append(query)
+            existing.best_position = min(existing.best_position, position)
+            if not existing.title and hit.title:
+                existing.title = hit.title
+
+    if not merged:
+        return []
+
+    # ── BM25: 문서 = 후보의 제목+초록, 질의 = 원문 토큰, 코퍼스 = 이 풀
+    frequencies: dict[str, Counter[str]] = {}
+    document_frequency: Counter[str] = Counter()
+    for number, candidate in merged.items():
+        tokens = Counter(
+            tokenize(f"{candidate.title} {abstracts.get(number, '')}")
+        )
+        frequencies[number] = tokens
+        for token in tokens:
+            document_frequency[token] += 1
+    corpus_size = len(frequencies)
+    average_length = (
+        sum(sum(tf.values()) for tf in frequencies.values()) / corpus_size
+    )
+
+    def bm25(number: str) -> float:
+        term_freq = frequencies[number]
+        length = sum(term_freq.values()) or 1
+        score = 0.0
+        for token in source_tokens:
+            occurrences = term_freq.get(token)
+            if not occurrences:
+                continue
+            idf = math.log(
+                1.0
+                + (corpus_size - document_frequency[token] + 0.5)
+                / (document_frequency[token] + 0.5)
+            )
+            score += (
+                idf
+                * occurrences
+                * (_BM25_K1 + 1.0)
+                / (
+                    occurrences
+                    + _BM25_K1
+                    * (1.0 - _BM25_B + _BM25_B * length / average_length)
+                )
+            )
+        return score
+
+    rrf_scores = {
+        number: sum(per_family.values())
+        for number, per_family in family_scores.items()
+    }
+    rrf_max = max(rrf_scores.values())
+    bm25_scores = {number: bm25(number) for number in merged}
+    bm25_max = max(bm25_scores.values())
+
+    for number, candidate in merged.items():
+        candidate.bm25_score = round(bm25_scores[number], 9)
+        candidate.rrf_score = round(rrf_scores[number], 9)
+
+    if ipc_signal:
+        profile: Counter[str] = Counter()
+        for query in sorted(hits_by_query):
+            for hit in hits_by_query[query]:
+                if exclude and hit.application_number in exclude:
+                    continue
+                subclass = _ipc_subclass(hit.metadata.get("ipc", ""))
+                if subclass:
+                    profile[subclass] += 1
+        dominant = {
+            subclass
+            for subclass, count in sorted(
+                profile.items(), key=lambda item: (-item[1], item[0])
+            )[:3]
+            if count >= 2
+        }
+        for candidate in merged.values():
+            candidate.ipc_consistent = (
+                _ipc_subclass(candidate.metadata.get("ipc", "")) in dominant
+            )
+
+    def final(number: str) -> float:
+        if bm25_max == 0.0:
+            return round(rrf_scores[number], 9)
+        return round(
+            bm25_scores[number] * (1.0 + rrf_scores[number] / rrf_max), 9
+        )
+
+    ordered = sorted(
+        merged.values(),
+        key=lambda c: (
+            -final(c.application_number),
             -int(c.ipc_consistent),
             -c.query_hits,
             c.best_position,

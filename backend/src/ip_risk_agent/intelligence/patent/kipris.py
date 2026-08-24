@@ -83,12 +83,19 @@ def normalize_application_number(raw: str) -> str:
 
 @dataclass(frozen=True)
 class PatentSearchHit:
-    """검색 결과 한 건. 초록은 아직 없다."""
+    """검색 결과 한 건.
+
+    초록은 검색 응답(astrtCont)에 이미 실려 온다 — 실측(2026-08-25)으로
+    확인했다. 상세조회 없이도 후보 어휘 재순위(BM25)가 가능한 근거다.
+    metadata(dict[str,str], 보존 한계 256자/값)에 넣지 않고 별도 필드로
+    둔다 — 초록은 수백 자를 넘는다.
+    """
 
     application_number: str
     title: str
     query: str
     metadata: dict[str, str] = field(default_factory=dict)
+    abstract: str = ""
 
 
 @dataclass(frozen=True)
@@ -298,9 +305,14 @@ class KiprisClient:
                 metadata["search_total"] = total
             if extra:
                 metadata.update(extra)
-            # 골든셋의 인용 번호가 공개/공고번호 표기로 올 수 있다. 매칭에
+            # 골든셋의 인용 번호가 공개·공고·등록번호 표기로 올 수 있다. 매칭에
             # 필요한 번호 체계를 있을 때만 함께 수집한다 (계획 문서 §4).
-            for tag in ("openNumber", "publicationNumber", "registerStatus"):
+            for tag in (
+                "openNumber",
+                "publicationNumber",
+                "registerNumber",
+                "registerStatus",
+            ):
                 value = _text(element, tag)
                 if value:
                     metadata[tag] = value
@@ -310,6 +322,7 @@ class KiprisClient:
                     title=_text(element, "inventionTitle"),
                     query=query,
                     metadata=metadata,
+                    abstract=_text(element, "astrtCont"),
                 )
             )
         return hits

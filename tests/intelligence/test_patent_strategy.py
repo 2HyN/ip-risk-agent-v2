@@ -22,6 +22,7 @@ from ip_risk_agent.intelligence.gemini.schemas import TechnicalExtraction
 from ip_risk_agent.intelligence.patent.analyzer import PatentAnalyzer
 from ip_risk_agent.intelligence.patent.candidate_rank import (
     rank_candidates,
+    rank_candidates_bm25,
     rank_candidates_rrf,
 )
 from ip_risk_agent.intelligence.patent.ephemeral_index import tokenize
@@ -37,6 +38,7 @@ from ip_risk_agent.intelligence.patent.search_strategy import (
     BASELINE_PLAN,
     EXPANDED_V1_PLAN,
     FIELDED_V1_PLAN,
+    FIELDED_V2_PLAN,
     plan_for,
     require_compare_strategy,
 )
@@ -477,3 +479,130 @@ def test_query_families_attribute_variants_to_first_superset():
     assert families["셔터 연동"] == "셔터 경광등 연동"
     assert families["지하철 셔터"] == "지하철 셔터 제어"
     assert families["완전 다른 질의"] == "완전 다른 질의"
+
+
+# ------------------------------------------------------------------ bm25 rank
+
+
+def test_fielded_v2_plan_constants():
+    plan = plan_for("fielded_v2")
+    assert plan is FIELDED_V2_PLAN
+    assert plan.rows == 60  # pageNo/numOfRows 실측으로 열린 깊이
+    assert plan.use_bm25 is True
+    assert plan.use_rrf is False
+    assert plan.search_fields == ("inventionTitle", "astrtCont")
+    assert plan.version == "search_fielded_v2"
+    # 기존 계획들은 BM25 를 켜지 않는다 — 동작 보존.
+    assert BASELINE_PLAN.use_bm25 is False
+    assert EXPANDED_V1_PLAN.use_bm25 is False
+    assert FIELDED_V1_PLAN.use_bm25 is False
+
+
+def _hit_with_abstract(number: str, query: str, title: str, abstract: str):
+    return PatentSearchHit(
+        application_number=number, title=title, query=query, abstract=abstract
+    )
+
+
+def test_bm25_prefers_vocabulary_over_position():
+    """원문 어휘를 공유하는 후보가 검색 위치가 낮아도 앞선다."""
+    src = frozenset(tokenize("지하철 역사의 방화셔터를 연동 제어하는 장치"))
+    far = _hit_with_abstract("200", "질의", "영화 자막 시스템", "자막을 출력한다")
+    close = _hit_with_abstract(
+        "100", "질의", "방화셔터 연동제어기", "방화셔터를 연동하여 제어한다"
+    )
+    ordered = rank_candidates_bm25(
+        {"질의": [far, close]}, source_tokens=src, ipc_signal=False
+    )
+    assert [c.application_number for c in ordered] == ["100", "200"]
+    assert ordered[0].bm25_score > 0.0
+
+
+def test_bm25_falls_back_to_rrf_when_no_vocabulary_overlap():
+    """원문 토큰 공유가 전무하면 검색 신호(RRF) 순서로 넘어간다."""
+    src = frozenset(tokenize("완전히 무관한 어휘"))
+    first = _hit_with_abstract("100", "질의", "제목 하나", "본문 하나")
+    second = _hit_with_abstract("200", "질의", "제목 둘", "본문 둘")
+    ordered = rank_candidates_bm25(
+        {"질의": [first, second]}, source_tokens=src, ipc_signal=False
+    )
+    # 위치 순 (RRF) — 100 이 앞이다.
+    assert [c.application_number for c in ordered] == ["100", "200"]
+
+
+def test_bm25_is_deterministic_and_respects_exclude():
+    src = frozenset(tokenize("방화셔터 연동 제어"))
+    hits = {
+        "질의 가": [
+            _hit_with_abstract("300", "질의 가", "방화셔터 제어", "셔터를 제어"),
+            _hit_with_abstract("100", "질의 가", "방화셔터 연동", "연동 제어"),
+        ],
+        "질의 나": [_hit_with_abstract("200", "질의 나", "무관한 발명", "무관")],
+    }
+    shuffled = {k: hits[k] for k in sorted(hits, reverse=True)}
+    first = [
+        c.application_number
+        for c in rank_candidates_bm25(hits, source_tokens=src, ipc_signal=False)
+    ]
+    second = [
+        c.application_number
+        for c in rank_candidates_bm25(shuffled, source_tokens=src, ipc_signal=False)
+    ]
+    assert first == second
+    without_top = rank_candidates_bm25(
+        hits,
+        source_tokens=src,
+        exclude=frozenset({first[0]}),
+        ipc_signal=False,
+    )
+    assert first[0] not in [c.application_number for c in without_top]
+
+
+def test_search_hits_carry_abstract_from_response():
+    client = KiprisClient(
+        "test-key", client=object(), search_fields=("inventionTitle",)
+    )
+
+    async def fake_get(path: str, params: dict):
+        return fromstring(
+            "<response><header><resultCode>00</resultCode></header><body>"
+            "<totalCount>7</totalCount><items><item>"
+            "<applicationNumber>1020200000001</applicationNumber>"
+            "<inventionTitle>방화셔터 연동제어기</inventionTitle>"
+            "<astrtCont>방화셔터를 연동하여 제어하는 장치이다.</astrtCont>"
+            "</item></items></body></response>"
+        )
+
+    client._get = fake_get
+    hits = run(client.search("셔터 연동", rows=20))
+    assert hits[0].abstract == "방화셔터를 연동하여 제어하는 장치이다."
+    assert hits[0].metadata["search_total"] == "7"
+
+
+def test_fielded_v2_version_string_names_the_rank_machine():
+    model = ScriptedModelClient(
+        [
+            TechnicalExtraction(
+                is_technical=True,
+                technical_elements=["방화셔터 연동 제어"],
+                search_queries=["방화셔터 연동 제어"],
+                source_segment_ids=["seg-1"],
+            )
+        ]
+    )
+    analyzer = PatentAnalyzer(
+        SpyProvider(),
+        model,
+        search_plan=FIELDED_V2_PLAN,
+        compare_strategy="rag",
+    )
+    artifact = make_artifact(
+        "방화셔터를 연동 제어하는 설계.",
+        logical_path="/Google Drive user@example.com/docs/plan.md",
+        kind=ArtifactKind.DOCUMENT_TEXT,
+        analyzers=[AnalysisType.PATENT],
+    )
+    result = run(analyzer.analyze(artifact))
+    assert result.status is AnalysisStatus.SUCCEEDED
+    assert "search_fielded_v2" in result.versions.prompt_version
+    assert "patent_rank_bm25_v1" in result.versions.prompt_version

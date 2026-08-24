@@ -19,11 +19,12 @@ from dataclasses import dataclass
 BASELINE = "baseline"
 EXPANDED_V1 = "expanded_v1"
 FIELDED_V1 = "fielded_v1"
+FIELDED_V2 = "fielded_v2"
 
 COMPARE_BASELINE = "baseline"
 COMPARE_RAG = "rag"
 
-_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1)
+_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1, FIELDED_V2)
 _COMPARE_STRATEGIES = (COMPARE_BASELINE, COMPARE_RAG)
 
 
@@ -53,6 +54,9 @@ class SearchPlan:
     #: AND 검색의 어휘 민감성을 깎는다 — 골든셋 실측에서 정확 질의가 인용 문헌을
     #: 못 데려온 원인 후보였다.
     expand_queries: bool = False
+    #: 순위를 BM25 어휘 재순위로 한다 (candidate_rank.rank_candidates_bm25).
+    #: use_rrf 보다 우선한다. 근거는 candidate_rank.RANK_VERSION_BM25 주석.
+    use_bm25: bool = False
 
 
 #: 현행 그대로. 질의 5 × rows 5, 적중수·위치 정렬, cap 6.
@@ -101,7 +105,31 @@ FIELDED_V1_PLAN = SearchPlan(
     expand_queries=True,
 )
 
-_PLANS = {plan.name: plan for plan in (BASELINE_PLAN, EXPANDED_V1_PLAN, FIELDED_V1_PLAN)}
+#: 손실 회계(계획 문서 §7.2)의 처방 두 가지를 fielded_v1 위에 얹는다.
+#:
+#:   * rows 60 — getAdvancedSearch 는 pageNo/numOfRows 로 깊이가 열린다
+#:     (실측). 인용 문헌들이 21~60위 구간에 실재해, 풀 천장이 4/25 → 10/25.
+#:   * BM25 재순위 — 커진 풀의 소음은 위치가 아니라 어휘로 거른다. 고정 풀
+#:     ablation 에서 recall@8 1/25(현행) → 4/25.
+FIELDED_V2_PLAN = SearchPlan(
+    name=FIELDED_V2,
+    version="search_fielded_v2",
+    extract_prompt="patent_extract_v3",
+    max_queries=8,
+    rows=60,
+    relax_zero_hits=False,
+    use_rrf=False,
+    compare_cap=8,
+    stage_deadline_seconds=90.0,
+    search_fields=("inventionTitle", "astrtCont"),
+    expand_queries=True,
+    use_bm25=True,
+)
+
+_PLANS = {
+    plan.name: plan
+    for plan in (BASELINE_PLAN, EXPANDED_V1_PLAN, FIELDED_V1_PLAN, FIELDED_V2_PLAN)
+}
 
 
 def plan_for(name: str) -> SearchPlan:
@@ -131,6 +159,8 @@ __all__ = [
     "EXPANDED_V1_PLAN",
     "FIELDED_V1",
     "FIELDED_V1_PLAN",
+    "FIELDED_V2",
+    "FIELDED_V2_PLAN",
     "SearchPlan",
     "plan_for",
     "require_compare_strategy",

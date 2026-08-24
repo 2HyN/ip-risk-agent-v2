@@ -58,6 +58,8 @@ class FirestorePatentResponseCache:
                 metadata={
                     str(k): str(v) for k, v in (item.get("metadata") or {}).items()
                 },
+                # 옛 캐시 항목에는 없다 — 빈 문자열이면 BM25 가 제목만 쓴다.
+                abstract=str(item.get("abstract", "")),
             )
             for item in data.get("hits") or []
         ]
@@ -74,6 +76,7 @@ class FirestorePatentResponseCache:
                         "title": hit.title,
                         "query": hit.query,
                         "metadata": dict(hit.metadata),
+                        "abstract": hit.abstract,
                     }
                     for hit in value.hits
                 ],
