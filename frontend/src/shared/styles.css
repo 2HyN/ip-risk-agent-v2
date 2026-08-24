@@ -15,6 +15,15 @@
   --soft: #f7f9fb;
   --danger: #b83838;
   --warning: #a56414;
+  /* Risk 등급 색. v1 데스크톱 앱의 등급 색 체계를 그대로 잇는다 — 같은 제품을
+     쓰던 사람이 "색만 보고 급한 것을 찾던" 습관을 잃지 않는다. 주황만 v1
+     (#FF8A00) 보다 어둡게 잡았다. 원값은 흰 배경 위 본문 글자로는 읽히지 않는다. */
+  --risk-high: #e0342c;
+  --risk-indeterminate: #2667d8;
+  --risk-medium: #c2670b;
+  --risk-low: #10855b;
+  /* 상쇄 요인(면제·허용). 위험이 아니라 '빠져나갈 구멍' 이라 등급 색과 분리한다. */
+  --risk-relief: #10855b;
 }
 * {
   box-sizing: border-box;
@@ -202,6 +211,38 @@ textarea:focus-visible {
   background: #e7efff;
   color: #2858a6;
 }
+/* Risk 등급 배지. 등급은 심각도 순서(빨강 > 주황 > 초록)가 있고 INDETERMINATE 는
+   순서 밖(판정 못 냄)이라 파랑으로 뺀다 — 색 자체가 순서를 말하게 둔다.
+   글자만으로는 훑을 때 안 걸려서 앞에 같은 색 점을 붙인다. */
+.badge--priority {
+  gap: 5px;
+  /* 긴 라벨(INDETERMINATE)이 칸을 넘지 않도록 자간·좌우 여백을 조금 줄인다. */
+  padding: 4px 9px;
+  letter-spacing: 0.02em;
+}
+.badge__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.badge--priority-high {
+  background: #fdeceb;
+  color: var(--risk-high);
+}
+.badge--priority-indeterminate {
+  background: #e7efff;
+  color: var(--risk-indeterminate);
+}
+.badge--priority-medium {
+  background: #fdf1e2;
+  color: var(--risk-medium);
+}
+.badge--priority-low {
+  background: #e6f6ee;
+  color: var(--risk-low);
+}
 .field {
   display: grid;
   gap: 7px;
@@ -366,11 +407,39 @@ textarea:focus-visible {
 /* 분석 실패 안내. 한도 소진처럼 사용자가 고칠 수 없는 것은 경고 톤으로 둔다 —
    위험을 알리는 것이 아니라 기다리면 된다는 뜻이기 때문이다. */
 .evidence-quote {
-  /* 겹친다고 판정된 구간. 발췌 전체가 아니라 이 부분이 근거다. */
-  background: #fff3bf;
-  color: inherit;
-  padding: 1px 2px;
-  border-radius: 3px;
+  /* 겹친다고 판정된 구간. 발췌 전체가 아니라 이 부분이 근거다.
+     v1 처럼 굵게 + 등급 색으로 칠한다. 노란 형광펜은 등급을 말해 주지 못해서
+     "겹치긴 하는데 급한가" 를 다시 위쪽 배지에서 찾아 읽어야 했다. */
+  background: none;
+  padding: 0;
+  font-weight: 700;
+  color: var(--ink);
+}
+.evidence-quote--high,
+.risk-mark--high {
+  color: var(--risk-high);
+}
+.evidence-quote--indeterminate,
+.risk-mark--indeterminate {
+  color: var(--risk-indeterminate);
+}
+.evidence-quote--medium,
+.risk-mark--medium {
+  color: var(--risk-medium);
+}
+.evidence-quote--low,
+.risk-mark--low {
+  color: var(--risk-low);
+}
+/* 라이선스 의무를 만드는 구절. 등급 색 그대로 칠해 위험의 출처를 문장에서 짚는다. */
+.risk-mark {
+  font-weight: 700;
+  color: var(--ink);
+}
+/* 상쇄 요인은 초록 — 같은 색으로 두면 '빠져나갈 구멍'이 위험으로 읽힌다. */
+.risk-mark--relief {
+  font-weight: 700;
+  color: var(--risk-relief);
 }
 .analysis-notice {
   display: block;
@@ -1450,7 +1519,14 @@ button.explorer-row__main:hover .explorer-row__name {
 .review-table th:nth-child(1) {
   width: auto;
 }
-.review-table th:nth-child(2),
+/* Priority 는 가장 긴 라벨이 INDETERMINATE 다. 110px 은 그것을 잘라 먹었다 —
+   td 가 overflow:hidden 이라 잘린 티도 안 나고 그냥 글자가 사라졌다.
+   Risk 칸(auto)에서 폭을 가져오므로 Priority 열 전체가 왼쪽으로 당겨진다. */
+.review-table th:nth-child(2) {
+  /* INDETERMINATE(13자) + 색 점 + 좌우 여백 + 칸 안쪽 여백. 대체 글꼴(Segoe UI)이
+     Inter 보다 넓어서 딱 맞게 잡으면 그 환경에서 다시 잘린다 — 여유를 둔다. */
+  width: 172px;
+}
 .review-table th:nth-child(3) {
   width: 110px;
 }

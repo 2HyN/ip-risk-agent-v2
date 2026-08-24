@@ -33,6 +33,53 @@ def render_segments(artifact: AnalysisArtifact) -> str:
     )
 
 
+def expand_queries(queries: list[str], *, cap: int = 15) -> list[str]:
+    """3단어 질의를 2단어 부분조합으로도 검색한다.
+
+    KIPRIS 검색은 넣은 단어를 **모두** 포함한 문서만 찾는다. 그래서 3단어
+    질의는 표현이 조금만 달라도 통째로 빈다 — 골든셋 실측에서 "셔터 CCTV
+    연동" 같은 정확한 질의가 심사관 인용 문헌을 못 데려온 원인 후보다.
+    원 질의를 앞에 두고(정밀한 것 우선), 그 2단어 조합을 뒤에 붙인다.
+
+    결정론적이다 — 같은 질의 목록이면 같은 확장이 나온다. 검색 호출 수가
+    cap 까지 늘어나므로 기본 경로에서는 쓰지 않고 옵션으로 켠다.
+
+    cap 은 2라운드(질의당 조합 둘)가 들어가는 크기여야 한다. 10 이었을 때
+    5질의 × 1라운드에서 잘려 정답 질의("셔터 제어"·"셔터 연동")가 목록에
+    못 들어간 것을 골든셋 역방향 테스트로 확인했다.
+    """
+    expanded: list[str] = []
+
+    def _add(candidate: str) -> bool:
+        if candidate not in expanded and len(expanded) < cap:
+            expanded.append(candidate)
+        return len(expanded) < cap
+
+    for query in queries:
+        _add(query)
+    # 질의별로 돌아가며 하나씩 넣는다 — 첫 질의의 조합이 cap 을 독식해
+    # 뒤 질의("셔터 CCTV 연동")의 조합이 아예 못 들어가는 것을 막는다.
+    pools = []
+    for query in queries:
+        words = query.split()
+        if len(words) < 3:
+            continue
+        pools.append(
+            [
+                f"{words[i]} {words[j]}"
+                for i in range(len(words))
+                for j in range(i + 1, len(words))
+            ]
+        )
+    position = 0
+    while any(position < len(pool) for pool in pools):
+        for pool in pools:
+            if position < len(pool) and not _add(pool[position]):
+                return expanded
+        position += 1
+    return expanded
+
+
 def clamp_queries(queries: list[str], *, max_queries: int = MAX_QUERIES) -> list[str]:
     """검색어를 2~3 단어로 자른다.
 

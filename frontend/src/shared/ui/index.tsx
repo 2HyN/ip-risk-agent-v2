@@ -38,6 +38,32 @@ export function Badge({
   return <span className={`badge badge--${tone}`}>{children}</span>;
 }
 
+const PRIORITIES = ["HIGH", "INDETERMINATE", "MEDIUM", "LOW"] as const;
+
+/**
+ * Risk 등급 배지.
+ *
+ * 등급은 다른 상태값과 성격이 다르다 — 훑어보는 사람이 "먼저 볼 것" 을 고르는
+ * 유일한 단서라서, 일반 Badge 의 5색 톤(neutral·success·…)에 끼워 맞추면
+ * MEDIUM 과 LOW 가 똑같은 회색이 되어 순서가 사라진다. 등급만 별도 색을 준다:
+ * HIGH 빨강 · INDETERMINATE 파랑 · MEDIUM 주황 · LOW 초록.
+ *
+ * 색 점을 앞에 두는 이유는 글자를 읽지 않고도 열을 훑을 수 있어야 하기 때문이다.
+ * 모르는 값이 오면 색을 지어내지 않고 중립 배지로 둔다.
+ */
+export function PriorityBadge({ value }: { value: string }) {
+  const known = (PRIORITIES as readonly string[]).includes(value);
+  if (!known) return <Badge>{value}</Badge>;
+  return (
+    <span
+      className={`badge badge--priority badge--priority-${value.toLowerCase()}`}
+    >
+      <span className="badge__dot" aria-hidden="true" />
+      {value}
+    </span>
+  );
+}
+
 export function Field({
   label,
   hint,
@@ -148,18 +174,14 @@ export function toneFor(
     return "success";
   if (["FAILED", "SOURCE_OFFLINE", "DISABLED"].includes(value)) return "danger";
   if (
-    [
-      "NEW",
-      "UNREAD",
-      "REAUTH_REQUIRED",
-      "MANAGER_ACTION_REQUIRED",
-      "HIGH",
-    ].includes(value)
+    ["NEW", "UNREAD", "REAUTH_REQUIRED", "MANAGER_ACTION_REQUIRED"].includes(
+      value,
+    )
   )
     return "warning";
-  // 판정을 못 내린 것은 심각도가 아니다. HIGH 와 같은 색으로 두면 "심각하다" 로
-  // 읽히고, MEDIUM 과 같게 두면 지금처럼 묻힌다. 눈에 띄되 다른 색이어야 한다.
-  if (value === "INDETERMINATE") return "info";
+  // Risk 등급(HIGH·INDETERMINATE·MEDIUM·LOW)은 여기서 다루지 않는다 —
+  // PriorityBadge 가 전담한다. 두 곳에서 색을 정하면 같은 등급이 화면마다
+  // 다른 색으로 나온다.
   if (["PATENT", "LICENSE", "MONITORING"].includes(value)) return "info";
   return "neutral";
 }
