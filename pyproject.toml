@@ -17,7 +17,7 @@ dependencies = [
   "itsdangerous==2.2.0",
   "google-api-python-client==2.198.0",
   "google-auth[requests]==2.56.3",  # [requests] extra 는 의도적이다. Drive client(connectors/google_drive/client.py)와 RAG client(intelligence/rag/engine.py)가 google.auth.transport.requests.Request 를 직접 import 한다.
-  "PyJWT[crypto]==2.10.1",
+  "PyJWT[crypto]==2.13.0",
   "defusedxml==0.7.1",
   "PyYAML==6.0.3",
   "google-genai==2.17.0",

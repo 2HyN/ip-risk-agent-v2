@@ -1,20 +1,93 @@
 # CI — main 대상 PR 에서 실행되는 검증 파이프라인. 배포하지 않는다.
 #
-# 런타임 이미지와 같은 python:3.14.7-slim 위에서 같은 lock 으로 설치하고
-# pytest(-m "not live")를 돈다. 외부 API 실호출(live)은 자격증명과 한도
-# (KIPRIS 월 1,000회) 때문에 CI 에서 돌리지 않는다.
+# 세 트랙이 병렬로 돈다 (waitFor: ['-']).
+#
+#   * pytest — 런타임 이미지와 같은 python:3.14.7-slim 위에서 같은 lock 으로
+#     설치하고 pytest(-m "not live") + 계약(파이썬) 시험 + 계약 생성물
+#     드리프트 검사. 외부 API 실호출(live)은 자격증명 때문에 CI 에서 안 돈다.
+#   * pip-audit — 런타임 lock 의 알려진 취약점. 런타임에 실리는 것이므로
+#     발견 시 실패(차단)한다.
+#   * node — 프런트·데스크톱·계약 TS: typecheck, verify:resolution,
+#     frontend vitest, desktop node --test, pnpm audit.
+#     이전에는 이 트랙이 CI 에 없어 타입 오류가 main 머지 후(CD 의 docker
+#     build)에야 터졌다.
+#
+# 계약 시험 중 test_typescript_workspace_package_resolution 은 pnpm 이 필요해
+# 파이썬 트랙에서 deselect 한다 — 같은 검증을 node 트랙의 verify:resolution 이
+# 수행한다.
+#
+# pnpm audit 은 두 단계다: --prod(런타임 의존성)는 차단, 전체(devDependencies
+# 포함)는 보고 전용. 실측(2026-08-24) — --prod 는 clean, 전체는 electron-builder
+# 체인(app-builder-lib <26.15.0, builder-util-runtime <9.7.0)의 HIGH 2건.
+# 포장 도구 승급은 데스크톱 재검증이 필요한 별도 결정이라 게이트로 막지 않고
+# 로그에 보이게만 한다.
 serviceAccount: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
-timeout: 1800s
+timeout: 2400s
 steps:
   - id: pytest
     name: python:3.14.7-slim-bookworm
+    waitFor: ['-']
     entrypoint: bash
     args:
       - -ceu
       - |
         pip install -q -r requirements.lock
         pip install -q --no-deps -e .
-        python -m pytest tests -m "not live" -q
+        python -m pytest tests shared/contracts/tests -m "not live" -q \
+          --deselect "shared/contracts/tests/test_contracts.py::test_typescript_workspace_package_resolution"
+        # 계약 생성물 드리프트 — 커밋된 스키마·TS 선언이 재생성 결과와 같은가.
+        # Cloud Build 소스에는 .git 이 없어 git diff 를 못 쓰므로 지문으로 비교한다.
+        python - <<'PY'
+        import hashlib, pathlib, subprocess, sys
+
+        targets = sorted(
+            [
+                *pathlib.Path("shared/contracts/schemas").glob("*.json"),
+                pathlib.Path("shared/contracts/typescript/generated/contracts.ts"),
+            ]
+        )
+
+        def digest() -> str:
+            h = hashlib.sha256()
+            for path in targets:
+                h.update(path.name.encode())
+                h.update(path.read_bytes())
+            return h.hexdigest()
+
+        before = digest()
+        subprocess.run([sys.executable, "scripts/generate_contracts.py"], check=True)
+        if digest() != before:
+            print("contracts drift: 생성물이 낡았다 — pnpm run generate 후 커밋하라", file=sys.stderr)
+            sys.exit(1)
+        print("contracts generation clean")
+        PY
+  - id: pip-audit
+    name: python:3.14.7-slim-bookworm
+    waitFor: ['-']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        pip install -q pip-audit
+        pip-audit -r requirements.lock --progress-spinner off
+  - id: node
+    name: node:24.19.0-bookworm-slim
+    waitFor: ['-']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        corepack enable
+        corepack prepare pnpm@11.19.0 --activate
+        pnpm install --frozen-lockfile
+        pnpm --filter @iprisk/contracts build
+        pnpm run typecheck
+        pnpm run verify:resolution
+        pnpm --filter @iprisk/frontend test
+        pnpm --filter @iprisk/desktop build
+        pnpm --filter @iprisk/desktop test
+        pnpm audit --prod
+        pnpm audit || echo "full audit findings above are report-only (devDependencies)"
 options:
   logging: CLOUD_LOGGING_ONLY
   machineType: E2_HIGHCPU_8
