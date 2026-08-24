@@ -33,7 +33,7 @@ from ..gemini.client import PromptLibrary, StructuredModelClient
 from ..gemini.schemas import PatentComparison, TechnicalExtraction
 from . import evidence_builder, grounding
 from .candidate_rank import DEFAULT_CANDIDATE_CAP, RankedCandidate, rank_candidates
-from .extraction import TechnicalExtractor, render_segments
+from .extraction import TechnicalExtractor, expand_queries, render_segments
 from .cache import CachedExtraction, EXTRACTION_TTL, extraction_cache_key
 from .kipris import PatentDocument, PatentSearchProvider
 from .score import evidence_strength
@@ -125,6 +125,30 @@ _DOCUMENT_KINDS = frozenset(
 )
 
 
+def _digits_only(value: str | None) -> str | None:
+    if value is None:
+        return None
+    digits = "".join(ch for ch in value if ch.isdigit())
+    return digits[:8] or None
+
+
+def _drop_future_hits(hits_by_query, cutoff: str) -> None:
+    """컷오프(YYYYMMDD) 이후 출원·공개된 검색 결과를 제거한다.
+
+    날짜를 모르는 히트는 남긴다 — 필터의 목적은 확실한 미래 문서를 치우는
+    것이지, 정보 부족을 탈락 사유로 만드는 것이 아니다.
+    """
+    for query, hits in hits_by_query.items():
+        kept = []
+        for hit in hits:
+            raw = hit.metadata.get("applicationDate") or hit.metadata.get("openDate")
+            date = _digits_only(raw)
+            if date and len(date) == 8 and date > cutoff:
+                continue
+            kept.append(hit)
+        hits_by_query[query] = kept
+
+
 class PatentAnalyzer:
     """``AnalysisType.PATENT`` 담당."""
 
@@ -139,12 +163,28 @@ class PatentAnalyzer:
         candidate_cap: int = DEFAULT_CANDIDATE_CAP,
         response_cache=None,
         previously_matched=None,
+        prior_art_cutoff: str | None = None,
+        search_rows: int = 5,
+        query_expansion: bool = False,
     ) -> None:
         self._search = search_provider
         self._client = model_client
         self._prompts = prompts or PromptLibrary()
         self._extractor = TechnicalExtractor(model_client, self._prompts)
         self._cap = candidate_cap
+        # 선행기술 컷오프 (YYYYMMDD). 이 날짜 이후에 출원된 후보는 정의상
+        # 선행기술이 아니므로 순위 전에 버린다 — cap 6 을 미래 문서가 낭비하는
+        # 것을 막는다. 골든셋 평가 실측: 2020년 출원의 후보에 2023·2025년
+        # 특허가 들어와 recall 을 깎았다. 운영 기본값 None(끔) — 기획서 입력은
+        # "지금" 이 기준이라 모든 공보가 과거이기 때문. 평가에서만 켠다.
+        self._prior_art_cutoff = _digits_only(prior_art_cutoff)
+        # 검색어당 가져올 검색 결과 수. 호출 수는 그대로이고(질의당 1회) 순위에
+        # 넣을 풀만 커진다. 골든셋 실측에서 상위 5건이 전부 주변부였다.
+        self._search_rows = search_rows
+        # 3단어 질의를 2단어 부분조합으로도 검색 (extraction.expand_queries).
+        # AND 전문검색의 어휘 민감성을 깎는다. 검색 호출이 최대 10회로 늘므로
+        # 기본은 끔 — 골든셋 평가로 효과를 확인한 뒤에 기본값을 논한다.
+        self._query_expansion = query_expansion
         # 같은 문서면 같은 검색어를 쓴다. 없으면 매번 다시 뽑는다.
         self._cache = response_cache
         # 이 artifact 에서 이미 매칭된 출원번호. 검색과 무관하게 다시 대조한다.
@@ -177,12 +217,21 @@ class PatentAnalyzer:
         if not extraction.is_technical:
             # 특허 검토 대상이 아니다. 실패가 아니라 해당 없음이다.
             return builder.skipped(**versions)
-        if not extraction.search_queries:
+        queries = (
+            expand_queries(extraction.search_queries)
+            if self._query_expansion
+            else extraction.search_queries
+        )
+        if not queries:
             # 대상이긴 하나 검색어를 만들 만큼의 기술 내용이 없다.
             return builder.inconclusive(**versions)
 
         # ── 2. 검색
-        outcome = await run_searches(self._search, extraction.search_queries)
+        outcome = await run_searches(
+            self._search, queries, rows=self._search_rows
+        )
+        if self._prior_art_cutoff:
+            _drop_future_hits(outcome.hits_by_query, self._prior_art_cutoff)
         for failure in outcome.failures:
             builder.record_failure(failure)
 
@@ -200,7 +249,7 @@ class PatentAnalyzer:
         carried = await self._carried_forward(artifact, candidates)
         candidates = [*candidates, *carried]
         _diagnostic(
-            query_count=len(extraction.search_queries),
+            query_count=len(queries),
             queries_answered=len(outcome.hits_by_query),
             hit_total=sum(len(hits) for hits in outcome.hits_by_query.values()),
             ranked_candidates=len(candidates),
@@ -250,7 +299,7 @@ class PatentAnalyzer:
                 document,
                 builder,
                 extracted_elements=len(extraction.technical_elements),
-                total_queries=len(extraction.search_queries),
+                total_queries=len(queries),
             )
             if evaluated is not None:
                 assessed += 1

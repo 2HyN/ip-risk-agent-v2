@@ -27,6 +27,11 @@ from ..common.errors import FailureCategory, ProviderFailureError
 BASE_URL = "https://plus.kipris.or.kr/kipo-api/kipi"
 
 SEARCH_PATH = "patUtiModInfoSearchSevice/getWordSearch"
+# 항목별검색. getWordSearch 는 **전문(full-text) AND + 불투명한 정렬**이라
+# 2단어 질의에 수천 건이 걸리고 원하는 문헌이 상위에 올 근거가 없다 — 골든셋
+# 실측: "셔터 연동" 이 전문 8,166건(인용 문헌 60위 밖) vs 제목 19건(4위),
+# 초록 394건(9위). 필드를 좁히는 것이 곧 순위를 만드는 것이다.
+ADVANCED_SEARCH_PATH = "patUtiModInfoSearchSevice/getAdvancedSearch"
 DETAIL_PATH = "patUtiModInfoSearchSevice/getBibliographyDetailInfoSearch"
 
 # 이 base 는 키 파라미터 이름이 `ServiceKey` 다. `accessKey` 는 인증되지 않는다.
@@ -177,7 +182,12 @@ class KiprisClient:
         retry_attempts: int = _RETRY_ATTEMPTS,
         retry_backoff_seconds: float = _RETRY_BACKOFF_SECONDS,
         client: httpx.AsyncClient | None = None,
+        search_fields: tuple[str, ...] | None = None,
     ) -> None:
+        # None 이면 기존 getWordSearch(전문 검색). ("inventionTitle", "astrtCont")
+        # 처럼 주면 항목별검색으로 필드마다 검색해 병합한다 — 상단
+        # ADVANCED_SEARCH_PATH 주석의 실측이 근거다. 기본값은 기존 동작 유지.
+        self._search_fields = search_fields
         self._access_key = access_key
         self._retry_attempts = max(1, retry_attempts)
         self._retry_backoff_seconds = retry_backoff_seconds
@@ -202,6 +212,8 @@ class KiprisClient:
         await self.aclose()
 
     async def search(self, query: str, *, rows: int = 5) -> list[PatentSearchHit]:
+        if self._search_fields is not None:
+            return await self._fielded_search(query, rows=rows)
         root = await self._get(
             SEARCH_PATH,
             {
@@ -213,6 +225,35 @@ class KiprisClient:
                 "docsCount": str(rows),
             },
         )
+        return self._parse_hits(root, query)
+
+    async def _fielded_search(self, query: str, *, rows: int) -> list[PatentSearchHit]:
+        """항목별검색 — 필드마다 따로 검색해 병합한다.
+
+        제목은 정밀하고(수십 건) 초록은 재현이 넓다(수백 건). 제목 결과를 앞에
+        두고 초록 결과로 뒤를 채운다 — 인용 문헌이 제목 4위 / 초록 9위였던
+        실측이 이 순서의 근거다. 필드 수만큼 호출이 늘어나는 것이 대가다.
+        """
+        merged: list[PatentSearchHit] = []
+        seen: set[str] = set()
+        for field in self._search_fields or ():
+            root = await self._get(
+                ADVANCED_SEARCH_PATH,
+                {
+                    field: query,
+                    "patent": "true",
+                    "utility": "true",
+                    "docsStart": "1",
+                    "docsCount": str(max(rows, 20)),
+                },
+            )
+            for hit in self._parse_hits(root, query):
+                if hit.application_number not in seen:
+                    seen.add(hit.application_number)
+                    merged.append(hit)
+        return merged[: max(rows, 20)]
+
+    def _parse_hits(self, root: Element, query: str) -> list[PatentSearchHit]:
         hits: list[PatentSearchHit] = []
         for element in root.iter("item"):
             number = normalize_application_number(_text(element, "applicationNumber"))
