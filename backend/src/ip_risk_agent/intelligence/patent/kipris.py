@@ -255,23 +255,35 @@ class KiprisClient:
         merged: list[PatentSearchHit] = []
         seen: set[str] = set()
         for field in self._search_fields or ():
+            # 페이징 실측 (2026-08-25): 이 경로도 ``docsStart`` 는 무시된다
+            # (docsStart=21 이 1페이지와 완전 중복). ``pageNo``/``numOfRows`` 는
+            # 실제로 듣는다 — numOfRows=40 에 40건 유니크, pageNo=2 는 다음
+            # 페이지가 실측으로 확인됐다. rows>20 확장이 가능하다.
             root = await self._get(
                 ADVANCED_SEARCH_PATH,
                 {
                     field: query,
                     "patent": "true",
                     "utility": "true",
-                    "docsStart": "1",
-                    "docsCount": str(max(rows, 20)),
+                    "pageNo": "1",
+                    "numOfRows": str(max(rows, 20)),
                 },
             )
-            for hit in self._parse_hits(root, query):
+            # 어느 필드에서 걸렸는지는 순위 신호다 — 제목 적중이 초록 적중보다
+            # 정밀하다 (인용 문헌 제목 4위 / 초록 9위 실측).
+            for hit in self._parse_hits(root, query, extra={"search_field": field}):
                 if hit.application_number not in seen:
                     seen.add(hit.application_number)
                     merged.append(hit)
         return merged[: max(rows, 20)]
 
-    def _parse_hits(self, root: Element, query: str) -> list[PatentSearchHit]:
+    def _parse_hits(
+        self, root: Element, query: str, *, extra: dict[str, str] | None = None
+    ) -> list[PatentSearchHit]:
+        # 질의의 결과 집합 크기는 특이도의 직접 척도다 — "셔터 연동" 제목 19건의
+        # 적중과 "CCTV 영상" 2,769건의 적중은 같은 무게가 아니다. 순위(RRF)가
+        # 가중치로 쓰도록 히트마다 실어 둔다.
+        total = (root.findtext(".//totalCount") or "").strip()
         hits: list[PatentSearchHit] = []
         for element in root.iter("item"):
             number = normalize_application_number(_text(element, "applicationNumber"))
@@ -282,6 +294,10 @@ class KiprisClient:
                 "openDate": _text(element, "openDate"),
                 "ipc": _text(element, "ipcNumber"),
             }
+            if total.isdigit():
+                metadata["search_total"] = total
+            if extra:
+                metadata.update(extra)
             # 골든셋의 인용 번호가 공개/공고번호 표기로 올 수 있다. 매칭에
             # 필요한 번호 체계를 있을 때만 함께 수집한다 (계획 문서 §4).
             for tag in ("openNumber", "publicationNumber", "registerStatus"):

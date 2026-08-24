@@ -40,8 +40,13 @@ from .candidate_rank import (
     rank_candidates_rrf,
 )
 from .claims import CLAIMS_VERSION, chunk_claims, parse_claims
-from .ephemeral_index import INDEX_VERSION, select_context
-from .extraction import TechnicalExtractor, expand_queries, render_segments
+from .ephemeral_index import INDEX_VERSION, select_context, tokenize
+from .extraction import (
+    TechnicalExtractor,
+    expand_queries,
+    query_families,
+    render_segments,
+)
 from .cache import CachedExtraction, EXTRACTION_TTL, extraction_cache_key
 from .kipris import PatentDocument, PatentSearchProvider
 from .score import evidence_strength
@@ -192,6 +197,7 @@ class PatentAnalyzer:
         prior_art_cutoff: str | None = None,
         search_rows: int = 5,
         query_expansion: bool = False,
+        exclude_application_numbers: tuple[str, ...] = (),
     ) -> None:
         self._search = search_provider
         self._client = model_client
@@ -227,6 +233,9 @@ class PatentAnalyzer:
         self._cache = response_cache
         # 이 artifact 에서 이미 매칭된 출원번호. 검색과 무관하게 다시 대조한다.
         self._previously_matched = previously_matched
+        # 후보에서 무조건 제외할 출원번호. 골든셋 평가에서 자기 출원이 자기
+        # 초록 검색에 1위로 걸려 cap 을 낭비하는 것을 막는다 (평가 전용).
+        self._exclude = frozenset(exclude_application_numbers)
 
     @property
     def _is_baseline(self) -> bool:
@@ -318,7 +327,19 @@ class PatentAnalyzer:
             return builder.failed(**versions)
 
         if self._plan.use_rrf:
-            candidates = rank_candidates_rrf(outcome.hits_by_query, cap=self._cap)
+            candidates = rank_candidates_rrf(
+                outcome.hits_by_query,
+                cap=self._cap,
+                # 확장 변형을 원 질의 계열로 묶는다 — 가짜 합의 방지 (rank v2).
+                family_of=query_families(extraction.search_queries, queries),
+                # 원문 어휘와 제목이 겹치는 후보를 앞세운다 (rank v2).
+                source_tokens=frozenset(
+                    tokenize(
+                        "\n".join(s.text for s in artifact.text_segments)
+                    )
+                ),
+                exclude=self._exclude or None,
+            )
         else:
             candidates = rank_candidates(outcome.hits_by_query, cap=self._cap)
         # 검색이 데려오지 않았어도, 이 문서에서 이미 매칭된 특허는 다시 대조한다.

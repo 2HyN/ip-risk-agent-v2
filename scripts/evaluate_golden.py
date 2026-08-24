@@ -260,6 +260,9 @@ async def run(
                     search_plan=plan,
                     compare_strategy=compare_strategy,
                     prior_art_cutoff=_application_date_of(number),
+                    # 자기 초록으로 검색하면 자기 출원이 1위로 걸린다 —
+                    # 평가에서는 정의상 후보가 아니므로 제외한다.
+                    exclude_application_numbers=(number,),
                 )
             else:
                 analyzer = PatentAnalyzer(

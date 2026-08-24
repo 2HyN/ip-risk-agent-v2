@@ -80,6 +80,25 @@ def expand_queries(queries: list[str], *, cap: int = 15) -> list[str]:
     return expanded
 
 
+def query_families(originals: list[str], executed: list[str]) -> dict[str, str]:
+    """실행 질의 → 원 질의(계열) 매핑.
+
+    확장 질의(2단어 부분조합)는 원 질의의 변형이지 새로운 각도가 아니다.
+    순위(RRF)가 계열당 최대 기여만 세도록, 각 실행 질의를 단어 집합이 포함되는
+    첫 원 질의에 귀속시킨다. 어느 원 질의에도 안 들어가면 자기 자신이 계열이다.
+    """
+    families: dict[str, str] = {}
+    for query in executed:
+        words = set(query.split())
+        family = query
+        for original in originals:
+            if words <= set(original.split()):
+                family = original
+                break
+        families[query] = family
+    return families
+
+
 def clamp_queries(queries: list[str], *, max_queries: int = MAX_QUERIES) -> list[str]:
     """검색어를 2~3 단어로 자른다.
 

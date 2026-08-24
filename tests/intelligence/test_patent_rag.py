@@ -140,7 +140,7 @@ def test_rag_flow_completes_and_grades_by_distinct_elements():
     assert metadata["compare_strategy"] == "rag"
     assert metadata["distinct_match_count"] == 2
     # 확장 계획이므로 RRF 순위 근거도 남는다.
-    assert metadata["rank_version"] == "patent_rank_rrf_v1"
+    assert metadata["rank_version"] == "patent_rank_rrf_v2"
 
     # 4항(baseline 창 밖의 종속항)이 검색으로 컨텍스트에 들어와 근거가 됐다.
     assert f"patent:{APP_NO}:claim:4" in candidate.evidence_ids
@@ -153,7 +153,7 @@ def test_rag_versions_record_the_full_machine():
     result = run(rag_analyzer(client).analyze(patent_artifact()))
     assert result.versions.prompt_version == (
         "patent_extract_v3+patent_compare_v3"
-        "+search_expanded_v1+patent_rank_rrf_v1+claimchunk-v1+bm25-v1"
+        "+search_expanded_v1+patent_rank_rrf_v2+claimchunk-v1+bm25-v1"
     )
     assert result.versions.analyzer_version == "patent-analyzer-1.1.0"
 

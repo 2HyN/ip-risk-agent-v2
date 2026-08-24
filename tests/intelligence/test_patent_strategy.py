@@ -24,7 +24,8 @@ from ip_risk_agent.intelligence.patent.candidate_rank import (
     rank_candidates,
     rank_candidates_rrf,
 )
-from ip_risk_agent.intelligence.patent.extraction import clamp_queries
+from ip_risk_agent.intelligence.patent.ephemeral_index import tokenize
+from ip_risk_agent.intelligence.patent.extraction import clamp_queries, query_families
 from ip_risk_agent.intelligence.patent.kipris import (
     ADVANCED_SEARCH_PATH,
     KiprisClient,
@@ -336,8 +337,10 @@ def test_fielded_search_merges_title_first_and_dedupes():
     assert [path for path, _ in calls] == [ADVANCED_SEARCH_PATH, ADVANCED_SEARCH_PATH]
     assert calls[0][1]["inventionTitle"] == "셔터 연동"
     assert calls[1][1]["astrtCont"] == "셔터 연동"
-    # getAdvancedSearch 는 docsCount 를 20 까지 존중한다 — 실측 상한 그대로.
-    assert calls[0][1]["docsCount"] == "20"
+    # getAdvancedSearch 도 docsStart 는 무시된다(1페이지 반복 실측) —
+    # 실제로 듣는 pageNo/numOfRows 를 쓴다.
+    assert calls[0][1]["numOfRows"] == "20"
+    assert calls[0][1]["pageNo"] == "1"
 
 
 def test_fielded_plan_expands_queries_and_uses_plan_rows():
@@ -401,3 +404,76 @@ def test_prior_art_cutoff_drops_future_hits_but_keeps_unknown_dates():
 
     # 미래 문서만 치운다 — 날짜를 모르는 히트는 정보 부족이지 탈락 사유가 아니다.
     assert hits_by_query["q"] == [past, unknown]
+
+
+# ------------------------------------------------------------------ rank v2
+
+
+def test_specific_query_hits_outweigh_broad_query_hits():
+    """특이도 가중 — 19건 질의의 적중이 2,769건 질의의 적중보다 무겁다."""
+    narrow = hit("100", "셔터 연동")
+    narrow.metadata["search_total"] = "19"
+    broad = hit("200", "CCTV 영상")
+    broad.metadata["search_total"] = "2769"
+    ordered = rank_candidates_rrf(
+        {"셔터 연동": [narrow], "CCTV 영상": [broad]}, ipc_signal=False
+    )
+    assert [c.application_number for c in ordered] == ["100", "200"]
+
+
+def test_expansion_variants_do_not_fake_consensus():
+    """계열별 max — 같은 원 질의의 확장 변형 여럿에 걸려도 한 번으로 센다."""
+    original = "셔터 경광등 연동"
+    variants = ["셔터 경광등", "셔터 연동", "경광등 연동"]
+    hits_by_query = {q: [hit("100", q)] for q in [original, *variants]}
+    # 다른 계열 하나에 걸린 후보 — 위치는 더 낮다(2위).
+    other = hit("200", "지하철 제어")
+    hits_by_query["지하철 제어"] = [hit("300", "지하철 제어"), other]
+    families = {q: original for q in [original, *variants]}
+    families["지하철 제어"] = "지하철 제어"
+    ordered = rank_candidates_rrf(
+        hits_by_query, family_of=families, ipc_signal=False
+    )
+    ranks = {c.application_number: i for i, c in enumerate(ordered)}
+    # 계열 1개×변형 4개(=1회)인 100 이, 계열 1개 2위인 200 을 크게 앞서지 않는다
+    # — max 합산이므로 100 의 점수는 1/(60+1) 하나뿐이다.
+    scores = {c.application_number: c.rrf_score for c in ordered}
+    assert scores["100"] == pytest.approx(1 / 61, rel=1e-6)
+    assert ranks["100"] < ranks["200"]  # 위치 우위만큼만 앞선다
+
+
+def test_title_similarity_lifts_topically_close_candidates():
+    """제목-원문 유사도 배수 — 원문 어휘를 공유하는 제목이 앞선다."""
+    close = PatentSearchHit(
+        application_number="100", title="방화셔터 연동 제어기", query="질의 가"
+    )
+    far = PatentSearchHit(
+        application_number="200", title="영화 자막 시스템", query="질의 가"
+    )
+    source = frozenset(tokenize("지하철 역사의 방화셔터를 연동 제어하는 장치"))
+    # far 가 위치상 앞이어도 유사도 배수가 뒤집는다.
+    ordered = rank_candidates_rrf(
+        {"질의 가": [far, close]},
+        source_tokens=source,
+        ipc_signal=False,
+    )
+    assert [c.application_number for c in ordered] == ["100", "200"]
+
+
+def test_exclude_removes_self_from_pool():
+    hits_by_query = {"질의 가": [hit("100", "질의 가"), hit("200", "질의 가")]}
+    ordered = rank_candidates_rrf(
+        hits_by_query, exclude=frozenset({"100"}), ipc_signal=False
+    )
+    assert [c.application_number for c in ordered] == ["200"]
+
+
+def test_query_families_attribute_variants_to_first_superset():
+    families = query_families(
+        ["셔터 경광등 연동", "지하철 셔터 제어"],
+        ["셔터 경광등 연동", "셔터 경광등", "셔터 연동", "지하철 셔터", "완전 다른 질의"],
+    )
+    assert families["셔터 경광등"] == "셔터 경광등 연동"
+    assert families["셔터 연동"] == "셔터 경광등 연동"
+    assert families["지하철 셔터"] == "지하철 셔터 제어"
+    assert families["완전 다른 질의"] == "완전 다른 질의"
