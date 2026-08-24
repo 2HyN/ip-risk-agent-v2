@@ -22,7 +22,10 @@ _SENSITIVE_METADATA_KEY = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class EvidenceRetentionPolicy:
-    max_excerpt_chars: int = 1_000
+    # 청구항 하나가 1,000자를 넘는 일이 흔해, 1,000 에서는 근거가 중간에 잘리고
+    # 잘린 뒤를 가리키는 하이라이트 구간까지 함께 버려졌다. 원문 전체를 싣는 것이
+    # 아니라 **발췌 상한**이므로, 청구항·초록이 통째로 들어가는 크기로 올린다.
+    max_excerpt_chars: int = 4_000
     max_reference_chars: int = 2_048
     max_metadata_chars: int = 256
     max_metadata_items: int = 32

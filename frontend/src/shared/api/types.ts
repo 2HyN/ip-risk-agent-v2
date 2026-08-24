@@ -30,6 +30,10 @@ export type Membership = {
   invited_by: string;
   created_at: string;
   updated_at: string;
+  // 목록 라우트만 채운다 — id 는 사람이 못 알아본다.
+  user_email?: string | null;
+  user_display_name?: string | null;
+  invited_by_email?: string | null;
 };
 
 export type Invitation = {
@@ -41,6 +45,7 @@ export type Invitation = {
   role: Role;
   status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
   invited_by: string;
+  invited_by_email?: string | null;
   created_at: string;
   updated_at: string;
   expires_at: string | null;
@@ -193,6 +198,25 @@ export type DataAccessSummary = {
   raw_source_persisted: false;
   analysis_artifact_persisted: false;
   external_rag_reference_only: true;
+};
+
+export type AnalysisProgressItem = {
+  artifact_id: string;
+  display_name: string;
+  status: string;
+  failure_safe: string | null;
+};
+
+export type AnalysisProgress = {
+  total: number;
+  waiting: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  inconclusive: number;
+  items: AnalysisProgressItem[];
+  generated_at: string;
 };
 
 export type Notification = {

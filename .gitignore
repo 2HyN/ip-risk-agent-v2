@@ -18,3 +18,5 @@ labels/
 .rag-corpus-cache/
 *.jsonl
 cost-report-baseline.md
+# electron-builder 산출물
+apps/desktop/release/

@@ -20,6 +20,7 @@ from ip_risk_agent.application.repositories import (
     RecordNotFoundError,
 )
 from ip_risk_agent.application.workspace_admin import WorkspaceAdministrationService
+from ip_risk_agent.core.artifacts import ArtifactAvailability
 from ip_risk_agent.core.memberships import (
     InvitationStatus,
     MembershipRole,
@@ -81,6 +82,11 @@ class MembershipResponse(StrictApiModel):
     invited_by: str
     created_at: datetime
     updated_at: datetime
+    # id 만으로는 사람이 사람을 못 알아본다. 목록 라우트가 채워서 보낸다 —
+    # 다른 라우트(내 멤버십 등)는 안 채워도 되도록 선택 필드다.
+    user_email: str | None = None
+    user_display_name: str | None = None
+    invited_by_email: str | None = None
 
 
 class InvitationResponse(StrictApiModel):
@@ -124,6 +130,8 @@ class MountAliasUpdateRequest(StrictApiModel):
 class PendingInvitationResponse(InvitationResponse):
     workspace_name: str
     acceptance_available: bool
+    #: 초대한 사람의 이메일. id 는 화면에서 사람이 못 알아본다.
+    invited_by_email: str | None = None
 
 
 class InvitationAcceptanceResponse(StrictApiModel):
@@ -145,6 +153,32 @@ class WorkspaceDashboardResponse(StrictApiModel):
     resolved_recently: int
     analysis_failed: int
     source_health: SourceHealthSummaryResponse
+
+
+class AnalysisProgressItemResponse(StrictApiModel):
+    artifact_id: str
+    display_name: str
+    status: str
+    failure_safe: str | None = None
+
+
+class AnalysisProgressResponse(StrictApiModel):
+    """지금 이 워크스페이스에서 분석이 어디까지 왔는가.
+
+    화면의 진행 바가 주기적으로 묻는 값이라 **문서 단위**로 센다 — 대시보드의
+    실패 계산과 같은 이유로, 판본이 밀려 끝난 실행은 세지 않는다. ``items`` 에는
+    끝나지 않았거나 실패한 문서만 담는다. 다 끝났으면 비어 있다.
+    """
+
+    total: int
+    waiting: int
+    queued: int
+    running: int
+    succeeded: int
+    failed: int
+    inconclusive: int
+    items: list[AnalysisProgressItemResponse]
+    generated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,6 +322,82 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
             ),
         )
 
+    @router.get("/{vws_id}/analyses/progress", response_model=AnalysisProgressResponse)
+    async def get_analysis_progress(
+        vws_id: str,
+        principal: CurrentPrincipal = Depends(current),
+    ):
+        """화면이 폴링하는 작업 현황. 대시보드와 같은 눈으로 센다.
+
+        문서마다 **지금 판본을 맡은 변경**의 마지막 실행 하나만 본다. 실행 기록
+        전부를 세면 문서를 고칠 때마다 진행률이 뒤로 간다.
+        """
+        await require_workspace_action(
+            deps.unit_of_work_factory,
+            risk_workspace_id=vws_id,
+            actor_user_id=principal.user.id,
+            action=VwsAction.VWS_VIEW,
+        )
+        counts = {
+            "WAITING": 0,
+            "QUEUED": 0,
+            "RUNNING": 0,
+            "SUCCEEDED": 0,
+            "FAILED": 0,
+            "INCONCLUSIVE": 0,
+        }
+        items: list[AnalysisProgressItemResponse] = []
+        async with deps.unit_of_work_factory() as uow:
+            changes_by_artifact: dict[str, list] = {}
+            for event in await uow.change_events.list_for_workspace(vws_id):
+                if event.artifact_id is not None:
+                    changes_by_artifact.setdefault(event.artifact_id, []).append(event)
+            for artifact in await uow.artifacts.list_for_workspace(vws_id):
+                state = await uow.artifacts.get_state(artifact.id)
+                if (
+                    state is not None
+                    and state.availability_state is ArtifactAvailability.DELETED
+                ):
+                    continue
+                change = current_change_for_artifact(
+                    changes_by_artifact.get(artifact.id), state
+                )
+                failure: str | None = None
+                if change is None:
+                    status_key = "WAITING"
+                else:
+                    job = latest_job(await uow.analysis_jobs.list_for_change(change.id))
+                    if job is None:
+                        status_key = "WAITING"
+                    elif job.status.value == "FAILED":
+                        # 밀려서 끝난 실행은 실패가 아니다 — 새 판본이 자리를
+                        # 맡았고 사람이 할 일이 없다.
+                        status_key = "FAILED" if needs_attention(job) else "WAITING"
+                        failure = job.failure_safe if needs_attention(job) else None
+                    else:
+                        status_key = job.status.value
+                counts[status_key] += 1
+                if status_key not in {"SUCCEEDED", "INCONCLUSIVE"} and len(items) < 50:
+                    items.append(
+                        AnalysisProgressItemResponse(
+                            artifact_id=artifact.id,
+                            display_name=artifact.display_name,
+                            status=status_key,
+                            failure_safe=failure,
+                        )
+                    )
+        return AnalysisProgressResponse(
+            total=sum(counts.values()),
+            waiting=counts["WAITING"],
+            queued=counts["QUEUED"],
+            running=counts["RUNNING"],
+            succeeded=counts["SUCCEEDED"],
+            failed=counts["FAILED"],
+            inconclusive=counts["INCONCLUSIVE"],
+            items=items,
+            generated_at=datetime.now(timezone.utc),
+        )
+
     @router.patch("/{vws_id}", response_model=WorkspaceResponse)
     async def update_workspace(
         vws_id: str,
@@ -347,7 +457,28 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
             scope=f"members:{vws_id}",
             codec=deps.cursor_codec,
         )
-        return Page(items=list(selected), next_cursor=next_cursor)
+        # id 만으로는 사람이 사람을 못 알아본다 — 이 페이지에 나올 사용자만
+        # 이름과 이메일을 되짚어 함께 싣는다.
+        user_ids = {member.user_id for member in selected} | {
+            member.invited_by for member in selected
+        }
+        async with deps.unit_of_work_factory() as uow:
+            users = {user_id: await uow.users.get(user_id) for user_id in user_ids}
+        items = []
+        for member in selected:
+            user = users.get(member.user_id)
+            inviter = users.get(member.invited_by)
+            items.append(
+                MembershipResponse(
+                    **MembershipResponse.model_validate(member).model_dump(
+                        exclude={"user_email", "user_display_name", "invited_by_email"}
+                    ),
+                    user_email=None if user is None else user.email,
+                    user_display_name=None if user is None else user.display_name,
+                    invited_by_email=None if inviter is None else inviter.email,
+                )
+            )
+        return Page(items=items, next_cursor=next_cursor)
 
     @router.post(
         "/{vws_id}/members/invitations",
@@ -521,11 +652,15 @@ def create_invitations_router(deps: WorkspaceRouterDependencies) -> APIRouter:
                         invitation.expires_at is None
                         or invitation.expires_at > datetime.now(timezone.utc)
                     )
+                    inviter = await uow.users.get(invitation.invited_by)
                     values.append(
                         PendingInvitationResponse(
                             **InvitationResponse.model_validate(invitation).model_dump(),
                             workspace_name=workspace.name,
                             acceptance_available=acceptance_available,
+                            invited_by_email=(
+                                None if inviter is None else inviter.email
+                            ),
                         )
                     )
         selected, next_cursor = paginate(

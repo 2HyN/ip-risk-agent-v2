@@ -19,9 +19,16 @@ import { ElectronDirectoryPicker } from "./electron-directory-picker.js";
 import { HttpMountRegistrationClient } from "./mount-registration-client.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const runtimeProfile = process.env["APP_ENV"] ?? "local";
+// 배포된 운영 서비스. 포장된 앱은 아무 설정 없이 이곳에 붙는다 — 릴리스를 받은
+// 사람에게 환경변수를 요구할 수는 없다. 개발(포장 전)은 예전처럼 로컬 기본이고,
+// 두 경우 모두 환경변수가 이긴다.
+const PRODUCTION_SERVER_BASE_URL =
+  "https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app";
+const runtimeProfile =
+  process.env["APP_ENV"] ?? (app.isPackaged ? "production" : "local");
 const serverBaseUrl = trustedApplicationUrl(
-  process.env["IPRISK_SERVER_BASE_URL"] ?? "http://127.0.0.1:8000",
+  process.env["IPRISK_SERVER_BASE_URL"] ??
+    (app.isPackaged ? PRODUCTION_SERVER_BASE_URL : "http://127.0.0.1:8000"),
   runtimeProfile,
 );
 
@@ -251,7 +258,12 @@ function applyNavigationPolicy(
     const parsed = new URL(url);
     if (
       parsed.protocol === "https:" &&
-      ["drive.google.com", "github.com"].includes(parsed.hostname) &&
+      // 원문(drive·github)과 근거 특허(KIPRIS)로 나가는 링크만 기본 브라우저로
+      // 연다. 목록에 없는 링크는 조용히 버려진다 — KIPRIS 가 빠져 있던 동안
+      // 근거 링크가 "안 눌리는" 것처럼 보였다.
+      ["drive.google.com", "github.com", "www.kipris.or.kr", "kipris.or.kr"].includes(
+        parsed.hostname,
+      ) &&
       !parsed.username &&
       !parsed.password
     ) {

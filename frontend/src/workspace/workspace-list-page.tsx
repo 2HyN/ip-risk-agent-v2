@@ -91,8 +91,16 @@ export function WorkspaceListPage() {
                   </div>
                   <Badge tone="info">{invitation.role}</Badge>
                 </div>
+                {invitation.invited_by_email === null ||
+                invitation.invited_by_email === undefined ? null : (
+                  <p className="muted">Invited by {invitation.invited_by_email}</p>
+                )}
+                {/* 수락 기한이다. 기한 없는 초대에 "Expires —" 를 띄우면
+                    만료됐다는 말처럼 읽힌다. */}
                 <p className="muted">
-                  Expires {formatDate(invitation.expires_at)}
+                  {invitation.expires_at === null
+                    ? "만료 기한 없음"
+                    : `수락 기한 ${formatDate(invitation.expires_at)}`}
                 </p>
               <Button
                 disabled={!invitation.acceptance_available}

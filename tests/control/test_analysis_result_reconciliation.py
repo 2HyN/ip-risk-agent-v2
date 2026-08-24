@@ -1514,3 +1514,43 @@ def test_old_evidence_survives_for_the_ledger_but_not_for_the_verdict() -> None:
             assert len(current) < len(everything)
 
     run(scenario())
+
+
+def test_many_new_risks_in_one_file_notify_once() -> None:
+    """파일 하나에서 HIGH Risk 가 여럿 나와도 알림은 **한 건**이다.
+
+    다섯 건이 따로 오면 스팸이고, 사람이 할 일은 어차피 "그 파일을 연다" 하나다.
+    무엇이 몇 건인지는 metadata 가 들고 간다.
+    """
+
+    async def scenario() -> None:
+        store = await seed_artifact_context()
+        job_id, started_at = await add_running_job(
+            store,
+            suffix="one",
+            revision="revision-1",
+        )
+        base = patent_result(job_id, "revision-1", started_at)
+        second = PatentCandidate(
+            normalized_application_number="KR-10-2026-000002",
+            title="Another ranking method",
+            suggested_review_priority=ReviewPriority.HIGH,
+            matched_elements=["candidate ranking"],
+            evidence_ids=[base.evidence[0].evidence_id],
+            provider_metadata_safe={"jurisdiction": "KR"},
+        )
+        result = base.model_copy(update={"candidates": [*base.candidates, second]})
+        acceptance = await make_service(store).accept_analysis_result(result)
+        assert acceptance.disposition is AnalysisResultDisposition.ACCEPTED
+        assert len(acceptance.affected_risk_ids) == 2
+
+        async with store() as uow:
+            notifications = await uow.notifications.list_for_user("owner-1")
+            assert len(notifications) == 1
+            notification = notifications[0]
+            assert notification.notification_type is NotificationType.RISK_HIGH_DETECTED
+            assert notification.metadata_safe["risk_count"] == 2
+            assert notification.metadata_safe["artifact_id"] == "artifact-1"
+            assert notification.metadata_safe["display_name"] is not None
+
+    run(scenario())

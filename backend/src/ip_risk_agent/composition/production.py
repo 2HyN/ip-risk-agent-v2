@@ -349,6 +349,17 @@ def _compose_api(foundation, context: RuntimeCompositionContext) -> RuntimeCompo
             desktop=(local_desktop,),
         ),
         extra_api_routers=(scheduler,),
+        # workspace 삭제는 API 의 DELETE 라우트가 실행한다. eraser 가 worker 쪽에만
+        # 있던 동안 프로덕션 삭제는 DELETING 표시만 하고 아무것도 지우지 않았다 —
+        # workspace 네 개가 그 상태로 남아 있는 것을 운영에서 확인했다.
+        # operational 이 먼저다 (canonical 참조를 살아 있을 때 읽는다).
+        workspace_erasers=(
+            FirestoreOperationalEraser(
+                foundation.clients.firestore,
+                credential_vault=foundation.credential_vault,
+            ),
+            FirestoreWorkspaceEraser(foundation.clients.firestore),
+        ),
     )
 
 

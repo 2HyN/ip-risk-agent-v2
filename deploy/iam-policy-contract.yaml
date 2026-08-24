@@ -59,6 +59,33 @@ buildBindings:
     role: roles/iam.serviceAccountTokenCreator
     member: service-555102774494@gcp-sa-cloudbuild.iam.gserviceaccount.com
     resource: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+# CD — main push 트리거(deploy/cloudbuild-cd.yaml)가 빌드 신원으로 배포까지
+# 이어가기 위한 권한. run.admin 은 배포 신원에만 있고 런타임 신원에는 없다.
+cdBindings:
+  cdDeploy:
+    role: roles/run.admin
+    member: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+    resource: projects/proj-aj22-211200020328
+  cdRuntimeActAs:
+    role: roles/iam.serviceAccountUser
+    member: iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+    resources:
+      - projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+      - projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
+# 사람 배포자 — 팀원이 수동으로 빌드·배포할 수 있는 최소 묶음 (2026-08-24 부여).
+# owner 계정(aj22@iceu.kr, fall@aicore.co.kr)은 별도 부여가 필요 없다.
+humanDeployers:
+  members:
+    - user:aj28@iceu.kr
+    - user:aj14@iceu.kr
+  projectRoles:
+    - roles/cloudbuild.builds.editor
+    - roles/storage.objectAdmin
+    - roles/run.admin
+  serviceAccountUserOn:
+    - iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+    - iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
+    - iprisk-v2-worker@proj-aj22-211200020328.iam.gserviceaccount.com
 fixedSecretAccess:
   iprisk-v2-session-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]
   iprisk-v2-google-login-client-secret: [iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com]

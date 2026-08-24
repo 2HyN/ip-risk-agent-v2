@@ -1,0 +1,20 @@
+# CI — main 대상 PR 에서 실행되는 검증 파이프라인. 배포하지 않는다.
+#
+# 런타임 이미지와 같은 python:3.14.7-slim 위에서 같은 lock 으로 설치하고
+# pytest(-m "not live")를 돈다. 외부 API 실호출(live)은 자격증명과 한도
+# (KIPRIS 월 1,000회) 때문에 CI 에서 돌리지 않는다.
+serviceAccount: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+timeout: 1800s
+steps:
+  - id: pytest
+    name: python:3.14.7-slim-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        pip install -q -r requirements.lock
+        pip install -q --no-deps -e .
+        python -m pytest tests -m "not live" -q
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8

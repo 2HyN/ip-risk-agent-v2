@@ -1,0 +1,78 @@
+# CD — main push 트리거가 실행하는 자동 배포 파이프라인.
+#
+# 수동 빌드용 cloudbuild.yaml 과 갈라 둔 이유: 수동 제출(gcloud builds submit)은
+# 빌드·스모크까지만 하고 배포는 사람이 digest 를 확인하고 한다. 트리거는 사람이
+# 없으므로 여기서는 배포까지 한 파이프라인으로 잇는다 — 단, 규칙은 같다:
+# 이미지 하나를 만들어 **API·Worker 에 같은 digest** 를 얹는다. tag 가 아니라
+# digest 로 배포하므로 두 서비스가 다른 이미지를 서빙하는 상태가 생기지 않는다.
+#
+# 빌드 신원은 수동 빌드와 동일한 iprisk-v2-deploy 다. 트리거로 돌면 SHORT_SHA 는
+# Cloud Build 가 자동 주입한다.
+substitutions:
+  _REGION: asia-northeast3
+  _REPOSITORY: ip-risk-agent-v2
+  _IMAGE: application
+serviceAccount: projects/proj-aj22-211200020328/serviceAccounts/iprisk-v2-deploy@proj-aj22-211200020328.iam.gserviceaccount.com
+timeout: 2700s
+steps:
+  # 테스트가 게이트다 — pytest 를 통과하지 못한 커밋은 이미지를 만들지도,
+  # 배포하지도 않는다. PR 검증(cloudbuild-ci.yaml)과 같은 환경·같은 명령이다.
+  - id: pytest
+    name: python:3.14.7-slim-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        pip install -q -r requirements.lock
+        pip install -q --no-deps -e .
+        python -m pytest tests -m "not live" -q
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+      - .
+  - id: smoke-import-api
+    name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - --rm
+      - --entrypoint
+      - python
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+      - -c
+      - "from ip_risk_agent.main import create_app; print('api import ok')"
+  - id: smoke-import-worker
+    name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - --rm
+      - --entrypoint
+      - python
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+      - -c
+      - "from ip_risk_agent.worker import create_app; print('worker import ok')"
+  # 배포는 digest 로 한다. push 를 여기서 명시적으로 하는 이유 — images: 필드의
+  # push 는 모든 step 이 끝난 뒤에 일어나므로, 배포 step 이 참조할 digest 가
+  # 그 전에 레지스트리에 있어야 한다.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}:${SHORT_SHA}
+  - id: deploy-same-digest
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE}"
+        DIGEST=$$(gcloud artifacts docker images describe "$${IMAGE}:${SHORT_SHA}" --format="value(image_summary.digest)")
+        echo "deploying $${IMAGE}@$${DIGEST}"
+        gcloud run deploy ip-risk-agent-v2-api    --image "$${IMAGE}@$${DIGEST}" --region ${_REGION} --quiet
+        gcloud run deploy ip-risk-agent-v2-worker --image "$${IMAGE}@$${DIGEST}" --region ${_REGION} --quiet
+        echo "deployed $${DIGEST}"
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8

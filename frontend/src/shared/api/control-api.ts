@@ -1,5 +1,6 @@
 import { ApiClient, queryString } from "./client";
 import type {
+  AnalysisProgress,
   Dashboard,
   DataAccessSummary,
   HistoryEntry,
@@ -36,8 +37,16 @@ export class ControlApi {
       method: "POST",
       body: JSON.stringify(body),
     });
+  deleteWorkspace = (id: string) =>
+    this.client.request<Workspace>(`/api/v1/workspaces/${id}`, {
+      method: "DELETE",
+    });
   dashboard = (id: string) =>
     this.client.request<Dashboard>(`/api/v1/workspaces/${id}/dashboard`);
+  analysesProgress = (id: string) =>
+    this.client.request<AnalysisProgress>(
+      `/api/v1/workspaces/${id}/analyses/progress`,
+    );
   invitations = (cursor: string | null = null) =>
     this.client.request<Page<Invitation>>(
       `/api/v1/invitations${queryString({ cursor })}`,
@@ -104,7 +113,7 @@ export class ControlApi {
     );
   history = (
     id: string,
-    kind: "activity" | "audit" | "source-access",
+    kind: "activity" | "risk-events" | "audit" | "source-access",
     cursor: string | null = null,
   ) =>
     this.client.request<Page<HistoryEntry>>(

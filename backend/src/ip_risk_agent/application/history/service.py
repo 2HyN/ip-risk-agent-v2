@@ -91,6 +91,40 @@ class HistoryQueryService:
         )
         return WorkspaceActivity(risk_workspace_id, entries)
 
+    async def list_risk_events(
+        self,
+        *,
+        risk_workspace_id: str,
+        actor_user_id: str,
+        limit: int = 100,
+    ) -> WorkspaceActivity:
+        """Risk 생애 사건만. 전체 활동에서는 접근 기록에 묻힌다."""
+        _require_limit(limit)
+        async with self._unit_of_work_factory() as uow:
+            await _authorize(
+                uow,
+                risk_workspace_id=risk_workspace_id,
+                actor_user_id=actor_user_id,
+                action=VwsAction.AUDIT_VIEW,
+            )
+            risks = await uow.risks.list_for_workspace(risk_workspace_id)
+            risk_events = []
+            for risk in risks:
+                risk_events.extend(
+                    (risk, event) for event in await uow.risks.list_events(risk.id)
+                )
+        entries = tuple(
+            sorted(
+                (
+                    _risk_entry(risk, event, self._safety)
+                    for risk, event in risk_events
+                ),
+                key=lambda entry: (entry.occurred_at, entry.id),
+                reverse=True,
+            )[:limit]
+        )
+        return WorkspaceActivity(risk_workspace_id, entries)
+
     async def list_audit_events(
         self,
         *,
@@ -236,6 +270,9 @@ def _risk_entry(
         actor_type=event.actor_type,
         actor_user_id=event.actor_user_id,
         risk_id=risk.id,
+        # 화면이 id 를 파일 이름으로 되짚을 열쇠. 이것이 없으면 로그가 해시
+        # 덩어리로만 보인다 — 사건은 파일에서 났는데 파일을 말하지 않았다.
+        artifact_id=risk.artifact_id,
         metadata_safe=sanitize_history_mapping(
             {
                 "previous_state": event.previous_state_safe,
@@ -243,6 +280,10 @@ def _risk_entry(
                 "analysis_job_id": event.analysis_job_id,
                 "evidence_refs": event.evidence_refs,
                 "reason": event.reason_safe,
+                # 사람이 읽는 로그의 본문. Risk 를 열지 않고도 무엇이 감지·해소
+                # 됐는지 알 수 있어야 한다.
+                "analysis_type": risk.analysis_type.value,
+                "summary": risk.summary,
             },
             safety,
         ),

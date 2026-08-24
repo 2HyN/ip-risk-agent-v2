@@ -2,4 +2,7 @@ packages:
   - "shared/contracts/typescript"
   - "frontend"
   - "apps/desktop"
-
+# electron-builder 가 끌고 오는 electron-winstaller 의 설치 스크립트는 쓰지 않는다 —
+# 릴리스 대상은 zip 뿐이라 Squirrel 설치기가 필요 없다.
+allowBuilds:
+  electron-winstaller: false

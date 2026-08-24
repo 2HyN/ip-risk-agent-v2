@@ -25,6 +25,10 @@ export function quoteSpan(
   if (!Number.isInteger(start) || !Number.isInteger(end)) return null;
   // 발췌는 보존 정책이 잘라낼 수 있다. 잘린 뒤를 가리키는 구간은 보여 줄 것이 없다.
   if (start < 0 || end <= start || end > length) return null;
+  // 발췌의 거의 전부를 덮는 구간은 강조하지 않는다. 모델이 짧은 초록을 통째로
+  // 인용하면 이렇게 되는데, 전부를 칠한 강조는 "어디가 문제인가" 에 아무 답도
+  // 주지 않으면서 화면만 시끄럽다.
+  if (end - start >= length * 0.9) return null;
   return { start, end };
 }
 

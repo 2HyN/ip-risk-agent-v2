@@ -471,8 +471,12 @@ def plan_workspace_deletion(
     )
     if workspace.owner_user_id != actor_user_id:
         raise DomainInvariantError("only the canonical owner may delete a workspace")
-    if workspace.status is not RiskWorkspaceStatus.ACTIVE:
-        raise DomainInvariantError("only an active workspace may be deleted")
+    # DELETING 은 다시 부를 수 있어야 한다 — 지우다 실패하면 이 상태로 남고,
+    # 재호출이 이어서 마무리한다 (eraser 는 재호출에 안전하고 workspace 문서를
+    # 마지막에 지운다). ACTIVE 만 허용하던 동안, 고착된 DELETING workspace 는
+    # "domain rules 위반" 으로 영영 지울 수 없었다.
+    if workspace.status is RiskWorkspaceStatus.DELETED:
+        raise DomainInvariantError("a deleted workspace cannot be deleted again")
     occurred_at = normalize_utc(occurred_at, "workspace_deletion.occurred_at")
     updated = replace(workspace, status=RiskWorkspaceStatus.DELETING, updated_at=occurred_at)
     audit_event = AuditEvent(
