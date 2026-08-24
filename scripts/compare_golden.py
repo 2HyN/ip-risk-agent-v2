@@ -11,11 +11,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN = ROOT / "labels" / "golden"
+# 골든셋이 저장소 밖(팀 공유 폴더)에 있으면 GOLDEN_DIR 로 가리킨다.
+GOLDEN = Path(os.environ.get("GOLDEN_DIR") or (ROOT / "labels" / "golden"))
 
 
 def _load(dirname: str) -> dict[str, dict]:

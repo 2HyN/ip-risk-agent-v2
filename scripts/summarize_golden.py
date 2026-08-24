@@ -18,18 +18,21 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL_DIR = ROOT / "labels" / "golden" / "eval"
+# 골든셋이 저장소 밖(팀 공유 폴더)에 있으면 GOLDEN_DIR 로 가리킨다.
+GOLDEN = Path(os.environ.get("GOLDEN_DIR") or (ROOT / "labels" / "golden"))
+EVAL_DIR = GOLDEN / "eval"
 
 
 def main() -> None:
     global EVAL_DIR
     if len(sys.argv) > 1:
-        EVAL_DIR = ROOT / "labels" / "golden" / sys.argv[1]
+        EVAL_DIR = GOLDEN / sys.argv[1]
     records = [
         json.loads(path.read_text(encoding="utf-8"))
         for path in sorted(EVAL_DIR.glob("*.json"))

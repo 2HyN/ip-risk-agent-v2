@@ -42,7 +42,8 @@ from ip_risk_agent.intelligence.patent.kipris import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN = ROOT / "labels" / "golden"
+# 골든셋이 저장소 밖(팀 공유 폴더)에 있으면 GOLDEN_DIR 로 가리킨다.
+GOLDEN = Path(os.environ.get("GOLDEN_DIR") or (ROOT / "labels" / "golden"))
 RAW_DIR = GOLDEN / "raw"
 
 
