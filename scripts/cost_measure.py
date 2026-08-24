@@ -66,6 +66,44 @@ SAMPLES = REPO_ROOT / "samples"
 DEFAULT_DOC_CHARS = 6000
 
 
+class CompareLogWriter:
+    """PatentComparison 의 실제 내용을 모델·문서별로 남긴다.
+
+    비용 이벤트(``JsonlCapture``)는 개수만 세지 내용을 담지 않는다 — 원문 유출
+    방지 원칙을 드라이버에서도 지킨다. 그런데 모델 티어링은 "싸다"만으로는
+    답이 안 되고 "품질이 유지되는가"가 있어야 결론이 된다. 그 판단 재료가 이
+    파일이다. 이 파일은 로그가 아니라 사람이 검토할 산출물이므로 남긴다 —
+    운영 코드 원칙과는 다른 목적이다.
+    """
+
+    def __init__(self, path: Path, *, model: str) -> None:
+        self._file = path.open("a", encoding="utf-8")
+        self._model = model
+
+    def write(self, *, doc: str, application_number: str, query: str, comparison) -> None:
+        record = {
+            "model": self._model,
+            "doc": doc,
+            "application_number": application_number,
+            "query": query,
+            "matched_elements": [
+                {
+                    "explanation": m.explanation,
+                    "source_quote": m.source_quote,
+                    "patent_quote": m.patent_quote,
+                }
+                for m in comparison.matched_elements
+            ],
+            "distinct_elements": comparison.distinct_elements,
+            "review_caveats": comparison.review_caveats,
+        }
+        self._file.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._file.flush()
+
+    def close(self) -> None:
+        self._file.close()
+
+
 class JsonlCapture(logging.Handler):
     """``event`` 필드를 가진 한 줄 JSON 로그만 골라 JSONL 로 저장한다."""
 
@@ -139,6 +177,7 @@ async def _run_patent(
     max_queries: int,
     rows: int,
     doc_chars: int,
+    compare_log: "CompareLogWriter | None" = None,
 ) -> None:
     if gemini is None:
         print("  patent: GEMINI_API_KEY 없음 — 구간 생략")
@@ -177,11 +216,23 @@ async def _run_patent(
                 f"[patent-1] 출원번호 {document.application_number}\n"
                 f"제목: {document.title}\n초록: {document.abstract}"
             )
-            await gemini.generate(
+            comparison = await gemini.generate(
                 compare_prompt.render(segments=segments, patent_evidence=evidence),
                 PatentComparison,
             )
-            print(f"    compare 완료: {document.application_number}")
+            print(
+                f"    compare 완료: {document.application_number}"
+                f" (matched={len(comparison.matched_elements)},"
+                f" distinct={len(comparison.distinct_elements)},"
+                f" caveats={len(comparison.review_caveats)})"
+            )
+            if compare_log is not None:
+                compare_log.write(
+                    doc=doc.name,
+                    application_number=document.application_number,
+                    query=query,
+                    comparison=comparison,
+                )
 
 
 async def _main() -> int:
@@ -196,11 +247,17 @@ async def _main() -> int:
     parser.add_argument("--doc-chars", type=int, default=DEFAULT_DOC_CHARS)
     parser.add_argument("--skip-license", action="store_true")
     parser.add_argument("--skip-patent", action="store_true")
+    parser.add_argument(
+        "--compare-out", default="compare-results.jsonl",
+        help="PatentComparison 내용(matched/distinct/caveats) 저장 경로 — 품질 비교용",
+    )
     args = parser.parse_args()
 
     capture = JsonlCapture(Path(args.out))
     logging.getLogger("ip_risk_agent").addHandler(capture)
     logging.getLogger("ip_risk_agent").setLevel(logging.INFO)
+
+    compare_log = CompareLogWriter(Path(args.compare_out), model=args.model)
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     kipris_key = os.environ.get("KIPRIS_ACCESS_KEY", "")
@@ -224,14 +281,17 @@ async def _main() -> int:
                 await _run_patent(
                     gemini, kipris, prompts,
                     args.max_docs, args.max_queries, args.rows, args.doc_chars,
+                    compare_log=compare_log,
                 )
     finally:
         if kipris is not None:
             await kipris.aclose()
         capture.close()
+        compare_log.close()
 
     print("\n수집된 이벤트:", json.dumps(capture.counts, ensure_ascii=False, sort_keys=True))
     print(f"로그 파일: {args.out} — 집계는 python scripts/cost_report.py {args.out}")
+    print(f"대조 결과: {args.compare_out} — 모델별 matched/distinct/caveats 원문 비교용")
     return 0
 
 
