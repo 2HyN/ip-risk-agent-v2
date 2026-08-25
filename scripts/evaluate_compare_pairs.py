@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import _repo_path  # noqa: F401  -- 자기 저장소의 코드를 먼저 경로에 올린다
+from _gcloud_creds import maybe_inject
 
 from iprisk_contracts import AnalysisArtifact
 from iprisk_contracts.analysis_artifact import AnalysisSecurityContext
@@ -67,6 +68,9 @@ OUT_ROOT = ROOT / "labels" / "compare-eval"  # labels/ 는 gitignore — 데이�
 _APP_NO = re.compile(r"\(21\)\s*출\s*원\s*번\s*호\s*([0-9\-]+)")
 
 STRATEGIES = ("baseline", "rag")
+
+# goldset2 전문은 128KB 기본 한도를 넘는다.
+csv.field_size_limit(10**8)
 
 
 def _cited_application_number(fulltext: str) -> str | None:
@@ -170,11 +174,11 @@ def _model_client() -> GoogleGenAIClient:
         raise SystemExit("GEMINI_API_KEY 또는 GCP_PROJECT_ID(Vertex ADC) 가 필요하다")
     return GoogleGenAIClient(
         model_id,
-        vertex_config={
+        vertex_config=maybe_inject({
             "vertexai": True,
             "project": project,
             "location": os.environ.get("VERTEX_LOCATION", "global"),
-        },
+        }),
     )
 
 

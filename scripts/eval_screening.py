@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import _repo_path  # noqa: F401
+from _gcloud_creds import maybe_inject
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,7 +48,7 @@ async def main_async() -> int:
         os.environ.get("GEMINI_MODEL_ID") or os.environ.get(
             "GEMINI_MODEL", "gemini-3.6-flash"
         ),
-        vertex_config={"vertexai": True, "project": project, "location": "global"},
+        vertex_config=maybe_inject({"vertexai": True, "project": project, "location": "global"}),
     )
     prompt = PromptLibrary().get("patent_screen_v1")
     plan = FIELDED_V5_PLAN

@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import _repo_path  # noqa: F401
+from _gcloud_creds import maybe_inject
 
 ROOT = Path(__file__).resolve().parents[1]
 G2 = ROOT / "labels" / "goldset2"
@@ -63,7 +64,7 @@ async def extract() -> int:
         os.environ.get("GEMINI_MODEL_ID") or os.environ.get(
             "GEMINI_MODEL", "gemini-3.6-flash"
         ),
-        vertex_config={"vertexai": True, "project": project, "location": "global"},
+        vertex_config=maybe_inject({"vertexai": True, "project": project, "location": "global"}),
     )
     extractor = TechnicalExtractor(
         model,
