@@ -73,7 +73,8 @@ optionalEnvironment:
     # 미설정 = baseline (현행). 확정 조합: fielded_v5 × hybrid.
     - PATENT_SEARCH_STRATEGY
     - PATENT_COMPARE_STRATEGY
-    # 공용 KIPRIS 키의 초당 상한 — 합산 = 인스턴스 수 × 이 값. 권장 1.0.
+    # 공용 KIPRIS 키의 초당 상한 — 합산 = 동시 분석 수 × 이 값. 확정 2.0 은
+    # 큐 maxConcurrentDispatches 8 (합산 16rps < 실측 허용 ~18rps) 를 전제한다.
     - KIPRIS_MAX_RPS
 canonicalEnvironment:
   common:

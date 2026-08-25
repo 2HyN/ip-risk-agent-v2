@@ -3,7 +3,9 @@ queue:
   location: asia-northeast3
   rateLimits:
     maxDispatchesPerSecond: 10
-    maxConcurrentDispatches: 20
+    # 8 × KIPRIS_MAX_RPS 2.0 = 합산 16rps — 공용 키의 실측 허용(~18rps) 안쪽.
+    # 대량 재검사(ops) 때만 체감되는 상한이고 평시 단건 분석에는 영향 없다.
+    maxConcurrentDispatches: 8
   retryConfig:
     maxAttempts: 8
     maxRetryDuration: 86400s

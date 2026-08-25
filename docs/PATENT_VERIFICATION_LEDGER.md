@@ -21,3 +21,26 @@ fielded_v5×hybrid 2/32 (A1 18·A2 11·B 3).
 ## 누적 기록
 
 <!-- 배치 완료 시 아래에 이어 적는다: 일시 · 배치 · 표본 · 수치 · 판정 -->
+
+### 2026-08-25 15:50 — B0: 배포 환경 전면 감사 (읽기 전용 6축, 워크플로)
+
+**결론: 운영 환경 건강. "정체불명 배포"의 정체는 팀원이 8/24 에 만든 리전 CD
+트리거였다.** `asia-northeast3` 에 `deploy-main`(main 푸시 → cloudbuild-cd.yaml
+로 빌드 + api·worker 동시 배포)과 `ci-pr` 이 있고, 리전 미지정 조회가 0건으로
+나와 그간 "트리거 없음"으로 오판했다. **이제부터 main 푸시 = 배포 행위다.**
+
+* 현재 서빙: api·worker 모두 digest `ae99a368…` = **커밋 44c0431 (우리 HEAD)**.
+  worker env 확정 3종(fielded_v5·hybrid·2.0) 정확, canonical 대비 차이 0.
+* 검증기 통과, 백엔드 pytest **1205 전부 통과**, 프런트 tsc·vite 빌드 성공,
+  스모크(health live/ready 200, SPA·번들 서빙, API 401 구조 응답) 정상,
+  IAM 의도대로(api 공개·worker internal+SA 전용).
+* 사용자 Drive 테스트(05:49Z)는 **새 test workspace** 에 붙었고 proj1 은 무변화
+  — 111건 재검사 결과에 영향 없음 확인. test 의 7건 중 6건 DONE, 특허 문서
+  1건(battery-…)이 타임아웃 버그 창(수정 전 워커)에 걸려 RUNNING 좀비로 남아
+  있던 것을 `request_reanalysis`(lease 만료 회수)로 재인큐했다.
+* 정리 조치: api 잔존 `ui-change` 태그 제거(00057 리비전 retain 해제), Cloud
+  Tasks 큐 `maxConcurrentDispatches` 20→**8** (8×2.0=합산 16rps < KIPRIS 실측
+  허용 ~18rps — 대량 재검사 시 공용 키 보호), yaml 주석 정합화.
+* 잔여 기록: 수동 빌드 digest `2af5971a…` 는 트리거 빌드와의 태그 경합으로
+  untagged 화(리비전들이 참조 중이라 삭제 안 함). proj1 마운트 6 중 4 가
+  DISABLED(8/23~24 부터) — 재검사 실패 69건의 원인 그대로, 데이터는 보존.
