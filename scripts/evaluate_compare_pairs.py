@@ -179,7 +179,8 @@ def _model_client() -> GoogleGenAIClient:
 
 
 async def run(
-    pairs_csv: Path, limit: int, strategies: tuple[str, ...], offset: int = 0
+    pairs_csv: Path, limit: int, strategies: tuple[str, ...], offset: int = 0,
+    tag: str = "",
 ) -> int:
     rows = _load_pairs(pairs_csv)[offset:]
     model = _model_client()
@@ -210,7 +211,7 @@ async def run(
             pending = [
                 strategy
                 for strategy in strategies
-                if not (OUT_ROOT / f"eval-{strategy}" / f"{target}-{cited}.json").exists()
+                if not (OUT_ROOT / f"eval-{strategy}{tag}" / f"{target}-{cited}.json").exists()
             ]
             if not pending:
                 continue  # 이미 평가함 — 재실행은 남은 것만 돈다
@@ -262,7 +263,7 @@ async def run(
                         for f in result.provider_failures
                     ],
                 }
-                out_dir = OUT_ROOT / f"eval-{strategy}"
+                out_dir = OUT_ROOT / f"eval-{strategy}{tag}"
                 out_dir.mkdir(parents=True, exist_ok=True)
                 (out_dir / f"{target}-{cited}.json").write_text(
                     json.dumps(record, ensure_ascii=False, indent=1),
@@ -342,6 +343,8 @@ def main() -> None:
         choices=("baseline", "rag", "both"),
         default="both",
     )
+    parser.add_argument("--tag", default="",
+                        help="결과 폴더 접미사 — 음성 쌍 평가는 -neg 로 분리")
     parser.add_argument("--summarize", action="store_true",
                         help="집계만 출력 (API 호출 없음)")
     args = parser.parse_args()
@@ -350,7 +353,7 @@ def main() -> None:
     strategies = (
         STRATEGIES if args.compare_strategy == "both" else (args.compare_strategy,)
     )
-    sys.exit(asyncio.run(run(Path(args.pairs), args.limit, strategies, args.offset)))
+    sys.exit(asyncio.run(run(Path(args.pairs), args.limit, strategies, args.offset, args.tag)))
 
 
 if __name__ == "__main__":
