@@ -3,6 +3,8 @@ services:
     name: ip-risk-agent-v2-api
     role: api
     port: 8080
+    # Dockerfile CMD 의 --proxy-headers 는 여기서 의도적으로 뺐다 — 백엔드가
+    # 클라이언트 IP/스킴을 소비하지 않아 무해하고, 라이브 서비스와 일치시킨다.
     command: [python, -m, uvicorn, ip_risk_agent.main:create_app, --factory, --host, 0.0.0.0, --port, "8080"]
     image: asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application@${IMAGE_DIGEST}
     serviceAccount: iprisk-v2-api@proj-aj22-211200020328.iam.gserviceaccount.com
@@ -106,7 +108,7 @@ canonicalEnvironment:
     # 지우면 baseline 으로 복귀한다.
     PATENT_SEARCH_STRATEGY: fielded_v5
     PATENT_COMPARE_STRATEGY: hybrid
-    # 공용 키: 합산 상한 = maxInstances × 값. 실측 서버 허용 ~18rps.
+    # 공용 키: 합산 = 동시 분석 수 × 값. 큐 동시 8 × 2.0 = 16rps < 실측 ~18rps.
     KIPRIS_MAX_RPS: "2.0"
 secretEnvironment:
   api:

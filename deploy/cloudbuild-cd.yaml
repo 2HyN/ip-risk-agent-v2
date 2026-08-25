@@ -8,6 +8,10 @@
 #
 # 빌드 신원은 수동 빌드와 동일한 iprisk-v2-deploy 다. 트리거로 돌면 SHORT_SHA 는
 # Cloud Build 가 자동 주입한다.
+#
+# 이 파일은 트리거 전용이다 — `gcloud builds submit` 으로 수동 제출하면
+# .gcloudignore 가 tests/ 를 업로드에서 빼므로 pytest 단계가 소스 부재로
+# 실패한다. 수동 빌드는 cloudbuild.yaml 을 쓴다.
 substitutions:
   _REGION: asia-northeast3
   _REPOSITORY: ip-risk-agent-v2
@@ -76,6 +80,22 @@ steps:
         gcloud run deploy ip-risk-agent-v2-api    --image "$${IMAGE}@$${DIGEST}" --region ${_REGION} --quiet
         gcloud run deploy ip-risk-agent-v2-worker --image "$${IMAGE}@$${DIGEST}" --region ${_REGION} --quiet
         echo "deployed $${DIGEST}"
+  # 배포 후 검증 — 리비전 readiness(포트 리슨)만으로는 앱 수준 고장을 못 잡는다.
+  # api 의 ready 엔드포인트가 200 이어야 빌드가 성공으로 끝난다. worker 는
+  # ingress internal 이라 외부 확인이 불가능해 import 스모크와 readiness 에 맡긴다.
+  - id: verify-api-health
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        URL=$$(gcloud run services describe ip-risk-agent-v2-api --region ${_REGION} --format="value(status.url)")
+        for i in 1 2 3 4 5; do
+          CODE=$$(curl -s -o /dev/null -w "%{http_code}" "$${URL}/health/ready") && [ "$${CODE}" = "200" ] && break
+          echo "attempt $${i}: /health/ready -> $${CODE:-curl fail}; retrying"; sleep 5; CODE=""
+        done
+        [ "$${CODE}" = "200" ] || { echo "api readiness check failed"; exit 1; }
+        echo "api ready ($${URL})"
 options:
   logging: CLOUD_LOGGING_ONLY
   machineType: E2_HIGHCPU_8

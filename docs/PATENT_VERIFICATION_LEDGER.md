@@ -44,3 +44,30 @@ fielded_v5×hybrid 2/32 (A1 18·A2 11·B 3).
 * 잔여 기록: 수동 빌드 digest `2af5971a…` 는 트리거 빌드와의 태그 경합으로
   untagged 화(리비전들이 참조 중이라 삭제 안 함). proj1 마운트 6 중 4 가
   DISABLED(8/23~24 부터) — 재검사 실패 69건의 원인 그대로, 데이터는 보존.
+
+### 2026-08-25 16:30 — B0-2: 전 브랜치 CI/CD 재점검 (사용자 요청, 워크플로 3축)
+
+**결론: CI/CD 구조 건전. 트리거는 asia-northeast3 의 2개(deploy-main·ci-pr)가
+전부**(6개 리전 전수 확인)이고, CD 는 pytest 게이트를 실제로 통과한 뒤에만
+빌드→스모크→push→digest 동시 배포로 진행함을 최근 빌드 2건의 step 로그로
+확인했다. **CD 배포 플래그는 `--image` 뿐이라 worker 확정 env 를 절대 밀지
+않는다.** 전 리모트 브랜치 13개의 merge-base diff 검사 결과 **확정 조합을
+다른 값으로 가진 브랜치는 없고**, CI/CD 파일을 바꾸는 것은 advanced_rag(의도된
+큐 8 축소)와 integration(레거시 v1 배포 체계, `cloudbuild.yaml` add/add 충돌
+— **병합 금지 대상**) 뿐이다.
+
+* 이번에 고침: cloudbuild-cd.yaml 에 **배포 후 api /health/ready 검증 단계**
+  추가(리비전 readiness 만으로는 앱 고장을 못 잡음), 트리거 전용임을 헤더에
+  명시(.gcloudignore 의 tests/ 제외 함정), cloud-run-services.yaml 의 낡은
+  주석(합산=maxInstances×값)·api command 의 --proxy-headers 생략 의도 명시.
+  api 는 라이브에서 프록시 헤더 없이 돌지만 백엔드가 클라이언트 IP/스킴을
+  소비하지 않아 무영향 확인 — 선언을 라이브에 맞춰 고정.
+* 보고만 (조치 안 함): ① ci-pr 트리거는 생성(8/24) 후 실행 0건 — main 대상
+  PR 이 아직 없어 PR 게이트 미검증. ② 배포 SA 에 run.admin (developer 면
+  충분) — 팀원 소유라 손대지 않음. ③ CD 게이트의 영구 deselect 1건(pnpm 필요
+  시험, PR node 트랙이 담당)과 pip-audit 부재(PR 전용) — main 직접 push 는
+  취약점 검사 없이 배포됨. ④ CI 에 vite 프로덕션 빌드 단계 없음(typecheck·
+  vitest 만) — 빌드 전용 실패는 CD 의 docker build 에서야 드러남.
+* main 동기화 유의: advanced_rag 는 main 대비 4커밋 앞(문서 3 + deploy 선언 1).
+  병합 푸시는 deploy-main 을 발화시켜 재빌드·재배포된다(코드 무변화라 안전).
+  큐 20→8 은 라이브에 이미 수동 적용됨 — CD 는 큐 yaml 을 자동 적용하지 않는다.
