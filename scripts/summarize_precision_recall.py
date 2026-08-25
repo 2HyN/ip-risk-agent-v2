@@ -19,9 +19,12 @@ from pathlib import Path
 csv.field_size_limit(10_000_000)
 
 
-def load_hits(path: Path) -> tuple[int, int, int]:
-    with path.open(encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
+def load_hits(paths: list[str]) -> tuple[int, int, int]:
+    """여러 결과 CSV 를 이어 붙여 행 단위로 집계한다 (구간이 겹치지 않게 --offset/--limit 로 나눠 돌린 결과용)."""
+    rows: list[dict] = []
+    for p in paths:
+        with Path(p).open(encoding="utf-8-sig") as f:
+            rows.extend(csv.DictReader(f))
     errors = sum(1 for r in rows if (r.get("error") or "").strip())
     hits = sum(1 for r in rows if r["hit"] in ("True", "true", "1"))
     return hits, len(rows), errors
@@ -29,12 +32,12 @@ def load_hits(path: Path) -> tuple[int, int, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--positive", required=True, help="양성(검증 쌍) 결과 CSV")
-    parser.add_argument("--negative", required=True, help="음성 쌍 결과 CSV")
+    parser.add_argument("--positive", required=True, nargs="+", help="양성(검증 쌍) 결과 CSV — 여러 개면 이어 붙임")
+    parser.add_argument("--negative", required=True, nargs="+", help="음성 쌍 결과 CSV — 여러 개면 이어 붙임")
     args = parser.parse_args()
 
-    tp, n_pos, err_pos = load_hits(Path(args.positive))
-    fp, n_neg, err_neg = load_hits(Path(args.negative))
+    tp, n_pos, err_pos = load_hits(args.positive)
+    fp, n_neg, err_neg = load_hits(args.negative)
     fn = n_pos - tp
     tn = n_neg - fp
 

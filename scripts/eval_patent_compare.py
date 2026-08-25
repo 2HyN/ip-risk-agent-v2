@@ -38,6 +38,7 @@ async def _main() -> int:
     parser.add_argument("--out", default="eval-results/patent_compare_recall.csv")
     parser.add_argument("--model", default=os.environ.get("GEMINI_MODEL_ID", "gemini-3.6-flash"))
     parser.add_argument("--limit", type=int, default=None, help="테스트용으로 앞에서 N개만 실행")
+    parser.add_argument("--offset", type=int, default=0, help="앞의 N개를 건너뛰고 시작 (이미 돌린 구간 이어서 실행)")
     parser.add_argument("--fulltext-chars", type=int, default=DEFAULT_FULLTEXT_CHARS)
     args = parser.parse_args()
 
@@ -49,9 +50,11 @@ async def _main() -> int:
     prompt = PromptLibrary().get(PROMPT_NAME)
 
     pairs = load_pairs(Path(args.in_path))
+    if args.offset:
+        pairs = pairs[args.offset:]
     if args.limit:
         pairs = pairs[: args.limit]
-    print(f"대상: {len(pairs)}쌍 (model={args.model})")
+    print(f"대상: {len(pairs)}쌍 (offset={args.offset}, model={args.model})")
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
