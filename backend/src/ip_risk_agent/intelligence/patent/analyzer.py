@@ -30,7 +30,12 @@ from ..common.errors import MalformedProviderOutputError, ProviderFailureError
 from ..common.evidence import source_reference, source_segment_id
 from ..common.validation import validate_artifact
 from ..gemini.client import PromptLibrary, StructuredModelClient
-from ..gemini.schemas import PatentComparison, PatentComparisonV3, TechnicalExtraction
+from ..gemini.schemas import (
+    PatentComparison,
+    PatentComparisonV3,
+    PatentScreening,
+    TechnicalExtraction,
+)
 from . import evidence_builder, grounding
 from .candidate_rank import (
     DEFAULT_CANDIDATE_CAP,
@@ -40,6 +45,7 @@ from .candidate_rank import (
     rank_candidates,
     rank_candidates_bm25,
     rank_candidates_rrf,
+    screen_pool,
 )
 from .claims import CLAIMS_VERSION, chunk_claims, parse_claims
 from .ephemeral_index import INDEX_VERSION, select_context, tokenize
@@ -146,6 +152,7 @@ ANALYZER_VERSION = "patent-analyzer-1.0.0"
 ANALYZER_VERSION_ENHANCED = "patent-analyzer-1.1.0"
 COMPARE_PROMPT = "patent_compare_v2"
 COMPARE_PROMPT_V3 = "patent_compare_v3"
+SCREEN_PROMPT = "patent_screen_v1"
 
 #: rag 대조의 병렬 폭. 모델 429 관측 시 조립에서 낮춘다.
 _RAG_COMPARE_CONCURRENCY = 3
@@ -270,6 +277,8 @@ class PatentAnalyzer:
                 suffixes.append(RANK_VERSION_BM25)
             elif self._plan.use_rrf:
                 suffixes.append(RANK_VERSION_RRF)
+            if self._plan.screen_total_cap:
+                suffixes.append(self._prompts.get(SCREEN_PROMPT).prompt_version)
         if self._compare_strategy == COMPARE_RAG:
             suffixes.append(f"{CLAIMS_VERSION}+{INDEX_VERSION}")
         if suffixes:
@@ -366,6 +375,13 @@ class PatentAnalyzer:
         # 같은 문서를 재검사했더니 특허 2 건이 그렇게 조용히 해소됐다.
         carried = await self._carried_forward(artifact, candidates)
         candidates = [*candidates, *carried]
+        screen_pass = screen_pool_size = 0
+        if self._plan.screen_total_cap:
+            survivors, screen_pool_size = await self._screen_candidates(
+                artifact, outcome.hits_by_query, candidates
+            )
+            screen_pass = len(survivors)
+            candidates = [*candidates, *survivors]
         search_counts = dict(
             query_count=len(queries),
             queries_answered=len(outcome.hits_by_query),
@@ -380,6 +396,10 @@ class PatentAnalyzer:
                 relaxed_queries=len(outcome.relaxations),
                 relax_recovered=outcome.relax_recovered,
             )
+            if self._plan.screen_total_cap:
+                search_counts.update(
+                    screen_pool=screen_pool_size, screen_pass=screen_pass
+                )
         _diagnostic(**search_counts)
         if not candidates:
             # 검색은 정상이고 결과가 없었다. 이것은 성공이다.
@@ -646,6 +666,55 @@ class PatentAnalyzer:
                 },
             ),
         )
+
+    async def _screen_candidates(
+        self, artifact: AnalysisArtifact, hits_by_query, candidates
+    ) -> tuple[list[RankedCandidate], int]:
+        """2단계 대조의 1단계 — 정밀 채널을 Gemini 1콜로 일괄 선별한다.
+
+        정밀 질의(결과집합 ≤ screen_total_cap)에 걸렸으나 순위 선별에 못 든
+        후보는, 어휘가 달라 검색된 것이라 어휘 순위가 못 올리는 것이 구조적
+        이다(계획 문서 §7.2 E2-6) — 적중 자체를 입장권으로 보고 관대한 선별을
+        거쳐 본대조에 태운다. 스크리닝 실패는 분석 실패가 아니다(생략 후 진행).
+        """
+        pool = screen_pool(
+            hits_by_query,
+            selected=frozenset(c.application_number for c in candidates),
+            total_cap=self._plan.screen_total_cap,
+            exclude=self._exclude or None,
+            limit=self._plan.screen_pool_limit,
+        )
+        if not pool:
+            return [], 0
+        listing = "\n".join(
+            f"[{index + 1}] {candidate.title}"
+            + (f" — {candidate.abstract[:300]}" if candidate.abstract else "")
+            for index, candidate in enumerate(pool)
+        )
+        prompt = self._prompts.get(SCREEN_PROMPT).render(
+            segments=render_segments(artifact),
+            candidates=listing,
+            max_pass=self._plan.screen_max_pass,
+        )
+        try:
+            screening = await self._client.generate(prompt, PatentScreening)
+        except (MalformedProviderOutputError, ProviderFailureError):
+            logger.warning("patent screening skipped (provider error)")
+            return [], len(pool)
+        survivors: list[RankedCandidate] = []
+        seen: set[int] = set()
+        for index in screening.related_indexes:
+            if not isinstance(index, int) or index < 1 or index > len(pool):
+                continue  # 목록 밖 번호는 버린다 — 위조 인덱스 방어
+            if index in seen:
+                continue
+            seen.add(index)
+            candidate = pool[index - 1]
+            candidate.metadata["judge_screen"] = "true"
+            survivors.append(candidate)
+            if len(survivors) >= self._plan.screen_max_pass:
+                break
+        return survivors, len(pool)
 
     def _rank_metadata(self, candidate: RankedCandidate) -> dict:
         """확장 순위 전략일 때만 순위 근거를 후보 메타데이터에 남긴다. 베이스라인은 빈 값."""

@@ -122,3 +122,17 @@ class RiskExplanationOutput(_Output):
     )
 
 
+
+
+class PatentScreening(_Output):
+    """정밀 채널 후보의 일괄 선별 (2단계 대조의 1단계).
+
+    **판정이 아니다** — "본대조를 받을 가치가 있는가"만 거른다. 여기서
+    통과한 후보도 본대조(grounding 검증 포함)를 통과해야 결과에 남는다.
+    """
+
+    related_indexes: list[int] = Field(
+        default_factory=list,
+        description="문서와 기술적으로 관련될 가능성이 있는 후보의 번호"
+        " (제시된 목록의 번호, 관련성 높은 순)",
+    )

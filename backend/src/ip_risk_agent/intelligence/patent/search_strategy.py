@@ -22,11 +22,12 @@ FIELDED_V1 = "fielded_v1"
 FIELDED_V2 = "fielded_v2"
 FIELDED_V3 = "fielded_v3"
 FIELDED_V4 = "fielded_v4"
+FIELDED_V5 = "fielded_v5"
 
 COMPARE_BASELINE = "baseline"
 COMPARE_RAG = "rag"
 
-_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1, FIELDED_V2, FIELDED_V3, FIELDED_V4)
+_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1, FIELDED_V2, FIELDED_V3, FIELDED_V4, FIELDED_V5)
 _COMPARE_STRATEGIES = (COMPARE_BASELINE, COMPARE_RAG)
 
 
@@ -71,6 +72,14 @@ class SearchPlan:
     #: 질의가 많아지므로 함께 올린다 — cap 선착순 절단으로 도달 가능 확장이
     #: 잘린 사례가 실측됐다.
     expansion_cap: int = 15
+    #: 2단계 대조 스크리닝 — 정밀 채널(결과집합 ≤ 이 값 질의의 적중, 선별
+    #: 밖 후보)을 Gemini 1콜로 일괄 선별해 통과분을 본대조에 태운다. 0=끔.
+    #: 근거(§7.2 E2-6): v4 질의의 수확은 어휘가 달라 BM25 가 못 올리는데,
+    #: 정밀 적중 자체가 근거다 — 무제한 직접 판정(문서당 64건)은 과하므로
+    #: 스크리닝이 그 사이를 잇는다 (판정 도달 14→21/86 상당).
+    screen_total_cap: int = 0
+    screen_max_pass: int = 12
+    screen_pool_limit: int = 150
 
 
 #: 현행 그대로. 질의 5 × rows 5, 적중수·위치 정렬, cap 6.
@@ -184,6 +193,27 @@ FIELDED_V4_PLAN = SearchPlan(
     expansion_cap=24,
 )
 
+#: fielded_v4 + 2단계 대조 스크리닝. 검색·순위는 v4 그대로, 정밀 채널을
+#: 스크리닝(문서당 Gemini +1콜)으로 본대조에 잇는다.
+FIELDED_V5_PLAN = SearchPlan(
+    name=FIELDED_V5,
+    version="search_fielded_v5",
+    extract_prompt="patent_extract_v4",
+    max_queries=14,
+    rows=60,
+    relax_zero_hits=False,
+    use_rrf=False,
+    compare_cap=8,
+    stage_deadline_seconds=120.0,
+    search_fields=("inventionTitle", "astrtCont"),
+    expand_queries=True,
+    use_bm25=True,
+    judge_tail_to=24,
+    judge_tail_total_cap=30,
+    expansion_cap=24,
+    screen_total_cap=30,
+)
+
 _PLANS = {
     plan.name: plan
     for plan in (
@@ -193,6 +223,7 @@ _PLANS = {
         FIELDED_V2_PLAN,
         FIELDED_V3_PLAN,
         FIELDED_V4_PLAN,
+        FIELDED_V5_PLAN,
     )
 }
 
@@ -230,6 +261,8 @@ __all__ = [
     "FIELDED_V3_PLAN",
     "FIELDED_V4",
     "FIELDED_V4_PLAN",
+    "FIELDED_V5",
+    "FIELDED_V5_PLAN",
     "SearchPlan",
     "plan_for",
     "require_compare_strategy",

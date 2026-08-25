@@ -24,6 +24,7 @@ from ip_risk_agent.intelligence.patent.candidate_rank import (
     rank_candidates,
     rank_candidates_bm25,
     rank_candidates_rrf,
+    screen_pool,
 )
 from ip_risk_agent.intelligence.patent.ephemeral_index import tokenize
 from ip_risk_agent.intelligence.patent.extraction import clamp_queries, query_families
@@ -41,6 +42,7 @@ from ip_risk_agent.intelligence.patent.search_strategy import (
     FIELDED_V2_PLAN,
     FIELDED_V3_PLAN,
     FIELDED_V4_PLAN,
+    FIELDED_V5_PLAN,
     plan_for,
     require_compare_strategy,
 )
@@ -758,3 +760,160 @@ def test_multiword_queries_are_joined_with_and_operator():
     # 단어가 하나면 이을 것이 없다 — 질의가 그대로 나간다.
     run(client.search("종량제", rows=20))
     assert seen[0]["inventionTitle"] == "종량제"
+
+
+# ------------------------------------------------------------------ 스크리닝
+
+
+def test_fielded_v5_plan_adds_screening():
+    plan = plan_for("fielded_v5")
+    assert plan is FIELDED_V5_PLAN
+    assert plan.screen_total_cap == 30
+    assert plan.screen_max_pass == 12
+    # 기존 계획들은 스크리닝을 켜지 않는다 — 동작 보존.
+    assert FIELDED_V4_PLAN.screen_total_cap == 0
+    assert BASELINE_PLAN.screen_total_cap == 0
+
+
+def test_screen_pool_collects_precise_hits_outside_selection():
+    precise = _hit_with_abstract("100", "정밀 질의", "무관 제목", "무관 초록")
+    precise.metadata.update({"search_field": "inventionTitle", "search_total": "7"})
+    broad = _hit_with_abstract("200", "광역 질의", "다른 제목", "다른 초록")
+    broad.metadata.update({"search_field": "astrtCont", "search_total": "2000"})
+    selected_precise = _hit_with_abstract("300", "정밀 질의", "이미 선별", "선별 초록")
+    selected_precise.metadata.update(
+        {"search_field": "inventionTitle", "search_total": "3"}
+    )
+    pool = screen_pool(
+        {"정밀 질의": [selected_precise, precise], "광역 질의": [broad]},
+        selected=frozenset({"300"}),
+        total_cap=30,
+    )
+    numbers = [c.application_number for c in pool]
+    assert numbers == ["100"]  # 정밀 적중 & 미선별만; 광역·기선별 제외
+    assert pool[0].abstract == "무관 초록"  # 스크리닝 입력용 초록 동반
+
+
+def test_analyzer_screening_adds_survivors_to_judgment():
+    """정밀 채널 후보가 스크리닝을 거쳐 본대조에 합류한다."""
+    from ip_risk_agent.intelligence.gemini.schemas import (
+        PatentComparison,
+        PatentScreening,
+    )
+    from ip_risk_agent.intelligence.patent.kipris import (
+        PatentDocument,
+        StaticPatentSearchProvider,
+    )
+
+    strong = _hit_with_abstract(
+        "1020200000001", "방화셔터 연동", "방화셔터 연동 장치", "방화셔터를 연동 제어"
+    )
+    strong.metadata.update({"search_field": "inventionTitle", "search_total": "500"})
+    # 어휘가 달라 순위로는 못 올라오는 정밀 적중 — 스크리닝의 표적.
+    precise = _hit_with_abstract(
+        "1020200000002", "방화셔터 연동", "다른 표현의 발명", "차폐막을 자동 작동"
+    )
+    precise.metadata.update({"search_field": "inventionTitle", "search_total": "4"})
+    provider = StaticPatentSearchProvider(
+        {"방화셔터 연동": [strong, precise]},
+        {
+            number: PatentDocument(
+                application_number=number,
+                title=f"특허 {number}",
+                abstract="초록 본문",
+                claims=["1. 청구항 본문."],
+            )
+            for number in ("1020200000001", "1020200000002")
+        },
+    )
+    import dataclasses
+    plan = dataclasses.replace(
+        FIELDED_V5_PLAN, compare_cap=1, judge_tail_to=0, expand_queries=False
+    )
+    model = ScriptedModelClient(
+        [
+            TechnicalExtraction(
+                is_technical=True,
+                technical_elements=["방화셔터 연동 제어"],
+                search_queries=["방화셔터 연동"],
+                source_segment_ids=["seg-1"],
+            ),
+            # 스크리닝: 목록의 1번(정밀 후보)을 통과시키고, 범위 밖 99는 버려진다.
+            PatentScreening(related_indexes=[1, 99]),
+            # 본대조 2건 (cap 1 = strong, 생존자 = precise) — 매칭 없음 응답.
+            PatentComparison(application_number="1020200000001"),
+            PatentComparison(application_number="1020200000002"),
+        ]
+    )
+    analyzer = PatentAnalyzer(
+        provider, model, search_plan=plan, compare_strategy="baseline"
+    )
+    artifact = make_artifact(
+        "방화셔터를 연동 제어하는 설계.",
+        logical_path="/Google Drive user@example.com/docs/plan.md",
+        kind=ArtifactKind.DOCUMENT_TEXT,
+        analyzers=[AnalysisType.PATENT],
+    )
+    result = run(analyzer.analyze(artifact))
+    assert result.status is AnalysisStatus.SUCCEEDED
+    # 대조가 2건 모두 수행됐다 = 생존자가 판정에 합류했다 (응답 소진으로 증명).
+    assert model.prompts and len(model.prompts) == 4
+    # 스크리닝 프롬프트에 정밀 후보의 제목·초록이 실렸다.
+    assert "다른 표현의 발명" in model.prompts[1]
+    assert "search_fielded_v5" in result.versions.prompt_version
+    assert "patent_screen" in result.versions.prompt_version
+
+
+def test_screening_failure_is_soft():
+    """스크리닝 오류는 분석을 죽이지 않는다 — 생략하고 진행한다."""
+    from ip_risk_agent.intelligence.common.errors import (
+        MalformedProviderOutputError,
+    )
+    from ip_risk_agent.intelligence.gemini.schemas import PatentComparison
+    from ip_risk_agent.intelligence.patent.kipris import (
+        PatentDocument,
+        StaticPatentSearchProvider,
+    )
+    import dataclasses
+
+    strong = _hit_with_abstract(
+        "1020200000001", "방화셔터 연동", "방화셔터 연동 장치", "방화셔터 연동 제어"
+    )
+    strong.metadata.update({"search_field": "inventionTitle", "search_total": "500"})
+    precise = _hit_with_abstract("1020200000002", "방화셔터 연동", "무관", "무관")
+    precise.metadata.update({"search_field": "inventionTitle", "search_total": "4"})
+    provider = StaticPatentSearchProvider(
+        {"방화셔터 연동": [strong, precise]},
+        {
+            "1020200000001": PatentDocument(
+                application_number="1020200000001",
+                title="특허", abstract="초록", claims=["1. 청구항."],
+            )
+        },
+    )
+    plan = dataclasses.replace(
+        FIELDED_V5_PLAN, compare_cap=1, judge_tail_to=0, expand_queries=False
+    )
+    model = ScriptedModelClient(
+        [
+            TechnicalExtraction(
+                is_technical=True,
+                technical_elements=["방화셔터 연동"],
+                search_queries=["방화셔터 연동"],
+                source_segment_ids=["seg-1"],
+            ),
+            MalformedProviderOutputError("GEMINI", "screening broke"),
+            PatentComparison(application_number="1020200000001"),
+        ]
+    )
+    analyzer = PatentAnalyzer(
+        provider, model, search_plan=plan, compare_strategy="baseline"
+    )
+    artifact = make_artifact(
+        "방화셔터 연동 설계.",
+        logical_path="/Google Drive user@example.com/docs/plan.md",
+        kind=ArtifactKind.DOCUMENT_TEXT,
+        analyzers=[AnalysisType.PATENT],
+    )
+    result = run(analyzer.analyze(artifact))
+    assert result.status is AnalysisStatus.SUCCEEDED  # 스크리닝 없이 완주

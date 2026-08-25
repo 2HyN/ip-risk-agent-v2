@@ -84,6 +84,8 @@ class RankedCandidate:
     ipc_consistent: bool = False
     #: BM25 전략에서만 채워진다 — 원문↔(제목+초록) 어휘 유사도.
     bm25_score: float = 0.0
+    #: 검색 응답에 실려 온 초록 (스크리닝 입력). 없으면 빈 문자열.
+    abstract: str = ""
 
     @property
     def query_hits(self) -> int:
@@ -430,3 +432,54 @@ def rank_candidates_bm25(
                 candidate.metadata["judge_tail"] = "true"
                 selected.append(candidate)
     return selected
+
+
+def screen_pool(
+    hits_by_query: dict[str, list[PatentSearchHit]],
+    *,
+    selected: frozenset[str],
+    total_cap: int = 30,
+    exclude: frozenset[str] | None = None,
+    limit: int = 60,
+) -> list[RankedCandidate]:
+    """정밀 채널 — 결과집합 ≤ total_cap 질의에 걸렸으나 선별에 못 든 후보들.
+
+    실측 근거(계획 문서 §7.2 E2-6): 질의 생성 v4 가 데려온 인용은 원문과
+    표면 어휘가 다르기 때문에 검색된 것이라, 어휘 순위(BM25)가 낮게 매기는
+    것이 구조적이다. 이 채널에서는 **적중 자체가 근거**이므로 순위와 무관하게
+    스크리닝(일괄 선별) 입장권을 준다. 순서는 (최소 결과집합, 최선 위치,
+    출원번호)로 결정론이다.
+    """
+    pool: dict[str, RankedCandidate] = {}
+    keys: dict[str, tuple[int, int]] = {}
+    for query in sorted(hits_by_query):
+        for position, hit in enumerate(hits_by_query[query]):
+            number = hit.application_number
+            if number in selected or (exclude and number in exclude):
+                continue
+            total = hit.metadata.get("search_total", "")
+            if not total.isdigit() or int(total) > total_cap:
+                continue
+            candidate = pool.get(number)
+            if candidate is None:
+                candidate = RankedCandidate(
+                    application_number=number,
+                    title=hit.title,
+                    matched_queries=[query],
+                    best_position=position,
+                    metadata=dict(hit.metadata),
+                    abstract=hit.abstract,
+                )
+                pool[number] = candidate
+                keys[number] = (int(total), position)
+            else:
+                if query not in candidate.matched_queries:
+                    candidate.matched_queries.append(query)
+                if not candidate.abstract and hit.abstract:
+                    candidate.abstract = hit.abstract
+                keys[number] = min(keys[number], (int(total), position))
+    ordered = sorted(
+        pool.values(),
+        key=lambda c: (*keys[c.application_number], c.application_number),
+    )
+    return ordered[:limit]
