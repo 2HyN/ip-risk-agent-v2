@@ -21,11 +21,12 @@ EXPANDED_V1 = "expanded_v1"
 FIELDED_V1 = "fielded_v1"
 FIELDED_V2 = "fielded_v2"
 FIELDED_V3 = "fielded_v3"
+FIELDED_V4 = "fielded_v4"
 
 COMPARE_BASELINE = "baseline"
 COMPARE_RAG = "rag"
 
-_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1, FIELDED_V2, FIELDED_V3)
+_SEARCH_STRATEGIES = (BASELINE, EXPANDED_V1, FIELDED_V1, FIELDED_V2, FIELDED_V3, FIELDED_V4)
 _COMPARE_STRATEGIES = (COMPARE_BASELINE, COMPARE_RAG)
 
 
@@ -66,6 +67,10 @@ class SearchPlan:
     #: cap 16 에도 +1 뿐이라 비효율이 실측됐다.
     judge_tail_to: int = 0
     judge_tail_total_cap: int = 30
+    #: 질의 확장(2단어 부분조합)의 상한. v4 는 프롬프트가 계열을 늘려 base
+    #: 질의가 많아지므로 함께 올린다 — cap 선착순 절단으로 도달 가능 확장이
+    #: 잘린 사례가 실측됐다.
+    expansion_cap: int = 15
 
 
 #: 현행 그대로. 질의 5 × rows 5, 적중수·위치 정렬, cap 6.
@@ -155,6 +160,30 @@ FIELDED_V3_PLAN = SearchPlan(
     judge_tail_total_cap=30,
 )
 
+#: fielded_v3 + 질의 생성 v4. 골든셋 도달성 마이닝(3렌즈·라이브 probe 100회)
+#: 의 처방이다 — A2 28건 중 20건, B 6건 중 4~5건은 어휘·조합이 실재하는데
+#: 질의 생성이 못 만든 것이 원인으로 확정됐다. 프롬프트 v4 는 5계열(정식
+#: 명칭 / 구성요소·수단 교차 / 문제·효과 어휘 / 동의어·표기 이형 / 앵커
+#: 해제·대칭)로 10~14개를 만들고, 클라이언트는 `*` AND 연산자와 필드별
+#: 무절단 병합을 쓴다 (수집 아티팩트로 인용 12건이 잘리던 결함 수정).
+FIELDED_V4_PLAN = SearchPlan(
+    name=FIELDED_V4,
+    version="search_fielded_v4",
+    extract_prompt="patent_extract_v4",
+    max_queries=14,
+    rows=60,
+    relax_zero_hits=False,
+    use_rrf=False,
+    compare_cap=8,
+    stage_deadline_seconds=120.0,
+    search_fields=("inventionTitle", "astrtCont"),
+    expand_queries=True,
+    use_bm25=True,
+    judge_tail_to=24,
+    judge_tail_total_cap=30,
+    expansion_cap=24,
+)
+
 _PLANS = {
     plan.name: plan
     for plan in (
@@ -163,6 +192,7 @@ _PLANS = {
         FIELDED_V1_PLAN,
         FIELDED_V2_PLAN,
         FIELDED_V3_PLAN,
+        FIELDED_V4_PLAN,
     )
 }
 
@@ -198,6 +228,8 @@ __all__ = [
     "FIELDED_V2_PLAN",
     "FIELDED_V3",
     "FIELDED_V3_PLAN",
+    "FIELDED_V4",
+    "FIELDED_V4_PLAN",
     "SearchPlan",
     "plan_for",
     "require_compare_strategy",

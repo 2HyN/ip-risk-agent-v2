@@ -305,7 +305,9 @@ class PatentAnalyzer:
             # 특허 검토 대상이 아니다. 실패가 아니라 해당 없음이다.
             return builder.skipped(**versions)
         queries = (
-            expand_queries(extraction.search_queries)
+            expand_queries(
+                extraction.search_queries, cap=self._plan.expansion_cap
+            )
             if self._query_expansion
             else extraction.search_queries
         )

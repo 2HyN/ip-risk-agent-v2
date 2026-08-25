@@ -338,8 +338,9 @@ def test_fielded_search_merges_title_first_and_dedupes():
         "1020200000003",
     ]
     assert [path for path, _ in calls] == [ADVANCED_SEARCH_PATH, ADVANCED_SEARCH_PATH]
-    assert calls[0][1]["inventionTitle"] == "셔터 연동"
-    assert calls[1][1]["astrtCont"] == "셔터 연동"
+    # AND 연산자 실측 — 공백 다단어는 3단어에서 순수 AND 가 아니므로 * 로 잇는다.
+    assert calls[0][1]["inventionTitle"] == "셔터*연동"
+    assert calls[1][1]["astrtCont"] == "셔터*연동"
     # getAdvancedSearch 도 docsStart 는 무시된다(1페이지 반복 실측) —
     # 실제로 듣는 pageNo/numOfRows 를 쓴다.
     assert calls[0][1]["numOfRows"] == "20"

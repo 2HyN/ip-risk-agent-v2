@@ -266,10 +266,15 @@ class KiprisClient:
             # (docsStart=21 이 1페이지와 완전 중복). ``pageNo``/``numOfRows`` 는
             # 실제로 듣는다 — numOfRows=40 에 40건 유니크, pageNo=2 는 다음
             # 페이지가 실측으로 확인됐다. rows>20 확장이 가능하다.
+            #
+            # AND 연산자 실측 (2026-08-25): 공백 다단어는 순수 AND 가 아니다 —
+            # 3단어에서 "실내 영상 위치"=0건 vs "실내*영상*위치"=573건(정답
+            # 포함)이고, 단어 추가가 기존 매치를 깨기도 한다. ``*`` 가 순수
+            # AND 로 동작하며 2단어에서는 공백형과 결과가 동일함을 확인했다.
             root = await self._get(
                 ADVANCED_SEARCH_PATH,
                 {
-                    field: query,
+                    field: "*".join(query.split()),
                     "patent": "true",
                     "utility": "true",
                     "pageNo": "1",
@@ -278,11 +283,16 @@ class KiprisClient:
             )
             # 어느 필드에서 걸렸는지는 순위 신호다 — 제목 적중이 초록 적중보다
             # 정밀하다 (인용 문헌 제목 4위 / 초록 9위 실측).
+            #
+            # 병합 상한은 두지 않는다 — 이전의 ``merged[:rows]`` 절단은 제목
+            # 결과가 캡을 채우면 초록 히트를 통째로 버렸고, 골든셋 실측에서
+            # 인용 12건이 정확히 이 아티팩트로 수집에서 잘렸다. 상한은
+            # 필드당 rows 로 이미 유계다 (필드 2 × rows).
             for hit in self._parse_hits(root, query, extra={"search_field": field}):
                 if hit.application_number not in seen:
                     seen.add(hit.application_number)
                     merged.append(hit)
-        return merged[: max(rows, 20)]
+        return merged
 
     def _parse_hits(
         self, root: Element, query: str, *, extra: dict[str, str] | None = None

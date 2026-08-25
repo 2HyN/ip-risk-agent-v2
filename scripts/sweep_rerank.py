@@ -56,7 +56,7 @@ def _biblio_ipcs(number: str) -> set[str]:
     return out
 
 
-def load_cases(rows: int = 60) -> list[dict]:
+def load_cases(rows: int = 60, queries_prefix: str = "queries") -> list[dict]:
     """출원별 (풀 후보, 정답 인용, 원문 정보) — 컷오프·자기 제외 적용."""
     pairs = {
         json.loads(line)["application_number"]: json.loads(line)
@@ -84,9 +84,10 @@ def load_cases(rows: int = 60) -> list[dict]:
         if not cited:
             continue
         cutoff = re.sub(r"\D", "", _biblio(number, "applicationDate"))[:8]
-        queries = json.loads(
-            (DIAG / f"queries-{number}.json").read_text(encoding="utf-8")
-        )
+        qpath = DIAG / f"{queries_prefix}-{number}.json"
+        if not qpath.exists():
+            continue
+        queries = json.loads(qpath.read_text(encoding="utf-8"))
         originals = [
             q for q in queries
             if not any(set(q.split()) < set(o.split()) for o in queries if o != q)
