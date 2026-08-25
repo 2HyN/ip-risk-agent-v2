@@ -58,6 +58,8 @@ from ip_risk_agent.intelligence.explain import GeminiRiskExplainer
 from ip_risk_agent.intelligence.license.package_metadata import HttpPackageMetadataProvider
 from ip_risk_agent.intelligence.patent.cache import CachingPatentSearchProvider
 from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+from ip_risk_agent.intelligence.patent.rate_limit import TokenBucket
+from ip_risk_agent.intelligence.patent.search_strategy import plan_for
 from ip_risk_agent.gcp.license_clause_cache import FirestoreClauseSearchCache
 from ip_risk_agent.gcp.patent_cache import FirestorePatentResponseCache
 from ip_risk_agent.intelligence.public import IntelligenceFacade, create_analyzer_registry
@@ -387,8 +389,20 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
     # 프로세스 안에만 두면 재분석 때마다 다시 검색한다 — 아끼려는 호출이
     # 바로 그것이다 (§9.2).
     clause_cache = FirestoreClauseSearchCache(foundation.clients.firestore)
+    # 검색 채널(전문 vs 항목별)은 클라이언트 속성이라 계획을 여기서 읽어
+    # 넘긴다. 버킷은 인스턴스 단위 — 공용 키의 합산 상한은 인스턴스 수 ×
+    # KIPRIS_MAX_RPS 다 (계획 문서 §7.2 성능 검토).
+    patent_plan = plan_for(settings.patent_search_strategy)
     kipris = CachingPatentSearchProvider(
-        KiprisClient(_secret(foundation, settings.kipris_api_key_secret_id)),
+        KiprisClient(
+            _secret(foundation, settings.kipris_api_key_secret_id),
+            rate_limiter=(
+                TokenBucket(settings.kipris_max_rps)
+                if settings.kipris_max_rps
+                else None
+            ),
+            search_fields=patent_plan.search_fields,
+        ),
         patent_cache,
     )
     retriever = None
@@ -415,6 +429,8 @@ def _compose_worker(foundation, context: RuntimeCompositionContext) -> RuntimeCo
             # 검색과 무관하게 다시 대조한다. 재검사에서 Risk 가
             # 조용히 해소되는 것을 막는다.
             patent_response_cache=patent_cache,
+            patent_search_strategy=settings.patent_search_strategy,
+            patent_compare_strategy=settings.patent_compare_strategy,
             previously_matched_patents=context.control_facade.previously_matched_patents,
             # 분석기는 workspace 를 모른다. Control 이 배포 형태 축과 정책 표 판본을
             # 읽어 주는 **함수 하나**를 넘긴다 (§3 · §5.10).

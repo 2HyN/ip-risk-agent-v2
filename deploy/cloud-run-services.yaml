@@ -69,6 +69,12 @@ optionalEnvironment:
     - RAG_REGION
     - RAG_CORPUS_ID
     - RAG_CORPUS_VERSION
+    # 특허 고도화 전략 스위치 (docs/PATENT_RAG_ENHANCEMENT_PLAN.md §3·§7.2).
+    # 미설정 = baseline (현행). 확정 조합: fielded_v5 × hybrid.
+    - PATENT_SEARCH_STRATEGY
+    - PATENT_COMPARE_STRATEGY
+    # 공용 KIPRIS 키의 초당 상한 — 합산 = 인스턴스 수 × 이 값. 권장 1.0.
+    - KIPRIS_MAX_RPS
 canonicalEnvironment:
   common:
     APP_ENV: production

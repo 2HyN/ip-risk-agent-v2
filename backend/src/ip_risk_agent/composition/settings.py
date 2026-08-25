@@ -77,6 +77,14 @@ class Settings:
     vertex_config: str | None = None
     kipris_api_key_secret_id: str | None = None
     kipris_access_key: str | None = field(default=None, repr=False)
+    #: 특허 고도화 전략 스위치 (docs/PATENT_RAG_ENHANCEMENT_PLAN.md §3·§7.2).
+    #: 기본값 baseline — 설정하지 않으면 현행 그대로다. 이름은 분석기 조립에서
+    #: 화이트리스트로 검증된다 (오타가 조용히 베이스라인으로 떨어지지 않게).
+    patent_search_strategy: str = "baseline"
+    patent_compare_strategy: str = "baseline"
+    #: KIPRIS 초당 호출 상한 (유료 등급·공용 키의 남은 제약). 미설정이면 버킷
+    #: 없음. 키를 여러 주체가 나눠 쓰므로 인스턴스 수 × 이 값이 합산 상한이다.
+    kipris_max_rps: float | None = None
     rag_region: str | None = None
     rag_corpus_id: str | None = None
     rag_corpus_version: str | None = None
@@ -138,6 +146,11 @@ class Settings:
             vertex_config=value("VERTEX_AI_LOCATION_OR_ENDPOINT_CONFIG"),
             kipris_api_key_secret_id=value("KIPRIS_API_KEY_SECRET_ID"),
             kipris_access_key=value("KIPRIS_ACCESS_KEY"),
+            patent_search_strategy=value("PATENT_SEARCH_STRATEGY") or "baseline",
+            patent_compare_strategy=value("PATENT_COMPARE_STRATEGY") or "baseline",
+            kipris_max_rps=(
+                float(value("KIPRIS_MAX_RPS")) if value("KIPRIS_MAX_RPS") else None
+            ),
             rag_region=value("RAG_REGION"),
             rag_corpus_id=value("RAG_CORPUS_ID"),
             rag_corpus_version=value("RAG_CORPUS_VERSION"),

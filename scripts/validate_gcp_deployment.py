@@ -270,6 +270,9 @@ def validate(root: Path = ROOT) -> list[str]:
             "RAG_REGION",
             "RAG_CORPUS_ID",
             "RAG_CORPUS_VERSION",
+            "PATENT_SEARCH_STRATEGY",
+            "PATENT_COMPARE_STRATEGY",
+            "KIPRIS_MAX_RPS",
         },
     }
     for role, expected_names in expected_optional.items():
