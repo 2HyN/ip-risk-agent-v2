@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -67,7 +68,7 @@ from ip_risk_agent.intelligence.patent.extraction import (
     expand_queries,
     query_families,
 )
-from ip_risk_agent.intelligence.patent.kipris import KiprisClient
+from ip_risk_agent.intelligence.patent.kipris import KiprisClient, PatentSearchHit
 from ip_risk_agent.intelligence.patent.query_builder import run_searches
 from ip_risk_agent.intelligence.patent.rate_limit import TokenBucket
 from ip_risk_agent.intelligence.patent.search_strategy import plan_for
@@ -79,6 +80,74 @@ OUT_ROOT = ROOT / "labels" / "search-recall"
 #: probe_query_ceiling.py 가 이미 인용 번호 -> 출원번호를 전부 해석해 뒀다.
 #: 같은 캐시를 읽어 KIPRIS 호출을 0 회로 만든다.
 RESOLVE_CACHE = ROOT / "labels" / "query-ceiling"
+#: 검색 응답 캐시. 질의·필드·rows 가 같으면 KIPRIS 를 다시 부르지 않는다.
+SEARCH_CACHE = ROOT / "labels" / "search-cache"
+
+#: **클라이언트의 검색 동작 판(版).** 요청을 만드는 방식이 바뀌면 반드시
+#: 올린다 — 안 올리면 옛 동작으로 받은 응답을 새 동작의 결과로 오독한다.
+#: 지금 값은 b68dd2d 기준이다: `*` AND 조인 + 필드 병합 무절단. 그 이전
+#: (공백 조인·merged[:rows]) 응답과 섞이면 안 되므로 판이 다르다.
+CLIENT_REV = "and-star+nomergecap"
+
+
+class CachedSearch:
+    """KiprisClient 를 감싸 검색 응답을 디스크에 남긴다.
+
+    KIPRIS 는 공용 키의 0.7초 간격이 하한이라 수집이 벽시계를 지배한다.
+    그런데 이 하네스가 답하는 질문(임계값·순위 변형)은 **같은 풀 위에서**
+    반복 채점하는 성질이다. 한 번 받아 두면 재채점이 공짜가 된다 —
+    E2-4 가 고정 풀 ablation 으로 옮겨 간 것과 같은 이유다.
+    """
+
+    def __init__(self, inner: KiprisClient, fields, cache: Path) -> None:
+        self._inner = inner
+        self._tag = CLIENT_REV + "|" + ",".join(fields or ())
+        self._cache = cache
+        self.hits = 0
+        self.misses = 0
+
+    def _path(self, query: str, rows: int) -> Path:
+        digest = hashlib.sha1(
+            f"{self._tag}|{query}|{rows}".encode()
+        ).hexdigest()[:16]
+        return self._cache / f"s-{digest}.json"
+
+    async def search(self, query: str, *, rows: int = 5):
+        path = self._path(query, rows)
+        if path.exists():
+            self.hits += 1
+            return [
+                PatentSearchHit(
+                    application_number=row["n"],
+                    title=row["t"],
+                    query=query,
+                    metadata=row["m"],
+                    abstract=row["a"],
+                )
+                for row in json.loads(path.read_text(encoding="utf-8"))
+            ]
+        found = await self._inner.search(query, rows=rows)
+        self.misses += 1
+        self._cache.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                [
+                    {
+                        "n": hit.application_number,
+                        "t": hit.title,
+                        "m": hit.metadata,
+                        "a": hit.abstract,
+                    }
+                    for hit in found
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return found
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
 
 
 def _text(path: Path, tag: str) -> str:
@@ -201,7 +270,10 @@ async def run(args) -> int:
     if not key:
         raise SystemExit("KIPRIS_ACCESS_KEY 가 필요하다")
     plan = plan_for(args.search_strategy)
-    out_dir = OUT_ROOT / plan.name
+    # 모델을 바꿔 재면 질의가 달라지므로 결과가 섞이면 안 된다. 태그로 가른다.
+    out_dir = OUT_ROOT / (
+        f"{plan.name}@{args.model_tag}" if args.model_tag else plan.name
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     records = [
@@ -214,12 +286,40 @@ async def run(args) -> int:
     print(f"{plan.name}: 출원 {len(records)}건 · 인용 해석 캐시 {len(resolved)}건")
 
     max_rps = os.environ.get("KIPRIS_MAX_RPS", "").strip()
-    kipris = KiprisClient(
-        access_key=key,
-        search_fields=plan.search_fields,
-        rate_limiter=TokenBucket(float(max_rps)) if max_rps else None,
+    kipris = CachedSearch(
+        KiprisClient(
+            access_key=key,
+            search_fields=plan.search_fields,
+            rate_limiter=TokenBucket(float(max_rps)) if max_rps else None,
+        ),
+        plan.search_fields,
+        SEARCH_CACHE,
     )
     model = _model_client()
+
+    # 질의 추출을 먼저 몰아서 끝낸다 — Gemini 는 KIPRIS 의 초당 제한과 무관하니
+    # 병렬로 돌리고, 그 다음 검색만 직렬로 흘린다. 캐시가 차 있으면 즉시 끝난다.
+    pending = [
+        record
+        for record in records
+        if not (out_dir / f"{record['application_number']}.json").exists()
+        and _abstract_of(record["application_number"])
+    ]
+    if pending:
+        gate = asyncio.Semaphore(5)
+
+        async def _prefetch(record):
+            number = record["application_number"]
+            async with gate:
+                try:
+                    await _queries_for(
+                        number, _abstract_of(number), plan, model, out_dir
+                    )
+                except Exception as error:  # noqa: BLE001 -- 1건 실패가 전체를 막지 않는다
+                    print(f"  {number}: 질의 추출 실패 {type(error).__name__}")
+
+        await asyncio.gather(*(_prefetch(record) for record in pending))
+        print(f"질의 추출 완료 ({len(pending)}건) — 이제 검색만 남는다\n")
 
     totals = Counter()
     query_widths: list[int] = []
@@ -322,6 +422,10 @@ async def run(args) -> int:
             f" · 30건 이하 {sum(1 for w in query_widths if w <= 30)}/{len(query_widths)}"
             f" · 300건 초과 {sum(1 for w in query_widths if w > 300)}/{len(query_widths)}"
         )
+    print(
+        f"\n  검색 캐시 적중 {kipris.hits} · 신규 호출 {kipris.misses}"
+        f" (클라이언트 판 {CLIENT_REV})"
+    )
     print(f"\n세부 -> {out_dir}")
     return 0
 
@@ -332,6 +436,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--search-strategy", required=True)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--model-tag", default="",
+                        help="출력 폴더를 모델별로 가른다 (질의 캐시도 분리된다)")
     args = parser.parse_args()
     sys.exit(asyncio.run(run(args)))
 

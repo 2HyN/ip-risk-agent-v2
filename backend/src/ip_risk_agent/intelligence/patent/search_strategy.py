@@ -22,6 +22,7 @@ FIELDED_V1 = "fielded_v1"
 FIELDED_V2 = "fielded_v2"
 FIELDED_V3 = "fielded_v3"
 FIELDED_V4 = "fielded_v4"
+FIELDED_V5 = "fielded_v5"
 
 COMPARE_BASELINE = "baseline"
 COMPARE_RAG = "rag"
@@ -184,6 +185,37 @@ FIELDED_V4_PLAN = SearchPlan(
     expansion_cap=24,
 )
 
+#: v4 + **질의 결과집합 대역 교정.** 손잡이는 v4 그대로이고 추출 프롬프트만
+#: 바뀐다 — 이번 변경의 원인 귀속을 하나로 묶기 위해서다.
+#:
+#: 근거: 골든셋 샘플(출원 10 · 인용 16)에서 v4 가 v3 에 졌다. 풀 진입
+#: 2/16 vs 6/16, 풀 천장 3 vs 6. 원인은 **과도한 협소화**로 특정됐다 —
+#: 질의당 결과집합 중앙값이 v3 15건 vs v4 5건이었고, 오라클 곡선(질의
+#: 812회)에서 10건 미만 구간의 적중률은 25% 로 10~30건(42%)·30~100건
+#: (44%) 보다 낮다. "좁을수록 좋다" 가 아니라 대역이 있다.
+#:
+#: 순위층은 건드리지 않는다. 캐시된 풀 위에서 21개 변형을 스위프한 결과
+#: (`sweep_search_rank.py`) 정밀꼬리 임계값은 10~1000 어디서도 적중이
+#: 불변이었고, cap 16 만 +1 을 주되 판정 대상이 10.8 → 17.2 건으로 늘어
+#: 전환율이 나빴다. BM25 를 끄면 0 으로 무너진다 — 순위층은 포화다.
+FIELDED_V5_PLAN = SearchPlan(
+    name=FIELDED_V5,
+    version="search_fielded_v5",
+    extract_prompt="patent_extract_v5",
+    max_queries=FIELDED_V4_PLAN.max_queries,
+    rows=FIELDED_V4_PLAN.rows,
+    relax_zero_hits=FIELDED_V4_PLAN.relax_zero_hits,
+    use_rrf=FIELDED_V4_PLAN.use_rrf,
+    compare_cap=FIELDED_V4_PLAN.compare_cap,
+    stage_deadline_seconds=FIELDED_V4_PLAN.stage_deadline_seconds,
+    search_fields=FIELDED_V4_PLAN.search_fields,
+    expand_queries=FIELDED_V4_PLAN.expand_queries,
+    use_bm25=FIELDED_V4_PLAN.use_bm25,
+    judge_tail_to=FIELDED_V4_PLAN.judge_tail_to,
+    judge_tail_total_cap=FIELDED_V4_PLAN.judge_tail_total_cap,
+    expansion_cap=FIELDED_V4_PLAN.expansion_cap,
+)
+
 _PLANS = {
     plan.name: plan
     for plan in (
@@ -193,6 +225,7 @@ _PLANS = {
         FIELDED_V2_PLAN,
         FIELDED_V3_PLAN,
         FIELDED_V4_PLAN,
+        FIELDED_V5_PLAN,
     )
 }
 
@@ -230,6 +263,8 @@ __all__ = [
     "FIELDED_V3_PLAN",
     "FIELDED_V4",
     "FIELDED_V4_PLAN",
+    "FIELDED_V5",
+    "FIELDED_V5_PLAN",
     "SearchPlan",
     "plan_for",
     "require_compare_strategy",

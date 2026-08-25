@@ -41,6 +41,7 @@ from ip_risk_agent.intelligence.patent.search_strategy import (
     FIELDED_V2_PLAN,
     FIELDED_V3_PLAN,
     FIELDED_V4_PLAN,
+    FIELDED_V5_PLAN,
     plan_for,
     require_compare_strategy,
 )
@@ -758,3 +759,35 @@ def test_multiword_queries_are_joined_with_and_operator():
     # 단어가 하나면 이을 것이 없다 — 질의가 그대로 나간다.
     run(client.search("종량제", rows=20))
     assert seen[0]["inventionTitle"] == "종량제"
+
+
+def test_fielded_v5_changes_only_the_extraction_prompt():
+    """v5 는 v4 에서 추출 프롬프트 하나만 바꾼다.
+
+    질의 결과집합 대역을 프롬프트로 조준할 수 있는가가 유일한 질문이므로,
+    손잡이가 하나라도 같이 움직이면 원인 귀속이 섞인다. 이 시험이 그
+    단일 변수 조건을 고정한다.
+    """
+    plan = plan_for("fielded_v5")
+    assert plan is FIELDED_V5_PLAN
+    assert plan.extract_prompt == "patent_extract_v5"
+    assert plan.version == "search_fielded_v5"
+    moved = {
+        field
+        for field in (
+            "max_queries",
+            "rows",
+            "relax_zero_hits",
+            "use_rrf",
+            "compare_cap",
+            "stage_deadline_seconds",
+            "search_fields",
+            "expand_queries",
+            "use_bm25",
+            "judge_tail_to",
+            "judge_tail_total_cap",
+            "expansion_cap",
+        )
+        if getattr(plan, field) != getattr(FIELDED_V4_PLAN, field)
+    }
+    assert moved == set(), f"v4 대비 함께 움직인 손잡이: {moved}"
