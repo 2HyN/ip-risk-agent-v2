@@ -63,6 +63,7 @@ from .search_strategy import (
     BASELINE,
     BASELINE_PLAN,
     COMPARE_BASELINE,
+    COMPARE_HYBRID,
     COMPARE_RAG,
     SearchPlan,
     require_compare_strategy,
@@ -152,6 +153,7 @@ ANALYZER_VERSION = "patent-analyzer-1.0.0"
 ANALYZER_VERSION_ENHANCED = "patent-analyzer-1.1.0"
 COMPARE_PROMPT = "patent_compare_v2"
 COMPARE_PROMPT_V3 = "patent_compare_v3"
+COMPARE_PROMPT_V4 = "patent_compare_v4"
 SCREEN_PROMPT = "patent_screen_v1"
 
 #: rag 대조의 병렬 폭. 모델 429 관측 시 조립에서 낮춘다.
@@ -261,11 +263,11 @@ class PatentAnalyzer:
         비-baseline 은 전략 버전을 연접해 "그때의 후보 풀·대조가 어떤 기계에서
         나왔는가"를 되짚을 수 있게 한다 (§4.2 의 연장).
         """
-        compare_prompt = (
-            COMPARE_PROMPT
-            if self._compare_strategy == COMPARE_BASELINE
-            else COMPARE_PROMPT_V3
-        )
+        compare_prompt = {
+            COMPARE_BASELINE: COMPARE_PROMPT,
+            COMPARE_RAG: COMPARE_PROMPT_V3,
+            COMPARE_HYBRID: COMPARE_PROMPT_V4,
+        }[self._compare_strategy]
         version = (
             f"{self._extractor.prompt_version}+"
             f"{self._prompts.get(compare_prompt).prompt_version}"
@@ -279,7 +281,7 @@ class PatentAnalyzer:
                 suffixes.append(RANK_VERSION_RRF)
             if self._plan.screen_total_cap:
                 suffixes.append(self._prompts.get(SCREEN_PROMPT).prompt_version)
-        if self._compare_strategy == COMPARE_RAG:
+        if self._compare_strategy in (COMPARE_RAG, COMPARE_HYBRID):
             suffixes.append(f"{CLAIMS_VERSION}+{INDEX_VERSION}")
         if suffixes:
             version = version + "+" + "+".join(suffixes)
@@ -435,7 +437,7 @@ class PatentAnalyzer:
         results: list[PatentCandidate] = []
         assessed = 0
 
-        if self._compare_strategy == COMPARE_RAG:
+        if self._compare_strategy in (COMPARE_RAG, COMPARE_HYBRID):
             evaluations = await self._compare_all_rag(
                 artifact,
                 candidates,
@@ -808,7 +810,12 @@ class PatentAnalyzer:
         total_queries: int,
     ):
         """요소 색인 대조. 검증 원칙(폐기·재질의 1회)은 v2 경로와 같다."""
-        prompt = self._prompts.get(COMPARE_PROMPT_V3).render(
+        compare_prompt = (
+            COMPARE_PROMPT_V4
+            if self._compare_strategy == COMPARE_HYBRID
+            else COMPARE_PROMPT_V3
+        )
+        prompt = self._prompts.get(compare_prompt).render(
             segments=render_segments(artifact),
             elements="\n".join(
                 f"[E{index}] {element}" for index, element in enumerate(elements)

@@ -349,7 +349,7 @@ def main() -> None:
                              "겹쳐도 건너뛰기(결과 파일 존재)로 안전하다")
     parser.add_argument(
         "--compare-strategy",
-        choices=("baseline", "rag", "both"),
+        choices=("baseline", "rag", "hybrid", "both"),
         default="both",
     )
     parser.add_argument("--tag", default="",
