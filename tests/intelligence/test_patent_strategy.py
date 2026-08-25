@@ -40,6 +40,7 @@ from ip_risk_agent.intelligence.patent.search_strategy import (
     FIELDED_V1_PLAN,
     FIELDED_V2_PLAN,
     FIELDED_V3_PLAN,
+    FIELDED_V4_PLAN,
     plan_for,
     require_compare_strategy,
 )
@@ -667,3 +668,93 @@ def test_judge_tail_off_by_default():
         {"질의": [top, precise]}, source_tokens=src, cap=1, ipc_signal=False
     )
     assert [c.application_number for c in selected] == ["100"]
+
+
+# ------------------------------------------------------- fielded_v4 (질의 생성 v4)
+
+
+def test_fielded_v4_plan_constants():
+    """v4 상수를 고정한다.
+
+    v1~v3 는 전부 상수 시험이 있는데 v4 에만 없었다. 이 값들은 골든셋
+    도달성 마이닝이 정한 것이라, 되돌아가면 그 측정이 무효가 된다.
+    """
+    plan = plan_for("fielded_v4")
+    assert plan is FIELDED_V4_PLAN
+    assert plan.extract_prompt == "patent_extract_v4"
+    # 5계열 프롬프트가 10~14개를 만든다.
+    assert plan.max_queries == 14
+    # cap 선착순 절단으로 도달 확장이 잘린 실측 반영 (15 -> 24).
+    assert plan.expansion_cap == 24
+    assert plan.stage_deadline_seconds == 120.0
+    # 순위·판정 층은 v3 를 물려받는다 — 이번 변경의 원인 귀속을 분리한다.
+    assert plan.rows == FIELDED_V3_PLAN.rows
+    assert plan.use_bm25 is FIELDED_V3_PLAN.use_bm25
+    assert plan.judge_tail_to == FIELDED_V3_PLAN.judge_tail_to
+    assert plan.compare_cap == FIELDED_V3_PLAN.compare_cap
+    assert plan.version == "search_fielded_v4"
+
+
+def test_expansion_cap_defaults_preserve_existing_plans():
+    """신설 손잡이가 기존 계획의 동작을 바꾸지 않았는지."""
+    assert FIELDED_V1_PLAN.expansion_cap == 15
+    assert FIELDED_V2_PLAN.expansion_cap == 15
+    assert FIELDED_V3_PLAN.expansion_cap == 15
+    assert BASELINE_PLAN.expansion_cap == 15
+
+
+def test_fielded_search_keeps_every_field_hit():
+    """병합에 상한을 두지 않는다.
+
+    이전의 ``merged[:max(rows, 20)]`` 은 제목 결과가 캡을 채우면 초록 히트를
+    **통째로** 버렸고, 골든셋 인용 12건이 정확히 그 아티팩트로 수집에서
+    잘렸다. 성능을 이유로 상한이 되살아나면 같은 손실이 조용히 재발하므로
+    여기서 못을 박는다. 상한은 필드당 rows 로 이미 유계다.
+    """
+    client = KiprisClient(
+        "test-key", client=object(), search_fields=("inventionTitle", "astrtCont")
+    )
+    # 제목만으로 rows 를 채운다 — 예전 코드라면 초록 결과가 전부 사라졌다.
+    title_numbers = [f"10202000{index:05d}" for index in range(20)]
+    abstract_numbers = [f"10202001{index:05d}" for index in range(20)]
+    responses = [
+        _search_response(*title_numbers),
+        _search_response(*abstract_numbers),
+    ]
+
+    async def fake_get(path: str, params: dict):
+        return responses.pop(0)
+
+    client._get = fake_get
+
+    hits = run(client.search("셔터 연동", rows=20))
+    numbers = [hit.application_number for hit in hits]
+    assert numbers == title_numbers + abstract_numbers
+    # 초록 필드 히트가 한 건도 잘리지 않았다.
+    assert len(numbers) == 40
+    assert all(number in numbers for number in abstract_numbers)
+
+
+def test_multiword_queries_are_joined_with_and_operator():
+    """공백 다단어는 순수 AND 가 아니다 — 3단어에서 특히.
+
+    실측: "실내 영상 위치"=0건 vs "실내*영상*위치"=573건(정답 포함).
+    2단어에서는 두 표기의 결과가 같지만, 3단어에서 갈리므로 항상 ``*`` 로 잇는다.
+    """
+    client = KiprisClient(
+        "test-key", client=object(), search_fields=("inventionTitle",)
+    )
+    seen: list[dict] = []
+
+    async def fake_get(path: str, params: dict):
+        seen.append(dict(params))
+        return _search_response("1020200000001")
+
+    client._get = fake_get
+
+    run(client.search("실내 영상 위치", rows=20))
+    assert seen[0]["inventionTitle"] == "실내*영상*위치"
+    seen.clear()
+    # 단어가 하나면 이을 것이 없다 — 질의가 그대로 나간다.
+    run(client.search("종량제", rows=20))
+    assert seen[0]["inventionTitle"] == "종량제"
