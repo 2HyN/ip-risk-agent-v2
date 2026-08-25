@@ -83,13 +83,17 @@ steps:
   # 배포 후 검증 — 리비전 readiness(포트 리슨)만으로는 앱 수준 고장을 못 잡는다.
   # api 의 ready 엔드포인트가 200 이어야 빌드가 성공으로 끝난다. worker 는
   # ingress internal 이라 외부 확인이 불가능해 import 스모크와 readiness 에 맡긴다.
+  # 주의: status.url 이 주는 구형 호스트(…-<hash>-du.a.run.app)는 앱의
+  # TrustedHost 하드닝이 400 으로 거부한다 — 신뢰 호스트인 APP_PUBLIC_BASE_URL
+  # (숫자 프로젝트 번호 형식)을 서비스 env 에서 읽어 쓴다.
   - id: verify-api-health
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
     args:
       - -ceu
       - |
-        URL=$$(gcloud run services describe ip-risk-agent-v2-api --region ${_REGION} --format="value(status.url)")
+        URL=$$(gcloud run services describe ip-risk-agent-v2-api --region ${_REGION} --format=json \
+          | python3 -c "import json,sys; env={e['name']: e.get('value','') for e in json.load(sys.stdin)['spec']['template']['spec']['containers'][0]['env']}; print(env['APP_PUBLIC_BASE_URL'])")
         for i in 1 2 3 4 5; do
           CODE=$$(curl -s -o /dev/null -w "%{http_code}" "$${URL}/health/ready") && [ "$${CODE}" = "200" ] && break
           echo "attempt $${i}: /health/ready -> $${CODE:-curl fail}; retrying"; sleep 5; CODE=""
