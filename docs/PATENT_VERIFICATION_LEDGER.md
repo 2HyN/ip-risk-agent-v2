@@ -71,3 +71,18 @@ fielded_v5×hybrid 2/32 (A1 18·A2 11·B 3).
 * main 동기화 유의: advanced_rag 는 main 대비 4커밋 앞(문서 3 + deploy 선언 1).
   병합 푸시는 deploy-main 을 발화시켜 재빌드·재배포된다(코드 무변화라 안전).
   큐 20→8 은 라이브에 이미 수동 적용됨 — CD 는 큐 yaml 을 자동 적용하지 않는다.
+
+### 2026-08-25 17:05 — B0-3: CD 헬스 게이트 실전 검증 완료
+
+새 verify-api-health 단계를 main 에 올려 실전 2회로 검증했다.
+
+* 1회차(09c8860): 단계가 **실패** — `status.url` 의 구형 호스트를 앱의
+  TrustedHost 하드닝이 400 으로 거부. 배포는 성공, 서빙 무영향. 하드닝이
+  설계대로 작동함을 역확인한 셈이고, 검증 단계를 신뢰 호스트
+  (`APP_PUBLIC_BASE_URL`, 서비스 env 에서 판독)로 고쳤다(93a1ae7).
+* 2회차(93a1ae7): **전 단계 SUCCESS** — pytest 게이트 → 빌드 → import 스모크
+  → push → digest 동시 배포 → `/health/ready` 200. api·worker 모두 93a1ae7
+  이미지(digest `dbca62a5…`) 서빙, worker 확정 env 3종 보존 확인.
+
+이로써 CD 파이프라인은 "테스트 게이트 + 동일 digest 배포 + 배포 후 앱 수준
+헬스 확인"의 3중 검증을 갖췄고, main == advanced_rag == 운영 서빙이 일치한다.
