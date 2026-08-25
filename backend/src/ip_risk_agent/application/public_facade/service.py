@@ -792,7 +792,15 @@ class ControlPlaneFacade:
                 )
                 await uow.source_metadata.add_connection(connection)
             else:
-                _require_connection_match(connection, command)
+                try:
+                    _require_connection_match(connection, command)
+                except SourceConnectionOwnedByAnotherUserError as exc:
+                    # 화면이 "누구 계정으로 로그인하면 되는지" 를 말할 수 있게
+                    # 소유자의 이메일을 실어 보낸다. 이 경로에 도달한 사용자는
+                    # 그 provider 정체성(예: GitHub 설치)의 관리자다.
+                    owner = await uow.users.get(exc.owner_user_id)
+                    exc.owner_email = None if owner is None else owner.email
+                    raise
                 if (
                     command.credential_ref is not None
                     and connection.credential_ref != command.credential_ref
@@ -950,6 +958,19 @@ class ControlPlaneFacade:
         return SourceAccessRegistration(event.id, created)
 
 
+class SourceConnectionOwnedByAnotherUserError(DomainInvariantError):
+    """같은 provider 정체성(예: GitHub 설치)을 **다른 사용자**가 이미 연결했다.
+
+    일반 collision 과 분리하는 이유: 이 경우만은 사용자가 스스로 풀 수 있는
+    행동(소유 계정으로 로그인)이 있고, 화면이 그것을 말해 줘야 하기 때문이다.
+    """
+
+    def __init__(self, owner_user_id: str, owner_email: str | None = None) -> None:
+        super().__init__("source connection registration key collision")
+        self.owner_user_id = owner_user_id
+        self.owner_email = owner_email
+
+
 def _require_connection_match(
     connection: SourceConnection,
     command: SourceMetadataRegistrationCommand,
@@ -962,9 +983,10 @@ def _require_connection_match(
     그것을 충돌로 거부하면 **재연결 이후 어떤 Mount 도 만들 수 없다.**
     자격증명 회전은 호출부에서 저장값을 갱신하는 것으로 처리한다.
     """
+    if connection.authorized_by_user_id != command.actor_user_id:
+        raise SourceConnectionOwnedByAnotherUserError(connection.authorized_by_user_id)
     if (
         connection.provider is not command.source_type
-        or connection.authorized_by_user_id != command.actor_user_id
         or connection.provider_subject != command.provider_subject
         or connection.provider_account_label != command.provider_account_label
     ):

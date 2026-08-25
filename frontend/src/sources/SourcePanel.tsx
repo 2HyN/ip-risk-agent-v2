@@ -687,8 +687,15 @@ function GitHubCompletion({
         await sourceApi.createGithubMountForMount(mountId, riskWorkspaceId, repository, branch.trim());
       }
       onComplete();
-    } catch {
-      setError("선택한 repository/branch를 mount로 만들지 못했습니다.");
+    } catch (reason) {
+      // 서버가 해법을 담은 문장을 줬으면(예: 이 설치는 다른 계정이 연결했다)
+      // 그대로 보여 준다 — 일반 문구로 덮으면 사용자는 같은 벽에 계속 부딪힌다.
+      const detail = reason instanceof ApiFailure ? reason.detail : null;
+      setError(
+        typeof detail === "object" && detail !== null && typeof detail.message === "string"
+          ? detail.message
+          : "선택한 repository/branch를 mount로 만들지 못했습니다.",
+      );
     } finally {
       setBusy(false);
     }

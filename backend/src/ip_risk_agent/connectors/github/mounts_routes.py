@@ -5,6 +5,10 @@ from typing import Protocol
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ip_risk_agent.application.public_facade.service import (
+    SourceConnectionOwnedByAnotherUserError,
+)
+
 from ..common.authz import AuthzDependency, deny_all_authz
 from ..common.errors import NotFoundError, SourceConnectorError
 from .connection_lookup import (
@@ -150,14 +154,30 @@ def create_github_mounts_router(
         default_branch = await provider.get_default_branch(body.owner, body.repo)
         tracked_branch = body.tracked_branch or default_branch
 
-        result = await mount_creation_callback.create_github_mount(
-            request,
-            connection_id=connection_id,
-            risk_workspace_id=body.risk_workspace_id,
-            owner=body.owner,
-            repo=body.repo,
-            tracked_branch=tracked_branch,
-        )
+        try:
+            result = await mount_creation_callback.create_github_mount(
+                request,
+                connection_id=connection_id,
+                risk_workspace_id=body.risk_workspace_id,
+                owner=body.owner,
+                repo=body.repo,
+                tracked_branch=tracked_branch,
+            )
+        except SourceConnectionOwnedByAnotherUserError as exc:
+            # 일반 422 로 뭉개면 사용자는 원인을 알 길이 없다 — 이 실패만은
+            # "어느 계정으로 로그인하면 되는지" 가 곧 해법이라 그대로 말해 준다.
+            owner_label = exc.owner_email or "다른 계정"
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "GITHUB_CONNECTION_OWNED_BY_ANOTHER_ACCOUNT",
+                    "message": (
+                        f"이 GitHub 설치는 이미 {owner_label} 계정이 연결했습니다. "
+                        "그 계정으로 로그인해 연결하거나, 내 GitHub 계정/조직에 "
+                        "App 을 설치해 연결하세요."
+                    ),
+                },
+            ) from exc
 
         await tracking_scope_store.save(
             result.server_mount_id,
