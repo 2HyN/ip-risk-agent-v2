@@ -1,6 +1,6 @@
 {
   "name": "@iprisk/desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "IP Risk Agent desktop companion — mounts local folders into a Risk Workspace",
   "author": "IP Risk Agent Team 5",
