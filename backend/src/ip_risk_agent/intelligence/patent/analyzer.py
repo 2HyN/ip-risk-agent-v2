@@ -156,8 +156,9 @@ COMPARE_PROMPT_V3 = "patent_compare_v3"
 COMPARE_PROMPT_V4 = "patent_compare_v4"
 SCREEN_PROMPT = "patent_screen_v1"
 
-#: rag 대조의 병렬 폭. 모델 429 관측 시 조립에서 낮춘다.
-_RAG_COMPARE_CONCURRENCY = 3
+#: rag·hybrid 대조의 병렬 폭. 운영 재검사 실측에서 병렬 3 × 판정 ~22건이
+#: Cloud Run 요청 타임아웃을 넘겨 6 으로 올렸다. 모델 429 관측 시 낮춘다.
+_RAG_COMPARE_CONCURRENCY = 6
 
 # 기획·설계 문서만 본다. 의존성 파일에는 발명이 없다.
 _DOCUMENT_KINDS = frozenset(

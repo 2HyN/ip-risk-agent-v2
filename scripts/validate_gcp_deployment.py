@@ -390,7 +390,7 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
             "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
             "PATENT_SEARCH_STRATEGY": "fielded_v5",
             "PATENT_COMPARE_STRATEGY": "hybrid",
-            "KIPRIS_MAX_RPS": "1.0",
+            "KIPRIS_MAX_RPS": "2.0",
         },
     }
     if canonical_environment != expected_canonical_environment:

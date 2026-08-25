@@ -36,7 +36,7 @@ from ip_risk_agent.persistence.core_firestore import (
 TASKS_SERVICE_ACCOUNT = f"iprisk-v2-tasks@{PROJECT_ID}.iam.gserviceaccount.com"
 
 
-async def main_async(workspace_id: str, confirm: bool) -> int:
+async def main_async(workspace_id: str, confirm: bool, failed_only: bool = False) -> int:
     from google.cloud import firestore, tasks_v2
 
     firestore_client = firestore.AsyncClient(
@@ -50,10 +50,12 @@ async def main_async(workspace_id: str, confirm: bool) -> int:
         events_by_artifact = {}
         for artifact in active:
             events = await uow.change_events.list_for_artifact(artifact.id)
-            if events:
-                events_by_artifact[artifact.id] = max(
-                    events, key=lambda event: event.observed_at
-                )
+            if not events:
+                continue
+            latest = max(events, key=lambda event: event.observed_at)
+            if failed_only and latest.status.value != "FAILED":
+                continue
+            events_by_artifact[artifact.id] = latest
     print(
         f"workspace {workspace_id}: ACTIVE 파일 {len(active)}건,"
         f" 재검사 대상(변경 이벤트 보유) {len(events_by_artifact)}건"
@@ -80,7 +82,10 @@ async def main_async(workspace_id: str, confirm: bool) -> int:
     requested = skipped = 0
     for artifact_id, event in sorted(events_by_artifact.items()):
         try:
-            await service.request_reanalysis(event.id)
+            if failed_only:
+                await service.retry_failed(event.id)
+            else:
+                await service.request_reanalysis(event.id)
             requested += 1
         except Exception as exc:  # noqa: BLE001 — 진행 중이면 거부된다. 정상.
             print(f"  건너뜀 {artifact_id}: {type(exc).__name__}")
@@ -96,8 +101,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--confirm", action="store_true")
+    parser.add_argument("--failed-only", action="store_true",
+                        help="FAILED 이벤트만 retry_failed 로 재시도")
     args = parser.parse_args()
-    sys.exit(asyncio.run(main_async(args.workspace_id, args.confirm)))
+    sys.exit(asyncio.run(main_async(args.workspace_id, args.confirm, args.failed_only)))
 
 
 if __name__ == "__main__":

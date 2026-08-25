@@ -106,7 +106,7 @@ canonicalEnvironment:
     PATENT_SEARCH_STRATEGY: fielded_v5
     PATENT_COMPARE_STRATEGY: hybrid
     # 공용 키: 합산 상한 = maxInstances × 값. 실측 서버 허용 ~18rps.
-    KIPRIS_MAX_RPS: "1.0"
+    KIPRIS_MAX_RPS: "2.0"
 secretEnvironment:
   api:
     SESSION_SECRET: iprisk-v2-session-secret
