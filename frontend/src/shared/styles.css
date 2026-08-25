@@ -1653,3 +1653,11 @@ button.explorer-row__main:hover .explorer-row__name {
   align-items: center;
   gap: 8px;
 }
+
+/* 특허 근거 청크는 10개를 넘을 수 있다 — 좌우 "대조" 형식이 유지되게
+   목록을 스크롤 상자에 가둔다 (.license-text 와 동형). */
+.pane-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}

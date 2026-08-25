@@ -357,6 +357,11 @@ function EvidenceComparison({
     );
 
   if (risk.analysis_type === "PATENT") {
+    // 청크 근거는 저장 순서가 해시순이라 사실상 무작위다 — 사람이 읽는 순서
+    // (청구항 번호 → 분할 조각 번호, 초록은 맨 뒤)로 다시 세운다.
+    const sortedPatent = [...patent].sort(
+      (a, b) => patentOrder(a) - patentOrder(b),
+    );
     return (
       <Card>
         <p className="eyebrow">Why this risk</p>
@@ -365,14 +370,18 @@ function EvidenceComparison({
           {originalColumn}
           <section className="compare-pane">
             <h3>근거 문서 (특허)</h3>
-            {patent.map((evidence) => (
-              <EvidenceBlock
-                key={evidence.id}
-                evidence={evidence}
-                priority={priority}
-                keywords={keywords}
-              />
-            ))}
+            <div className="pane-scroll">
+              {sortedPatent.map((evidence) => (
+                <EvidenceBlock
+                  key={evidence.id}
+                  evidence={evidence}
+                  priority={priority}
+                  keywords={keywords}
+                  label={patentLabel(evidence)}
+                  hideReference
+                />
+              ))}
+            </div>
             {patent.length === 0 ? (
               <p className="fine-print">특허 쪽 발췌가 남아 있지 않습니다.</p>
             ) : null}
@@ -415,19 +424,54 @@ function EvidenceComparison({
   );
 }
 
+/** 청구항 근거의 사람용 정렬 키 — 번호·조각 순, 초록·번호 미상은 뒤로. */
+function patentOrder(evidence: Evidence): number {
+  if (evidence.evidence_type !== "PATENT_CLAIM") return 1_000_000;
+  const metadata = evidence.metadata_safe ?? {};
+  const claim = Number(metadata["claim_number"]);
+  const part = Number(metadata["part"]);
+  if (!Number.isFinite(claim)) return 900_000;
+  return claim * 100 + (Number.isFinite(part) ? part : 0);
+}
+
+/** "청구항 3 (독립항) · 부분 2/…" — 어느 조각인지 사람이 알아볼 라벨. */
+function patentLabel(evidence: Evidence): string | undefined {
+  if (evidence.evidence_type === "PATENT_ABSTRACT") return "초록";
+  const metadata = evidence.metadata_safe ?? {};
+  const claim = metadata["claim_number"];
+  if (typeof claim !== "string" || claim === "") return undefined;
+  const role =
+    metadata["claim_role"] === "independent"
+      ? "독립항"
+      : metadata["claim_role"] === "dependent"
+        ? "종속항"
+        : undefined;
+  const part = metadata["part"];
+  let label = `청구항 ${claim}`;
+  if (role) label += ` (${role})`;
+  if (typeof part === "string" && part !== "") label += ` · 부분 ${part}`;
+  return label;
+}
+
 function EvidenceBlock({
   evidence,
   priority,
   keywords,
+  label,
+  hideReference = false,
 }: {
   evidence: Evidence;
   priority: string;
   keywords: boolean;
+  label?: string | undefined;
+  hideReference?: boolean;
 }) {
   return (
     <article className="evidence-block">
       <div className="card-row">
-        <Badge tone="info">{evidence.evidence_type}</Badge>
+        {label ? <Badge tone="info">{label}</Badge> : (
+          <Badge tone="info">{evidence.evidence_type}</Badge>
+        )}
         <small>Revision {shortRevision(evidence.source_revision)}</small>
       </div>
       <EvidenceExcerpt
@@ -436,7 +480,11 @@ function EvidenceBlock({
         priority={priority}
         keywords={keywords}
       />
-      <p className="evidence-block__reference">{evidence.reference}</p>
+      {/* 특허 pane 은 같은 reference 줄이 청크 수만큼 반복된다 — 하단 링크
+          1곳으로 모으고 블록에는 찍지 않는다. */}
+      {hideReference ? null : (
+        <p className="evidence-block__reference">{evidence.reference}</p>
+      )}
     </article>
   );
 }

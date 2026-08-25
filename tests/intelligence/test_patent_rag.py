@@ -153,7 +153,7 @@ def test_rag_versions_record_the_full_machine():
     result = run(rag_analyzer(client).analyze(patent_artifact()))
     assert result.versions.prompt_version == (
         "patent_extract_v3+patent_compare_v3"
-        "+search_expanded_v1+patent_rank_rrf_v2+claimchunk-v1+bm25-v1"
+        "+search_expanded_v1+patent_rank_rrf_v2+claimchunk-v2+bm25-v1"
     )
     assert result.versions.analyzer_version == "patent-analyzer-1.1.0"
 

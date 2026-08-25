@@ -212,8 +212,8 @@ async def run(
     plan = plan_for(search_strategy) if search_strategy else None
     if plan is not None:
         suffix = f"eval-plan-{plan.name}"
-        if compare_strategy == "rag":
-            suffix += "-rag"
+        if compare_strategy != "baseline":
+            suffix += f"-{compare_strategy}"
     out_dir = GOLDEN / suffix
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -337,11 +337,11 @@ def main() -> None:
     parser.add_argument("--fielded", action="store_true",
                         help="항목별검색(제목+초록) - eval-fielded/")
     parser.add_argument("--search-strategy",
-                        choices=("baseline", "expanded_v1", "fielded_v1", "fielded_v2", "fielded_v3", "fielded_v4"),
+                        choices=("baseline", "expanded_v1", "fielded_v1", "fielded_v2", "fielded_v3", "fielded_v4", "fielded_v5"),
                         default=None,
                         help="SearchPlan 프리셋으로 평가 (개별 플래그 대신) "
                              "- eval-plan-<이름>[-rag]/")
-    parser.add_argument("--compare-strategy", choices=("baseline", "rag"),
+    parser.add_argument("--compare-strategy", choices=("baseline", "rag", "hybrid"),
                         default="baseline",
                         help="--search-strategy 와 함께 쓰는 대조 전략")
     args = parser.parse_args()

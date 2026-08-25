@@ -31,7 +31,8 @@ import re
 from dataclasses import dataclass
 
 #: 청커가 바뀌면 과거 판정의 뜻이 달라진다. ``prompt_version`` 에 연접된다.
-CLAIMS_VERSION = "claimchunk-v1"
+#: v2 — 분할 조각의 선행·후행 공백을 생성 시점에 제거 (하이라이트 좌표 정합).
+CLAIMS_VERSION = "claimchunk-v2"
 
 #: 근거 원장의 발췌 상한과 정렬한다 (`common/evidence.py` MAX_EXCERPT_CHARS).
 #: 조각이 상한 이하면 원장 절단이 일어나지 않아 evidence_truncated 강등의
@@ -172,7 +173,10 @@ def _split_long(text: str) -> list[str]:
         pieces.append(remaining[:cut])
         # 겹침만큼 되돌아가되 반드시 전진한다 — 무한 루프 방지.
         start += max(cut - CHUNK_OVERLAP, 1)
-    return pieces
+    # 겹침 슬라이스는 공백으로 시작할 수 있는데, 근거 원장은 저장 때 strip 을
+    # 하므로 조각 텍스트가 공백을 품으면 인용 하이라이트 좌표가 그만큼 밀린다
+    # — 생성 시점에 맞춰 둔다 (UI 검증 4번 항목).
+    return [piece.strip() for piece in pieces]
 
 
 def _chunk_ids(base: str, pieces: list[str]) -> list[tuple[str, int | None]]:
