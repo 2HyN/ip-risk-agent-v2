@@ -217,11 +217,21 @@ async def run(
                 print(f"  {target}: 인용 공보에서 출원번호 추출 실패 — 건너뜀")
                 continue
 
-            pending = [
-                strategy
-                for strategy in strategies
-                if not (OUT_ROOT / f"eval-{strategy}{tag}" / f"{target}-{cited}.json").exists()
-            ]
+            def _needs(strategy: str) -> bool:
+                # FAILED 기록(예: Gemini 503)은 완료가 아니다 — 존재만 보고
+                # 건너뛰면 일시 장애가 캐시에 영구 박제된다 (B1 실측: 수백 건).
+                path = OUT_ROOT / f"eval-{strategy}{tag}" / f"{target}-{cited}.json"
+                if not path.exists():
+                    return True
+                try:
+                    return (
+                        json.loads(path.read_text(encoding="utf-8")).get("status")
+                        != "SUCCEEDED"
+                    )
+                except (json.JSONDecodeError, OSError):
+                    return True
+
+            pending = [strategy for strategy in strategies if _needs(strategy)]
             if not pending:
                 continue  # 이미 평가함 — 재실행은 남은 것만 돈다
 
