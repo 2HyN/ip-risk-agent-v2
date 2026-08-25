@@ -1,5 +1,4 @@
 # IP Risk Agent
-추가 수정
 
 **여러 협업 Source Workspace(Local · GitHub · Google Drive)를 하나의 Risk
 Workspace 에 연결하고, 변경을 지속적으로 감지해 Patent·License 중심의 잠재적
@@ -8,13 +7,13 @@ IP Risk 를 근거 기반으로 분석함으로써, 사용자가 장기적으로
 
 - 웹: https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app
 - 데스크톱 앱(로컬 폴더 마운트용, Windows):
-  [Releases v1.0.0](../../releases/tag/v1.0.0) 에서 `IP-Risk-Agent-1.0.0-win.zip`
-  을 받아 압축 해제 후 `IP Risk Agent.exe` 실행 — 별도 설정 없이 운영 서비스에
-  붙는다.
+  [Releases](../../releases) 최신판(v1.0.1)의 zip 을 받아 압축 해제 후
+  `IP Risk Agent.exe` 실행 — 별도 설정 없이 운영 서비스에 붙는다.
 
-> **릴리스 v1.0.0** — `integration-v3` 에서 개발한 최종본을 `main` 에
-> fast-forward 반영·태그. 배포 이미지 커밋 `347cbbf`, API/Worker 동일 digest
-> (`sha256:4877e4ba…`).
+> **릴리스는 `main` 이다.** `main` 에 병합되면 CI 게이트를 통과한 커밋만
+> 자동으로 빌드·배포된다(아래 [배포](#6-배포--pr--main-병합이-곧-배포다) 참고).
+> v1.0.0 은 2차 최종본 태그, 이후 최종 단계 고도화(특허 분석 재설계 · CI/CD ·
+> UI 개편)는 main 에 연속 반영되어 있다.
 
 ## 핵심 가치
 
@@ -34,7 +33,7 @@ IP Risk 를 근거 기반으로 분석함으로써, 사용자가 장기적으로
 
 ## 팀
 
-**PBL 2차 팀 프로젝트 · 5조 (IP RISK)**
+**PBL 최종 프로젝트 · 5조 (IP RISK)**
 
 | 이름 | 담당 |
 |---|---|
@@ -58,11 +57,15 @@ IP Risk 를 근거 기반으로 분석함으로써, 사용자가 장기적으로
 4. **근거와 함께 판정한다.**
    - **특허** — 문서에서 기술 요소를 뽑아 KIPRIS 를 검색하고, 모델 대조 결과는
      인용 실재 검증(grounding)을 통과한 것만 남는다. 화면은 원본 문장 ↔ 청구항을
-     좌우로 놓고 겹친 구간을 하이라이트한다.
+     좌우로 놓고 겹친 구간을 하이라이트한다. 검색·선별·대조 전 단계는 심사관
+     인용 골든셋으로 실측하며 재설계했다(운영 조합 `fielded_v5 × hybrid` —
+     5계열 질의 추출 · `*` AND 필드 검색 · BM25 재순위 · 정밀 채널 스크리닝 ·
+     조각 근거 hybrid 대조. 실측 기록은 `docs/PATENT_RAG_ENHANCEMENT_PLAN.md`).
    - **라이선스** — 매니페스트 파싱 → 레지스트리 조회 → 전문 조회 → 조항 검색 →
-     권장 행동의 5단계. 배포 형태(SaaS/배포/수정/링크)에 따라 판정이 달라진다.
-     판정을 못 내린 건은 중간 등급에 묻히지 않고 **확인 필요(INDETERMINATE)** 로
-     따로 올라온다.
+     권장 행동의 5단계. 배포 형태(SaaS/배포/수정/링크)에 따라 판정이 달라지므로,
+     **Security & data 의 배포 프로파일을 설정하기 전에는 등급을 짐작하지 않고
+     전부 확인 필요(INDETERMINATE)** 로 둔다 — 설정을 저장하면 자동으로 재평가된다.
+     판정을 못 내린 건은 중간 등급에 묻히지 않고 따로 올라온다.
 5. **바깥의 변화도 잡는다.** 파일이 그대로여도 패키지가 라이선스를 바꾸면
    일일 재검증이 그것을 잡고, 이력에는 "우리가 바꿨는가, 바깥이 바뀌었는가" 의
    원인이 귀속되어 남는다.
@@ -80,7 +83,7 @@ IP Risk 를 근거 기반으로 분석함으로써, 사용자가 장기적으로
 | Review | **파일 단위로 묶인** Risk. 상세는 원본 ↔ 근거 대조 + 하이라이트 + 처분 |
 | Members & roles | 멤버 초대·역할 (OWNER / SOURCE_MANAGER / RISK_REVIEWER / VIEWER) |
 | Activity & audit | Risk 사건 · 관리 행위 · 원문 접근 기록 (내보내기 지원) |
-| Security & data | `.ipriskignore` 정책 · 보존 원칙 · workspace 삭제(전체 말소) |
+| Security & data | `.ipriskignore` 정책 · **라이선스 배포 프로파일** · 데이터 처리 원칙 · workspace 삭제(전체 말소) |
 
 ## 아키텍처
 
@@ -193,8 +196,8 @@ pnpm --filter @iprisk/desktop build && pnpm --filter @iprisk/desktop start
 ## 4) 테스트 — 전체 게이트 한 블록
 
 배포 전 게이트 전부다. 마지막에 `ALL GATES PASSED` 가 나와야 한다.
-최종 릴리스(v1.0.0) 기준 **백엔드 1,137건 · 프런트엔드 55건 · 데스크톱 83건**
-통과 — 새로 clone 한 환경에서도 같은 결과를 재검증했다.
+최종 기준 **백엔드 1,205건 · 프런트엔드 62건 · 데스크톱 83건** 통과 —
+새로 clone 한 환경에서도 같은 결과를 재검증했다.
 
 ```bash
 PY=.venv/bin/python; [ -e .venv/Scripts/python.exe ] && PY=.venv/Scripts/python
@@ -211,8 +214,9 @@ $PY -m compileall -q backend/src shared/contracts/python scripts \
 ```
 
 (백엔드 pytest 가 5~10분으로 가장 길다. 외부 API 실호출 시험은 `-m live` 로
-분리되어 있고, KIPRIS 월 1,000회 한도 때문에 실제 자격증명과 명시적 opt-in
-없이는 실행하지 않는다.)
+분리되어 있고, 실제 자격증명과 명시적 opt-in 없이는 실행하지 않는다. KIPRIS 는
+유료 등록으로 월 한도가 없으며 **초당 호출 제한만** 지키면 된다 — 공용 키라
+호출 간격 규율이 코드(토큰버킷·큐 동시 상한)에 배선되어 있다.)
 
 ## 5) 데이터 준비 — RAG corpus
 
@@ -242,20 +246,37 @@ $PY scripts/ingest_rag_corpus.py
 판본은 조항 검색 캐시 키에 포함되므로 갱신해도 무효화가 필요 없고, 되돌리면
 이전 캐시가 그대로 살아 있다.
 
-## 6) 배포 — 팀 GCP 프로젝트 권한 필요
+## 6) 배포 — PR → main 병합이 곧 배포다
 
-배포는 팀 프로젝트(`proj-aj22-211200020328`)에서만 가능하다. 계정에 **Cloud
-Build 제출 권한, 빌드 identity(`iprisk-v2-deploy`) 사용 권한(actAs), Cloud Run
-배포 권한**이 있어야 한다 — 없으면 아래 블록은 권한 오류로 멈춘다.
+배포는 자동이다. Cloud Build 트리거 2개(`asia-northeast3`)가 저장소에 연결되어
+있다:
 
-**⑴ 인증·프로젝트 지정** (기계당 1회):
+- **`ci-pr`** — `main` 대상 PR 이 열리거나 갱신되면 `deploy/cloudbuild-ci.yaml`
+  이 실행된다(검증만, 배포 없음): 런타임과 같은 환경의 pytest + 계약 드리프트
+  검사, pip-audit(차단형), node 트랙(typecheck·verify:resolution·frontend
+  vitest·desktop build+test·pnpm audit).
+- **`deploy-main`** — `main` 에 push(병합)되면 `deploy/cloudbuild-cd.yaml` 이
+  **7단계**로 실행된다: ① pytest 게이트 → ② docker build → ③④ API·Worker
+  import 스모크 → ⑤ Artifact Registry push → ⑥ **같은 digest** 를 두 Cloud Run
+  서비스에 배포 → ⑦ 배포 후 `api /health/ready` 200 검증(실패 시 빌드 FAILURE).
+  게이트를 통과하지 못한 커밋은 이미지를 만들지도 배포하지도 않는다.
+
+그래서 표준 릴리스 절차는 이것뿐이다:
 
 ```bash
-gcloud auth login
-gcloud config set project proj-aj22-211200020328
+git push origin <기능브랜치>      # PR 생성 → ci-pr 통과 확인
+# PR 을 main 에 병합 → deploy-main 이 빌드·배포·헬스 검증까지 자동 수행
+curl -s https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app/health/ready
 ```
 
-**⑵ 빌드 → digest 조회 → API·Worker 동일 digest 배포** (한 블록):
+**주의: `main` 푸시 = 배포 행위다.** 문서 하나만 바꿔도 재빌드·재배포가 돈다.
+배포 명령(`gcloud run deploy`)은 `--image` 만 갱신하므로 서비스 env(분석 전략
+설정 포함)는 보존된다. 롤백은 이전 이미지 digest 재지정.
+
+**수동 경로(보조)** — 트리거를 우회해야 할 때만. 팀 프로젝트 권한(Cloud Build
+제출, `iprisk-v2-deploy` actAs, Cloud Run 배포)이 필요하다. 수동 제출은
+`.gcloudignore` 가 `tests/` 를 빼므로 `cloudbuild.yaml`(빌드·스모크까지만)을
+쓴다 — `cloudbuild-cd.yaml` 을 수동 제출하면 pytest 단계가 소스 부재로 실패한다:
 
 ```bash
 SHA=$(git rev-parse --short HEAD)
@@ -269,13 +290,9 @@ gcloud builds submit --config=deploy/cloudbuild.yaml \
 && echo "DEPLOYED $SHA @ $DIGEST"
 ```
 
-**⑶ 배포 확인**:
-
-```bash
-curl -s https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app/health/ready
-```
-
-**⑷ 데스크톱 릴리스** (선택 — zip 을 만들어 GitHub Releases 에 올린다):
+**데스크톱 릴리스** (zip 을 만들어 GitHub Releases 에 올린다 — 데스크톱은 화면을
+배포된 웹에서 불러오는 셸이라, 웹 변경은 재릴리스 없이 반영되고 **main process
+변경(메뉴·마운트 등록 등)만 재패키징이 필요하다**):
 
 ```bash
 pnpm --filter @iprisk/desktop build && pnpm --filter @iprisk/desktop package
@@ -308,6 +325,8 @@ Secret Manager 경유이며 서비스 계정 key 파일은 쓰지 않는다. 로
 | `GOOGLE_DRIVE_SERVICE_ACCOUNT` | Drive 폴더를 공유받는 서비스 계정 주소 |
 | `GITHUB_APP_ID` · `GITHUB_APP_SLUG` · `GITHUB_APP_PRIVATE_KEY_SECRET_ID` · `GITHUB_WEBHOOK_SECRET_ID` | GitHub App 연동 |
 | `KIPRIS_API_KEY_SECRET_ID` | KIPRIS 접근 키의 Secret 이름 (키 자체는 파일·로그에 남기지 않는다) |
+| `PATENT_SEARCH_STRATEGY` · `PATENT_COMPARE_STRATEGY` | 특허 분석 전략 (운영 확정: `fielded_v5` × `hybrid` — 미설정 시 baseline, 이전 전략은 비교 기준선으로 보존) |
+| `KIPRIS_MAX_RPS` | 인스턴스당 KIPRIS 초당 호출 상한 (운영 2.0 — 큐 동시 8 과 함께 합산 16rps 보장) |
 | `GEMINI_MODEL_ID` | 분석 모델 |
 | `RAG_CORPUS_ID` · `RAG_CORPUS_VERSION` · `RAG_REGION` | 조항 근거 corpus |
 | `CLOUD_TASKS_QUEUE` / `_LOCATION` / `_SERVICE_ACCOUNT` · `ANALYSIS_WORKER_URL` | 분석 작업 큐 |
@@ -351,9 +370,11 @@ Drive watch · GitHub App · Cloud Tasks · RAG). 일부만 채우면 기동 시
 |---|---|
 | `docs/DEVELOPMENT_SPEC.md` | **규범.** 무엇을 왜 만들었는가, 알려진 결함과 닫힌 자리 |
 | `docs/DEVELOPMENT_PROGRESS.md` | 현재 상태 — 어디까지 왔고 무엇이 배포되어 있는가 |
+| `docs/PATENT_RAG_ENHANCEMENT_PLAN.md` | 특허 분석 고도화 — 전략 계보·골든셋 실측·채택/기각 근거 |
+| `docs/PATENT_VERIFICATION_LEDGER.md` | 누적 검증 원장 — 환경 감사·CI/CD 검증·라이브 실측 기록 |
 | `docs/USAGE_VERIFICATION.md` | 사용 검증 절차 |
 | `deploy/*.yaml` | 리소스·IAM·빌드 계약 (검증 스크립트가 대조) |
 
 ---
 
-PBL 2차 팀 프로젝트 · 5조 (IP RISK) · 2026
+PBL 최종 프로젝트 · 5조 (IP RISK) · 2026
