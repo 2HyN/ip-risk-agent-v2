@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../auth/session";
-import { formatDate, humanize, shortRevision } from "../shared/format";
+import { formatDate, humanize } from "../shared/format";
 import { useResource } from "../shared/hooks/use-resource";
 import {
   Badge,
@@ -110,9 +110,8 @@ export function RiskDetailPage() {
   return (
     <div className="content risk-detail">
       <PageHeader
-        eyebrow={`${risk.analysis_type} · ${risk.artifact_display_name ?? risk.artifact_id}`}
         title={risk.summary}
-        description={`First detected ${formatDate(risk.first_seen_at)}`}
+        description={`${risk.analysis_type} · ${risk.artifact_display_name ?? risk.artifact_id} · First detected ${formatDate(risk.first_seen_at)}`}
         actions={
           <div className="button-row">
             {/* 원본 열기 버튼은 여기서 뺐다 — 원본 ↔ 근거 대조 아래에 이미 있다.
@@ -153,7 +152,6 @@ export function RiskDetailPage() {
         </Card>
         {risk.review_disposition === "EXCLUDED" ? (
           <Card>
-            <p className="eyebrow">Excluded</p>
             <h2>추적이 끝난 Risk</h2>
             <p>
               이 Risk 가 나온 파일은 더 이상 추적되지 않습니다. 파일 추적을 끊었거나
@@ -170,13 +168,12 @@ export function RiskDetailPage() {
         />
         {risk.explanation_safe === null && risk.recommendation_safe === null ? null : (
           <Card>
-            <p className="eyebrow">설명 · 권고</p>
             {risk.explanation_safe === null ? null : (
               <>
                 <h2>왜 검토가 필요한가</h2>
                 <p>
                   <RiskText
-                    text={risk.explanation_safe}
+                    text={stripCitations(risk.explanation_safe)}
                     priority={emphasis ? risk.review_priority : null}
                   />
                 </p>
@@ -187,7 +184,7 @@ export function RiskDetailPage() {
                 <h2>무엇을 하면 되는가</h2>
                 <p>
                   <RiskText
-                    text={risk.recommendation_safe}
+                    text={stripCitations(risk.recommendation_safe)}
                     priority={emphasis ? risk.review_priority : null}
                   />
                 </p>
@@ -222,7 +219,6 @@ export function RiskDetailPage() {
                 닫기 ✕
               </Button>
             </div>
-            <p className="eyebrow">Reviewer decision</p>
             <h2>Record disposition</h2>
             {mutationError === null ? null : <ErrorState error={mutationError} />}
             <form
@@ -316,7 +312,6 @@ function EvidenceComparison({
   if (detail.evidence.length === 0) {
     return (
       <Card>
-        <p className="eyebrow">Why this risk</p>
         <h2>Minimal retained evidence</h2>
         <EmptyState
           title="No retained excerpt"
@@ -333,10 +328,17 @@ function EvidenceComparison({
   // 내용 없는 칸은 그리지 않는다 — "발췌가 없습니다" 를 칸마다 적으면 빈 안내가
   // 실제 근거보다 자리를 더 차지한다. 특허의 좌우 대조만 예외다: 비교라는 형식
   // 자체가 두 칸을 요구한다.
+  // 원본·근거로 나가는 링크는 pane 머리(예전 Revision 자리)에 둔다 — 본문은
+  // 발췌에 집중하고, 밖으로 나가는 문은 제목 줄이 쥔다.
   const originalColumn =
     originalEvidence.length === 0 && risk.analysis_type !== "PATENT" ? null : (
       <section className="compare-pane">
-        <h3>원본 문서</h3>
+        <div className="compare-pane__head">
+          <h3>원본 문서</h3>
+          <button type="button" className="text-link" onClick={onOpenOriginal}>
+            {openLabel} ↗
+          </button>
+        </div>
         {originalEvidence.map((evidence) => (
           <EvidenceBlock
             key={evidence.id}
@@ -348,11 +350,6 @@ function EvidenceComparison({
         {originalEvidence.length === 0 ? (
           <p className="fine-print">원본 쪽 발췌가 남아 있지 않습니다.</p>
         ) : null}
-        <p className="compare-pane__link">
-          <button type="button" className="text-link" onClick={onOpenOriginal}>
-            {openLabel} ↗
-          </button>
-        </p>
       </section>
     );
 
@@ -364,12 +361,14 @@ function EvidenceComparison({
     );
     return (
       <Card>
-        <p className="eyebrow">Why this risk</p>
         <h2>원본 ↔ 근거 대조</h2>
         <div className="compare-grid">
           {originalColumn}
           <section className="compare-pane">
-            <h3>근거 문서 (특허)</h3>
+            <div className="compare-pane__head">
+              <h3>근거 문서 (특허)</h3>
+              <PatentReferenceLinks evidence={patent} />
+            </div>
             <div className="pane-scroll">
               {sortedPatent.map((evidence) => (
                 <EvidenceBlock
@@ -385,7 +384,6 @@ function EvidenceComparison({
             {patent.length === 0 ? (
               <p className="fine-print">특허 쪽 발췌가 남아 있지 않습니다.</p>
             ) : null}
-            <PatentReferenceLinks evidence={patent} />
           </section>
         </div>
       </Card>
@@ -394,8 +392,7 @@ function EvidenceComparison({
 
   return (
     <Card>
-      <p className="eyebrow">Why this risk</p>
-      <h2>원본 · 근거 라이선스 대조</h2>
+      <h2>판정 근거</h2>
       <div className="compare-stack">
         {originalColumn}
         {license.length === 0 ? null : (
@@ -422,6 +419,17 @@ function EvidenceComparison({
       </div>
     </Card>
   );
+}
+
+/**
+ * 설명·권고 속 내부 인용 표식 제거 — "(src:L72-83)", "(patent:…:claim:1)" 은
+ * 근거 대조 화면이 좌표로 보여 주는 정보라 본문에서는 소음이다.
+ */
+function stripCitations(text: string | null | undefined): string {
+  return (text ?? "")
+    .replace(/\s*\((?:src|patent)[^)]*\)/gu, "")
+    .replace(/\s{2,}/gu, " ")
+    .trim();
 }
 
 /** 청구항 근거의 사람용 정렬 키 — 번호·조각 순, 초록·번호 미상은 뒤로. */
@@ -472,7 +480,6 @@ function EvidenceBlock({
         {label ? <Badge tone="info">{label}</Badge> : (
           <Badge tone="info">{evidence.evidence_type}</Badge>
         )}
-        <small>Revision {shortRevision(evidence.source_revision)}</small>
       </div>
       <EvidenceExcerpt
         excerpt={evidence.excerpt}

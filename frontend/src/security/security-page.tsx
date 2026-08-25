@@ -86,7 +86,6 @@ export function SecurityPage() {
   return (
     <div className="content">
       <PageHeader
-        eyebrow="Transparency & control"
         title="Security & data access"
         description="보호 정책과 보존 원칙을 관리합니다. 실제 원문 접근 기록은 Activity & audit의 Source access 탭에 있습니다."
       />
@@ -96,7 +95,6 @@ export function SecurityPage() {
           두 화면에서 다르게 늙는다. */}
       <div className="security-grid">
         <Card>
-          <p className="eyebrow">Global protection</p>
           <h2>.ipriskignore</h2>
           <form
             onSubmit={(event) => {
@@ -133,44 +131,31 @@ export function SecurityPage() {
           </form>
         </Card>
         <Card>
-          <p className="eyebrow">Retention assurances</p>
-          <h2>What Control retains</h2>
+          <h2>데이터 처리 원칙</h2>
           <div className="assurance-list">
             <Assurance
-              label="Raw source snapshots"
-              value={
-                access.data.raw_source_persisted
-                  ? "Persisted"
-                  : "Never persisted"
-              }
+              label="원본 소스"
+              value="화면에 표시되지 않고, 분석 시에만 읽으며 저장하지 않습니다"
               safe={!access.data.raw_source_persisted}
             />
             <Assurance
-              label="Approved analysis artifacts"
-              value={
-                access.data.analysis_artifact_persisted
-                  ? "Persisted"
-                  : "Transient"
-              }
+              label="분석 산출물"
+              value="검토하는 동안만 유지됩니다"
               safe={!access.data.analysis_artifact_persisted}
             />
             <Assurance
-              label="Evidence retention"
-              value={access.data.retention_policy_version}
+              label="판정 근거"
+              value="필요한 최소 발췌만 보관합니다"
               safe
             />
             <Assurance
-              label="External RAG"
-              value={
-                access.data.external_rag_reference_only
-                  ? "Reference knowledge only"
-                  : "Review required"
-              }
+              label="외부 특허·라이선스 지식"
+              value="참조 전용이며, 내 코드는 전송되지 않습니다"
               safe={access.data.external_rag_reference_only}
             />
             <Assurance
-              label="Secret filtering"
-              value="Enabled before analysis"
+              label="시크릿(API 키 등)"
+              value="분석 전에 자동 제거됩니다"
               safe
             />
           </div>
@@ -180,7 +165,6 @@ export function SecurityPage() {
           Source access 탭에 있고, 여기서는 id 표라 사람이 읽지 못했다. */}
       {role === "OWNER" ? (
         <Card className="danger-zone">
-          <p className="eyebrow">Danger zone</p>
           <h2>Workspace 삭제</h2>
           <p>
             이 workspace의 마운트, Risk, 근거, 이력이 모두 지워집니다. 되돌릴 수

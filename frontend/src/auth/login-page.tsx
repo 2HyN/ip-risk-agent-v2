@@ -18,7 +18,6 @@ export function LoginPage() {
         <span>IP Risk Agent</span>
       </div>
       <Card className="login-card">
-        <p className="eyebrow">Platform &amp; Control Plane</p>
         <h1>
           Know what changed.
           <br />

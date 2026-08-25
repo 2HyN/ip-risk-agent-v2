@@ -38,7 +38,6 @@ export function DashboardPage() {
   return (
     <div className="content">
       <PageHeader
-        eyebrow="Workspace overview"
         title={workspace.name}
         description={
           workspace.description ??
@@ -55,7 +54,10 @@ export function DashboardPage() {
       />
       <div className="metric-grid">
         {metrics.map(([label, value, note]) => (
-          <Card key={label} className="metric">
+          <Card
+            key={label}
+            className={label === "New risks" ? "metric metric--accent" : "metric"}
+          >
             <span>{label}</span>
             <strong>{value}</strong>
             <small>{note}</small>
@@ -65,10 +67,7 @@ export function DashboardPage() {
       <div className="dashboard-grid">
         <Card>
           <div className="section-heading">
-            <div>
-              <p className="eyebrow">Connected source health</p>
-              <h2>Collection readiness</h2>
-            </div>
+            <h2>Collection readiness</h2>
             <Badge
               tone={
                 dashboard.source_health.action_required +
@@ -129,7 +128,6 @@ export function AnalysisMonitorCard({ workspaceId }: { workspaceId: string }) {
   if (progress === null) {
     return (
       <Card>
-        <p className="eyebrow">Analysis monitor</p>
         <h2>작업 현황</h2>
         <LoadingState label="Checking analysis activity" />
       </Card>
@@ -142,10 +140,7 @@ export function AnalysisMonitorCard({ workspaceId }: { workspaceId: string }) {
   return (
     <Card>
       <div className="section-heading">
-        <div>
-          <p className="eyebrow">Analysis monitor</p>
-          <h2>작업 현황</h2>
-        </div>
+        <h2>작업 현황</h2>
         <Badge tone={progress.failed > 0 ? "warning" : active > 0 ? "info" : "success"}>
           {active > 0 ? `${active} in progress` : "Idle"}
         </Badge>

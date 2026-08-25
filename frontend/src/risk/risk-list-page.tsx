@@ -43,6 +43,8 @@ type ArtifactGroup = {
  * 소스 구분은 왼쪽 레일이 맡으므로 카드에는 경로만 적는다 — 경로의 첫 칸이
  * 이미 소스 폴더 이름이다.
  */
+const PRIORITY_ORDER = ["HIGH", "INDETERMINATE", "MEDIUM", "LOW"] as const;
+
 function groupByArtifact(risks: Risk[]): ArtifactGroup[] {
   const groups = new Map<string, ArtifactGroup>();
   for (const risk of risks) {
@@ -64,6 +66,14 @@ function groupByArtifact(risks: Risk[]): ArtifactGroup[] {
     ) {
       group.openCount += 1;
     }
+  }
+  // 같은 파일 안에서는 등급 순으로 — 먼저 볼 것이 맨 위다.
+  for (const group of groups.values()) {
+    group.risks.sort(
+      (a, b) =>
+        PRIORITY_ORDER.indexOf(a.review_priority) -
+        PRIORITY_ORDER.indexOf(b.review_priority),
+    );
   }
   return [...groups.values()];
 }
@@ -112,42 +122,24 @@ export function RiskListPage() {
   return (
     <div className="content content--wide">
       <PageHeader
-        eyebrow="Canonical risk register"
         title="Review"
         description="한 파일에서 나온 Risk를 모아서 봅니다. Machine lifecycle과 reviewer disposition은 분리되어 있어 분석 갱신이 사람의 판단을 덮지 않습니다."
       />
-      <div className="review-layout">
-        <aside className="review-rail" aria-label="Source filter">
-          <p className="eyebrow">Sources</p>
-          <button
-            type="button"
-            className={filters.mount_id === "" ? "is-active" : ""}
-            onClick={() => set("mount_id", "")}
-          >
-            All sources
-          </button>
-          {mounts.data?.items.map((mount) => (
-            <button
-              key={mount.id}
-              type="button"
-              className={filters.mount_id === mount.id ? "is-active" : ""}
-              onClick={() => set("mount_id", mount.id)}
-            >
-              {mount.alias}
-            </button>
-          ))}
-          {mounts.data?.next_cursor === null || mounts.data === null ? null : (
-            <Button
-              variant="ghost"
-              disabled={mounts.loadingMore}
-              onClick={mounts.loadMore}
-            >
-              {mounts.loadingMore ? "Loading…" : "More sources"}
-            </Button>
-          )}
-        </aside>
-        <div className="review-main">
+      <div className="review-main">
           <Card className="filter-bar" aria-label="Risk filters">
+            {/* 소스 선택 — 왼쪽 레일 대신 필터 줄의 첫 칸이다. */}
+            <Select
+              aria-label="Source"
+              value={filters.mount_id}
+              onChange={(event) => set("mount_id", event.target.value)}
+            >
+              <option value="">All sources</option>
+              {mounts.data?.items.map((mount) => (
+                <option key={mount.id} value={mount.id}>
+                  {mount.alias}
+                </option>
+              ))}
+            </Select>
             <Select
               aria-label="Lifecycle"
               value={filters.lifecycle_state}
@@ -290,7 +282,6 @@ export function RiskListPage() {
               </Button>
             </div>
           )}
-        </div>
       </div>
     </div>
   );

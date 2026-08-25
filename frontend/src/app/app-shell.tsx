@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../auth/session";
+import { humanize } from "../shared/format";
 import { Badge, Button, ErrorState, LoadingState } from "../shared/ui";
 import { useResource } from "../shared/hooks/use-resource";
 import {
@@ -58,7 +59,8 @@ export function AppShell() {
  * 안 읽은 알림 수. 모바일 앱 배지처럼 붙는다.
  *
  * 페이지를 옮길 때마다, 그리고 주기적으로 다시 묻는다 — 알림 페이지에서 읽음
- * 처리를 하고 나오면 배지가 그 자리에서 줄어야 한다.
+ * 처리를 하고 나오면 배지가 그 자리에서 줄어야 한다. 새 알림이 도착하면 브라우저
+ * 알림으로도 알린다 — 탭을 보고 있지 않을 때가 알림이 필요한 순간이다.
  */
 function UnreadNotificationBadge() {
   const { api, user } = useSession();
@@ -66,12 +68,48 @@ function UnreadNotificationBadge() {
   const [count, setCount] = useState(0);
   useEffect(() => {
     if (user === null) return;
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
+  }, [user]);
+  useEffect(() => {
+    if (user === null) return;
     let cancelled = false;
     let timer: number | undefined;
+    // 마지막으로 본 알림 시각 — 이후에 생긴 것만 브라우저 알림으로 올린다.
+    // 첫 조회는 기준만 잡는다. 접속하자마자 밀린 알림을 쏟아내지 않는다.
+    let seenUpTo: string | null = null;
     async function poll(): Promise<void> {
       try {
         const inbox = await api.notifications(true);
-        if (!cancelled) setCount(inbox.unread_count);
+        if (!cancelled) {
+          setCount(inbox.unread_count);
+          const fresh =
+            seenUpTo === null
+              ? []
+              : inbox.items.filter((item) => item.created_at > (seenUpTo ?? ""));
+          const latest = inbox.items[0];
+          if (latest !== undefined || seenUpTo === null) {
+            seenUpTo = latest?.created_at ?? new Date().toISOString();
+          }
+          if (
+            fresh.length > 0 &&
+            typeof Notification !== "undefined" &&
+            Notification.permission === "granted"
+          ) {
+            const head = fresh[0];
+            const name = head?.metadata_safe["display_name"];
+            new Notification("IP Risk Agent", {
+              body:
+                fresh.length === 1
+                  ? `${humanize(head?.notification_type ?? "알림")}${
+                      typeof name === "string" && name.length > 0 ? ` · ${name}` : ""
+                    }`
+                  : `새 알림 ${fresh.length}건`,
+              tag: "iprisk-inbox",
+            });
+          }
+        }
       } catch {
         // 배지 하나 때문에 화면을 흔들지 않는다. 다음 주기에 다시 묻는다.
       }
@@ -162,10 +200,6 @@ function WorkspaceSidebar({
         ) : null}
         <NavLink to={`${base}/security`}>Security &amp; data</NavLink>
       </nav>
-      <div className="sidebar__footer">
-        <span>Control Plane</span>
-        <small>Raw source is never previewed here.</small>
-      </div>
     </aside>
   );
 }

@@ -82,7 +82,6 @@ export function MembersPage() {
   return (
     <div className="content">
       <PageHeader
-        eyebrow="Workspace administration"
         title="Members & roles"
         description="Application permissions do not grant raw-source access. Provider authority is always checked separately."
       />
@@ -149,7 +148,15 @@ export function MembersPage() {
                 </tr>
               </thead>
               <tbody>
-                {resource.data?.items.map((member) => (
+                {/* Owner 가 맨 위, 나머지는 합류한 순서 — 목록의 기준점이 흔들리지 않는다. */}
+                {[...(resource.data?.items ?? [])]
+                  .sort((a, b) => {
+                    if (a.role === "OWNER" !== (b.role === "OWNER")) {
+                      return a.role === "OWNER" ? -1 : 1;
+                    }
+                    return a.created_at.localeCompare(b.created_at);
+                  })
+                  .map((member) => (
                   <tr key={member.id}>
                     <td>
                       <strong>

@@ -64,8 +64,8 @@ export function AddSourceChooser({
     <div className="source-provider-grid">
       <h2>Add Source</h2>
       <p className="source-hint">
-        마운트는 파일이 아니라 <strong>폴더 단위</strong>입니다. 연결한 폴더가
-        Files 의 뿌리에 붙습니다.
+        연결은 <strong>폴더 단위</strong>로 이루어지며, 연결된 폴더는 Files 아래에
+        추가됩니다.
       </p>
       <Button type="button" variant="secondary" onClick={handleDriveClick}>
         Google Drive

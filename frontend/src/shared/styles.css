@@ -1,18 +1,41 @@
 :root {
   color-scheme: light;
-  font-family: Inter, "Segoe UI", system-ui, sans-serif;
-  color: #1d2938;
-  background: #f4f6f8;
+  font-family:
+    "Pretendard Variable",
+    Pretendard,
+    -apple-system,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  color: #0a2540;
+  background: #f1f5f9;
   font-synthesis: none;
-  --ink: #152131;
-  --muted: #667386;
-  --line: #dce2e8;
-  --navy: #101825;
-  --blue: #2667d8;
-  --blue-dark: #174ca8;
-  --aqua: #45c9be;
+  /* ── 모노 블루 팔레트 (2026-08-25 확정). 상태 어휘 색은 별도 토큰. ── */
+  --blue-deep: #0a2540; /* 상단바 배경 · 제목 · KPI 큰 숫자 */
+  --blue-brand: #1d4ed8; /* CTA · 링크 · 활성 메뉴 텍스트 · 강조 라인 */
+  --blue-sky: #60a5fa; /* KPI 상단 라인 · 다크바 위 로고/활성 탭 밑줄 (텍스트 금지) */
+  --blue-tint: #e0f2fe; /* 활성 메뉴 배경 · 강조 카드 배경 · 아이콘 배경 */
+  --blue-tint-line: #bfdbfe; /* 강조 카드 보더 */
+  --bg: #f1f5f9;
+  --nav-bg: #0a2540;
+  --nav-text: #b9c6d8;
+  --nav-text-on: #ffffff;
+  --bar-gradient: linear-gradient(
+    90deg,
+    var(--blue-deep) 0%,
+    var(--blue-brand) 55%,
+    var(--blue-sky) 100%
+  );
+  /* 기존 이름들은 새 팔레트로 이어 붙인다 — 사용처 전면 교체 대신 별칭 유지. */
+  --ink: #0a2540;
+  --muted: #5a6b82;
+  --line: #e4e9f0;
+  --navy: var(--nav-bg);
+  --blue: var(--blue-brand);
+  --blue-dark: #1a44bd;
+  --aqua: var(--blue-sky);
   --surface: #fff;
-  --soft: #f7f9fb;
+  --soft: #f6f8fb;
   --danger: #b83838;
   --warning: #a56414;
   /* Risk 등급 색. v1 데스크톱 앱의 등급 색 체계를 그대로 잇는다 — 같은 제품을
@@ -32,7 +55,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #f4f6f8;
+  background: var(--bg);
 }
 button,
 input,
@@ -56,7 +79,6 @@ p {
 h1,
 h2,
 h3 {
-  font-family: "Segoe UI", system-ui, sans-serif;
   color: var(--ink);
   letter-spacing: -0.03em;
 }
@@ -88,14 +110,6 @@ p {
   white-space: nowrap;
   border: 0;
 }
-.eyebrow {
-  margin-bottom: 8px;
-  color: #287369;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-}
 .muted,
 small {
   color: var(--muted);
@@ -106,9 +120,8 @@ small {
   height: 34px;
   place-items: center;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--aqua), #8ce5d8);
-  color: #0d3234;
-  font-family: "Manrope";
+  background: var(--blue-sky);
+  color: var(--blue-deep);
   font-size: 0.82rem;
   font-weight: 800;
 }
@@ -134,7 +147,7 @@ a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid rgba(38, 103, 216, 0.25);
+  outline: 3px solid rgba(29, 78, 216, 0.25);
   outline-offset: 2px;
 }
 .button:disabled {
@@ -142,9 +155,9 @@ textarea:focus-visible {
   opacity: 0.5;
 }
 .button--primary {
-  background: var(--blue);
+  background: var(--blue-brand);
   color: #fff;
-  box-shadow: 0 6px 16px rgba(38, 103, 216, 0.2);
+  box-shadow: 0 6px 16px rgba(29, 78, 216, 0.2);
 }
 .button--primary:hover:not(:disabled) {
   background: var(--blue-dark);
@@ -208,8 +221,8 @@ textarea:focus-visible {
   color: #a83232;
 }
 .badge--info {
-  background: #e7efff;
-  color: #2858a6;
+  background: var(--blue-tint);
+  color: var(--blue-brand);
 }
 /* Risk 등급 배지. 등급은 심각도 순서(빨강 > 주황 > 초록)가 있고 INDETERMINATE 는
    순서 밖(판정 못 냄)이라 파랑으로 뺀다 — 색 자체가 순서를 말하게 둔다.
@@ -242,6 +255,20 @@ textarea:focus-visible {
 .badge--priority-low {
   background: #e6f6ee;
   color: var(--risk-low);
+}
+/* 점 색은 currentColor 상속에 맡기지 않고 등급마다 못박는다 — 표 안에서 상속이
+   끊겨 회색 점이 되는 사례가 있었다. */
+.badge--priority-high .badge__dot {
+  background: var(--risk-high);
+}
+.badge--priority-indeterminate .badge__dot {
+  background: var(--risk-indeterminate);
+}
+.badge--priority-medium .badge__dot {
+  background: var(--risk-medium);
+}
+.badge--priority-low .badge__dot {
+  background: var(--risk-low);
 }
 .field {
   display: grid;
@@ -474,22 +501,21 @@ textarea:focus-visible {
   background:
     radial-gradient(
       circle at 15% 15%,
-      rgba(69, 201, 190, 0.2),
+      rgba(96, 165, 250, 0.18),
       transparent 27%
     ),
     radial-gradient(
       circle at 90% 80%,
-      rgba(38, 103, 216, 0.2),
+      rgba(29, 78, 216, 0.22),
       transparent 30%
     ),
-    var(--navy);
+    var(--nav-bg);
 }
 .login-brand {
   display: flex;
   align-items: center;
   gap: 11px;
   color: #fff;
-  font-family: "Manrope";
   font-weight: 800;
 }
 .login-card {
@@ -522,9 +548,9 @@ textarea:focus-visible {
   align-items: center;
   gap: 34px;
   padding: 0 24px;
-  border-bottom: 1px solid #263141;
-  background: var(--navy);
-  color: #fff;
+  border-bottom: 1px solid #16334f;
+  background: var(--nav-bg);
+  color: var(--nav-text-on);
 }
 .topbar__brand {
   display: flex;
@@ -532,9 +558,8 @@ textarea:focus-visible {
   gap: 10px;
   border: 0;
   background: transparent;
-  color: #fff;
+  color: var(--nav-text-on);
   cursor: pointer;
-  font-family: "Manrope";
   font-weight: 800;
 }
 .topbar__nav {
@@ -546,13 +571,13 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   border-bottom: 2px solid transparent;
-  color: #aeb8c7;
+  color: var(--nav-text);
   font-size: 0.86rem;
   text-decoration: none;
 }
 .topbar__nav a.active {
-  border-color: var(--aqua);
-  color: #fff;
+  border-color: var(--blue-sky);
+  color: var(--nav-text-on);
 }
 .account {
   display: flex;
@@ -567,7 +592,9 @@ textarea:focus-visible {
   overflow: hidden;
   place-items: center;
   border-radius: 50%;
-  background: #33445a;
+  background: var(--blue-sky);
+  color: var(--blue-deep);
+  font-weight: 700;
 }
 .account__avatar img {
   width: 100%;
@@ -629,21 +656,8 @@ textarea:focus-visible {
   background: #f2f5f8;
 }
 .sidebar nav a.active {
-  background: #eaf0fb;
-  color: #1f58b1;
-}
-.sidebar__footer {
-  display: grid;
-  gap: 4px;
-  margin-top: auto;
-  padding: 14px 10px;
-  border-radius: 10px;
-  background: #f5f8fa;
-  font-size: 0.76rem;
-}
-.sidebar__footer small {
-  font-size: 0.66rem;
-  line-height: 1.4;
+  background: var(--blue-tint);
+  color: var(--blue-brand);
 }
 .workspace-main {
   min-width: 0;
@@ -672,8 +686,8 @@ textarea:focus-visible {
   text-align: left;
 }
 .workspace-card:hover {
-  border-color: #aac2e9;
-  box-shadow: 0 8px 22px rgba(27, 55, 88, 0.07);
+  border-color: var(--blue-tint-line);
+  box-shadow: 0 8px 22px rgba(10, 37, 64, 0.07);
 }
 .workspace-card__icon {
   display: grid;
@@ -682,8 +696,8 @@ textarea:focus-visible {
   flex: 0 0 auto;
   place-items: center;
   border-radius: 10px;
-  background: #e5f4f2;
-  color: #246c66;
+  background: var(--blue-tint);
+  color: var(--blue-brand);
   font-size: 0.75rem;
   font-weight: 800;
 }
@@ -701,6 +715,11 @@ textarea:focus-visible {
   gap: 12px;
   color: var(--ink);
   font-size: 0.96rem;
+}
+.workspace-card__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .create-card form {
   display: grid;
@@ -735,6 +754,9 @@ textarea:focus-visible {
 .metric {
   display: grid;
   gap: 5px;
+  border-top: 3px solid var(--blue-sky);
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
 }
 .metric span {
   color: var(--muted);
@@ -742,9 +764,13 @@ textarea:focus-visible {
   font-weight: 700;
 }
 .metric strong {
-  color: var(--ink);
-  font-family: "Manrope";
+  color: var(--blue-deep);
   font-size: 2.3rem;
+}
+/* 강조 KPI (New risks) — 틴트 배경으로 첫 시선을 받는다. */
+.metric--accent {
+  background: var(--blue-tint);
+  border-color: var(--blue-tint-line);
 }
 .metric small {
   font-size: 0.7rem;
@@ -793,15 +819,12 @@ textarea:focus-visible {
   text-decoration: none;
 }
 .assurance-card {
-  background: linear-gradient(145deg, #142033, #192c3f);
+  background: linear-gradient(145deg, #0a2540, #123456);
 }
 .assurance-card h2,
 .assurance-card p,
 .assurance-card li {
   color: #fff;
-}
-.assurance-card .eyebrow {
-  color: #76d7cb;
 }
 .check-list {
   display: grid;
@@ -811,7 +834,7 @@ textarea:focus-visible {
 }
 .check-list li::before {
   margin-right: 8px;
-  color: var(--aqua);
+  color: var(--blue-sky);
   content: "✓";
 }
 .filter-bar {
@@ -980,7 +1003,7 @@ td small {
   border: 2px solid #fff;
   border-radius: 50%;
   background: var(--blue);
-  box-shadow: 0 0 0 2px #a9c2eb;
+  box-shadow: 0 0 0 2px var(--blue-tint-line);
 }
 .timeline p {
   margin-bottom: 0;
@@ -1019,8 +1042,8 @@ td small {
   height: 34px;
   place-items: center;
   border-radius: 50%;
-  background: #eaf0fa;
-  color: var(--blue);
+  background: var(--blue-tint);
+  color: var(--blue-brand);
 }
 .activity-list p,
 .notification-list p {
@@ -1082,15 +1105,33 @@ td small {
   background: #fff0d6;
   color: #996216 !important;
 }
+/* 알림 점 — 종류가 색이다. 읽으면 같은 색이 옅어질 뿐 자리는 같다. */
 .notification-mark {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #c5ccd4;
 }
+.notification-mark--risk {
+  background: var(--danger);
+}
+.notification-mark--analysis {
+  background: var(--warning);
+}
+.notification-mark--source {
+  background: #2563a8;
+}
+.notification-list li:not(.is-unread) .notification-mark {
+  opacity: 0.3;
+}
 .notification-list .is-unread .notification-mark {
-  background: var(--blue);
-  box-shadow: 0 0 0 4px #e5edfa;
+  box-shadow: 0 0 0 4px var(--blue-tint);
+}
+/* 오른쪽 동작 칸 — 읽음 여부와 무관하게 같은 폭을 차지해 점·본문이 밀리지 않는다. */
+.notification-action {
+  display: inline-flex;
+  justify-content: flex-end;
+  min-width: 88px;
 }
 @media (max-width: 1050px) {
   .metric-grid {
@@ -1126,8 +1167,7 @@ td small {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
-  .sidebar__workspace,
-  .sidebar__footer {
+  .sidebar__workspace {
     display: none;
   }
   .sidebar nav {
@@ -1219,7 +1259,7 @@ td small {
 .progress__bar {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--blue), var(--aqua));
+  background: var(--bar-gradient);
   transition: width 0.6s ease;
 }
 .progress__caption {
@@ -1293,7 +1333,7 @@ td small {
   cursor: default;
 }
 .breadcrumbs button:not(:disabled):hover {
-  background: rgba(38, 103, 216, 0.08);
+  background: rgba(29, 78, 216, 0.08);
 }
 .breadcrumbs__part {
   display: inline-flex;
@@ -1388,6 +1428,11 @@ button.explorer-row__main:hover .explorer-row__name {
   justify-content: flex-end;
   margin-bottom: 4px;
 }
+.modal form {
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
 
 /* Review — 파일 단위 묶음 */
 .review-groups {
@@ -1437,6 +1482,21 @@ button.explorer-row__main:hover .explorer-row__name {
   margin-bottom: 10px;
   font-size: 0.95rem;
   letter-spacing: 0;
+}
+/* pane 머리 — 제목 왼쪽, 원본·KIPRIS 링크 오른쪽 (예전 Revision 자리). */
+.compare-pane__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 10px;
+}
+.compare-pane__head h3 {
+  margin-bottom: 0;
+}
+.compare-pane__head .compare-pane__link {
+  margin: 0;
 }
 .compare-pane__link {
   margin: 10px 0 0;
@@ -1541,45 +1601,7 @@ button.explorer-row__main:hover .explorer-row__name {
   text-overflow: ellipsis;
 }
 
-/* Review — 왼쪽 소스 레일 */
-.review-layout {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-.review-rail {
-  flex: 0 0 200px;
-  position: sticky;
-  top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-}
-.review-rail button {
-  border: 0;
-  background: none;
-  padding: 8px 10px;
-  border-radius: 8px;
-  text-align: left;
-  font: inherit;
-  color: var(--ink);
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.review-rail button:hover {
-  background: var(--soft);
-}
-.review-rail button.is-active {
-  background: rgba(38, 103, 216, 0.1);
-  color: var(--blue);
-  font-weight: 600;
-}
+/* Review — 소스 선택은 필터 줄의 드롭다운이 맡는다 (왼쪽 레일 제거). */
 .review-main {
   flex: 1 1 auto;
   min-width: 0;
@@ -1596,19 +1618,8 @@ button.explorer-row__main:hover .explorer-row__name {
   padding: 8px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(38, 103, 216, 0.06);
+  background: var(--blue-tint);
   font-size: 0.9rem;
-}
-@media (max-width: 900px) {
-  .review-layout {
-    flex-direction: column;
-  }
-  .review-rail {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
-    width: 100%;
-  }
 }
 
 /* Risk 상세 — 제목은 문장(요약)이라 화면 제목 크기로는 너무 크다. */

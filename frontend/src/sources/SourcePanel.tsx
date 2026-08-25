@@ -147,7 +147,9 @@ export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
 
   if (sources.loading) return <LoadingState label="Loading connected sources" />;
   if (sources.error !== null) return <ErrorState error={sources.error} retry={sources.reload} />;
-  const connected = sources.data?.connected_sources ?? [];
+  const allConnected = sources.data?.connected_sources ?? [];
+  // 비활성화한 소스는 목록에서 뺀다 — 데이터는 남아 있지만(부활 대비) 보이지 않는다.
+  const connected = allConnected.filter((item) => item.status !== "DISABLED");
   // 살아 있는 GitHub 연결. 있으면 "Add Source" 가 설치 화면으로 나가지 않는다.
   const activeGithub = connected.find(
     (item) => item.source_type === "GITHUB" && item.status === "ACTIVE",
@@ -178,7 +180,6 @@ export function SourcePanel({ platform }: { platform: PlatformAdapter }) {
   return (
     <div className="content content--wide">
       <PageHeader
-        eyebrow="Workspace files"
         title="Files"
         description="마운트는 폴더 단위입니다. 마운트한 폴더가 이 목록의 뿌리에 붙고, 안의 구조는 실제 소스를 그대로 따릅니다. 원문은 표시하거나 저장하지 않습니다."
         actions={
@@ -562,8 +563,7 @@ function DriveFolderShare({
 
   return (
     <div className="source-completion">
-      <p className="eyebrow">Google Drive</p>
-      <h2>추적할 폴더를 공유해 주세요</h2>
+      <h2>Google Drive — 추적할 폴더를 공유해 주세요</h2>
       <p>
         마운트는 <strong>파일이 아니라 폴더 단위</strong>입니다. Drive 에서 폴더를 열고
         아래 주소를 <strong>뷰어</strong>로 공유한 뒤, 그 폴더 주소를 붙여 넣으세요.
@@ -696,7 +696,6 @@ function GitHubCompletion({
 
   return (
     <div className="source-completion">
-      <p className="eyebrow">GitHub App</p>
       <h2>{mountId === undefined ? "Select repository and branch" : "Add another repository"}</h2>
       <p>
         아래 목록은 GitHub App 설치에서 접근할 수 있는 저장소입니다. 여기 있는

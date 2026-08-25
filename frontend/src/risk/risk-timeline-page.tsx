@@ -27,7 +27,6 @@ export function RiskTimelinePage() {
   return (
     <div className="content">
       <PageHeader
-        eyebrow="Append-only history"
         title="Risk timeline"
         description={resource.data.risk.summary}
         actions={

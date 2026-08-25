@@ -87,7 +87,6 @@ export function HistoryPage() {
   return (
     <div className="content">
       <PageHeader
-        eyebrow="Operational record"
         title="Activity & audit"
         description="Content-free workspace, risk, and source access history."
         actions={

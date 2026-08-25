@@ -93,12 +93,10 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
 }
 
 export function PageHeader({
-  eyebrow,
   title,
   description,
   actions,
 }: {
-  eyebrow?: string;
   title: string;
   description?: string;
   actions?: ReactNode;
@@ -106,7 +104,6 @@ export function PageHeader({
   return (
     <header className="page-header">
       <div>
-        {eyebrow === undefined ? null : <p className="eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
         {description === undefined ? null : <p>{description}</p>}
       </div>

@@ -56,6 +56,16 @@ class WorkspaceResponse(StrictApiModel):
     status: RiskWorkspaceStatus
 
 
+class WorkspaceListItemResponse(WorkspaceResponse):
+    """목록 전용 — 각 workspace 에서 내가 맡은 역할을 함께 준다.
+
+    화면이 workspace 마다 membership 을 따로 묻지 않게 하기 위한 필드라 목록
+    라우트만 채운다. 단건 조회의 역할은 /membership 이 정답이다.
+    """
+
+    my_role: MembershipRole | None = None
+
+
 class WorkspaceCreateRequest(StrictApiModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2_000)
@@ -211,7 +221,7 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
         )
         return plan.workspace
 
-    @router.get("", response_model=Page[WorkspaceResponse])
+    @router.get("", response_model=Page[WorkspaceListItemResponse])
     async def list_workspaces(
         principal: CurrentPrincipal = Depends(current),
         cursor: str | None = None,
@@ -219,14 +229,27 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
     ):
         async with deps.unit_of_work_factory() as uow:
             values = await uow.workspaces.list_for_user(principal.user.id)
-        selected, next_cursor = paginate(
-            values,
-            cursor=cursor,
-            limit=limit,
-            scope=f"workspaces:{principal.user.id}",
-            codec=deps.cursor_codec,
-        )
-        return Page(items=list(selected), next_cursor=next_cursor)
+            selected, next_cursor = paginate(
+                values,
+                cursor=cursor,
+                limit=limit,
+                scope=f"workspaces:{principal.user.id}",
+                codec=deps.cursor_codec,
+            )
+            items = []
+            for workspace in selected:
+                membership = await uow.memberships.get(
+                    workspace.id, principal.user.id
+                )
+                items.append(
+                    WorkspaceListItemResponse(
+                        **WorkspaceResponse.model_validate(
+                            workspace, from_attributes=True
+                        ).model_dump(),
+                        my_role=None if membership is None else membership.role,
+                    )
+                )
+        return Page(items=items, next_cursor=next_cursor)
 
     @router.get("/{vws_id}", response_model=WorkspaceResponse)
     async def get_workspace(
@@ -282,8 +305,15 @@ def create_workspaces_router(deps: WorkspaceRouterDependencies) -> APIRouter:
             for event in change_events:
                 if event.artifact_id is not None:
                     changes_by_artifact.setdefault(event.artifact_id, []).append(event)
+            # 비활성화한 소스의 실패는 세지 않는다 — 사용자가 소스를 껐다는 것은
+            # "지금은 관리 대상이 아니다" 는 뜻이라, 남겨 두면 지울 수 없는 경고가 된다.
+            disabled_mounts = {
+                mount.id for mount in mounts if mount.status is MountStatus.DISABLED
+            }
             failed_artifacts = 0
             for artifact in await uow.artifacts.list_for_workspace(vws_id):
+                if artifact.mount_id in disabled_mounts:
+                    continue
                 change = current_change_for_artifact(
                     changes_by_artifact.get(artifact.id),
                     await uow.artifacts.get_state(artifact.id),

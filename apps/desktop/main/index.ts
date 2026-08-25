@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, safeStorage, shell } from "electron";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -164,6 +164,8 @@ async function bootstrap(): Promise<void> {
   ) {
     throw new Error("Production desktop renderer must share the API origin");
   }
+  // File · Edit · View 기본 메뉴는 이 앱의 어떤 기능과도 이어지지 않는다 — 지운다.
+  Menu.setApplicationMenu(null);
   const window = new BrowserWindow({
     width: 1180,
     height: 780,

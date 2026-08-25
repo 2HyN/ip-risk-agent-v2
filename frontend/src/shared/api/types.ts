@@ -18,6 +18,8 @@ export type Workspace = {
   created_at: string;
   updated_at: string;
   status: "ACTIVE" | "DELETING" | "DELETED";
+  // 목록 라우트만 채운다 — 각 workspace 에서 내가 맡은 역할.
+  my_role?: Role | null;
 };
 
 export type Role = "OWNER" | "SOURCE_MANAGER" | "RISK_REVIEWER" | "VIEWER";

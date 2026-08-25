@@ -8,7 +8,6 @@ export function SourceSlotPage() {
   return (
     <div className="content">
       <PageHeader
-        eyebrow="Source Plane integration"
         title="Connected sources"
         description="Provider connection and tracking controls are supplied by Agent 2 without changing Control Plane UI code."
       />

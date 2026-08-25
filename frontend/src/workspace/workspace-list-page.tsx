@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../auth/session";
-import { formatDate } from "../shared/format";
+import { formatDate, humanize } from "../shared/format";
 import { usePagedResource } from "../shared/hooks/use-paged-resource";
 import {
   Badge,
@@ -18,10 +18,11 @@ import {
 } from "../shared/ui";
 
 export function WorkspaceListPage() {
-  const { api, user } = useSession();
+  const { api } = useSession();
   const navigate = useNavigate();
   const resource = usePagedResource((cursor) => api.workspaces(cursor), [api]);
   const invitations = usePagedResource((cursor) => api.invitations(cursor), [api]);
+  const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -65,18 +66,19 @@ export function WorkspaceListPage() {
   return (
     <main className="content content--wide">
       <PageHeader
-        eyebrow={`Welcome, ${user?.display_name ?? "there"}`}
         title="Risk Workspaces"
         description="Each workspace is an independent collaboration, security, and risk boundary."
+        actions={
+          // Add source · Reviewer decision 과 같은 결 — 폼은 상시 카드가 아니라
+          // 버튼이 여는 작은 창이다.
+          <Button onClick={() => setCreateOpen(true)}>Create workspace</Button>
+        }
       />
       {mutationError === null ? null : <ErrorState error={mutationError} />}
       {invitations.data !== null && invitations.data.items.length > 0 ? (
         <section className="section">
           <div className="section-heading">
-            <div>
-              <p className="eyebrow">Pending access</p>
-              <h2>Workspace invitations</h2>
-            </div>
+            <h2>Workspace invitations</h2>
           </div>
           <div className="card-grid">
             {invitations.data.items.map((invitation) => (
@@ -102,14 +104,16 @@ export function WorkspaceListPage() {
                     ? "만료 기한 없음"
                     : `수락 기한 ${formatDate(invitation.expires_at)}`}
                 </p>
-              <Button
-                disabled={!invitation.acceptance_available}
-                onClick={() => {
-                  void accept(invitation.id);
-                }}
-              >
-                {invitation.acceptance_available ? "Accept invitation" : "Invitation expired"}
-              </Button>
+                <Button
+                  disabled={!invitation.acceptance_available}
+                  onClick={() => {
+                    void accept(invitation.id);
+                  }}
+                >
+                  {invitation.acceptance_available
+                    ? "Accept invitation"
+                    : "Invitation expired"}
+                </Button>
               </Card>
             ))}
           </div>
@@ -126,97 +130,124 @@ export function WorkspaceListPage() {
           )}
         </section>
       ) : null}
-      <div className="workspace-grid">
-        <section>
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Your portfolio</p>
-              <h2>Available workspaces</h2>
-            </div>
-          </div>
-          {resource.loading ? (
-            <LoadingState label="Loading workspaces" />
-          ) : resource.error !== null ? (
-            <ErrorState error={resource.error} retry={resource.reload} />
-          ) : resource.data?.items.length === 0 ? (
-            <EmptyState
-              title="No workspace yet"
-              description="Create the first workspace to start organizing source and risk activity."
-            />
-          ) : (
-            <div className="workspace-list">
-              {resource.data?.items.map((workspace) => (
-                <button
-                  className="workspace-card"
-                  key={workspace.id}
-                  onClick={() => navigate(`/w/${workspace.id}`)}
-                >
-                  <span className="workspace-card__icon" aria-hidden="true">
-                    {workspace.name.slice(0, 2).toUpperCase()}
-                  </span>
-                  <span className="workspace-card__body">
-                    <span className="workspace-card__top">
-                      <strong>{workspace.name}</strong>
+      <section>
+        <div className="section-heading">
+          <h2>Available workspaces</h2>
+        </div>
+        {resource.loading ? (
+          <LoadingState label="Loading workspaces" />
+        ) : resource.error !== null ? (
+          <ErrorState error={resource.error} retry={resource.reload} />
+        ) : resource.data?.items.length === 0 ? (
+          <EmptyState
+            title="No workspace yet"
+            description="Create the first workspace to start organizing source and risk activity."
+            action={
+              <Button onClick={() => setCreateOpen(true)}>Create workspace</Button>
+            }
+          />
+        ) : (
+          <div className="workspace-list">
+            {resource.data?.items.map((workspace) => (
+              <button
+                className="workspace-card"
+                key={workspace.id}
+                onClick={() => navigate(`/w/${workspace.id}`)}
+              >
+                <span className="workspace-card__icon" aria-hidden="true">
+                  {workspace.name.slice(0, 2).toUpperCase()}
+                </span>
+                <span className="workspace-card__body">
+                  <span className="workspace-card__top">
+                    <strong>{workspace.name}</strong>
+                    <span className="workspace-card__badges">
+                      {/* 내가 이 workspace 에서 무엇을 할 수 있는지 — 목록에서 바로 본다. */}
+                      {workspace.my_role === null ||
+                      workspace.my_role === undefined ? null : (
+                        <Badge tone="info">{humanize(workspace.my_role)}</Badge>
+                      )}
                       <Badge tone={toneFor(workspace.status)}>
                         {workspace.status}
                       </Badge>
                     </span>
-                    <span>{workspace.description ?? "No description"}</span>
-                    <small>Updated {formatDate(workspace.updated_at)}</small>
                   </span>
-                  <span aria-hidden="true">→</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {resource.data?.next_cursor === null || resource.data === null ? null : (
-            <div className="pagination-actions">
+                  <span>{workspace.description ?? "No description"}</span>
+                  <small>Updated {formatDate(workspace.updated_at)}</small>
+                </span>
+                <span aria-hidden="true">→</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {resource.data?.next_cursor === null || resource.data === null ? null : (
+          <div className="pagination-actions">
+            <Button
+              variant="secondary"
+              disabled={resource.loadingMore}
+              onClick={resource.loadMore}
+            >
+              {resource.loadingMore ? "Loading…" : "Load more workspaces"}
+            </Button>
+          </div>
+        )}
+      </section>
+      {createOpen ? (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setCreateOpen(false)}
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Create workspace"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal__head">
               <Button
-                variant="secondary"
-                disabled={resource.loadingMore}
-                onClick={resource.loadMore}
+                type="button"
+                variant="ghost"
+                onClick={() => setCreateOpen(false)}
               >
-                {resource.loadingMore ? "Loading…" : "Load more workspaces"}
+                닫기 ✕
               </Button>
             </div>
-          )}
-        </section>
-        <Card className="create-card">
-          <p className="eyebrow">New boundary</p>
-          <h2>Create workspace</h2>
-          <p>Start with isolated membership, policy, and risk history.</p>
-          <form
-            onSubmit={(event) => {
-              void create(event);
-            }}
-          >
-            <Field label="Workspace name">
-              <Input
-                required
-                maxLength={200}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Product counsel"
-              />
-            </Field>
-            <Field
-              label="Description"
-              hint="Optional · visible to workspace members"
+            <h2>Create workspace</h2>
+            <p>Start with isolated membership, policy, and risk history.</p>
+            <form
+              onSubmit={(event) => {
+                void create(event);
+              }}
             >
-              <Textarea
-                maxLength={2000}
-                rows={4}
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="What this workspace protects"
-              />
-            </Field>
-            <Button disabled={creating || name.trim() === ""}>
-              {creating ? "Creating…" : "Create workspace"}
-            </Button>
-          </form>
-        </Card>
-      </div>
+              <Field label="Workspace name">
+                <Input
+                  required
+                  maxLength={200}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="Product counsel"
+                />
+              </Field>
+              <Field
+                label="Description"
+                hint="Optional · visible to workspace members"
+              >
+                <Textarea
+                  maxLength={2000}
+                  rows={4}
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="What this workspace protects"
+                />
+              </Field>
+              <Button disabled={creating || name.trim() === ""}>
+                {creating ? "Creating…" : "Create workspace"}
+              </Button>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
