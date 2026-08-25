@@ -66,7 +66,12 @@ class AuthlibGoogleOidcClient:
         )
 
     async def authorize_redirect(self, request: Request, redirect_uri: str) -> Response:
-        return await self._client.authorize_redirect(request, redirect_uri)
+        # prompt=select_account — 구글 세션이 살아 있어도 계정 선택 화면을 강제한다.
+        # 없으면 로그아웃해도 "구글로 계속" 이 직전 계정으로 조용히 재로그인되어,
+        # 공용 기기·복수 계정(팀 시연) 환경에서 다른 계정으로 들어갈 길이 없다.
+        return await self._client.authorize_redirect(
+            request, redirect_uri, prompt="select_account"
+        )
 
     async def fetch_identity(self, request: Request) -> GoogleOidcIdentity:
         token = await self._client.authorize_access_token(request)
