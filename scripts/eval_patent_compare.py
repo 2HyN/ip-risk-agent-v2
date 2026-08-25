@@ -23,6 +23,9 @@ from ip_risk_agent.intelligence.gemini.schemas import PatentComparison
 PROMPT_NAME = "patent_compare_v2"
 DEFAULT_FULLTEXT_CHARS = 8000
 
+# 확장 골든셋(verification_pairs_v2)의 일부 행이 csv 기본 필드 한도(131072자)를 넘는다
+csv.field_size_limit(10_000_000)
+
 
 def load_pairs(csv_path: Path) -> list[dict]:
     with csv_path.open(encoding="utf-8-sig") as f:
