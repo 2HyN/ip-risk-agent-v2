@@ -203,7 +203,12 @@ async def run(
             if done >= limit:
                 break
             target = row["applicationNumber"].strip()
-            cited = _cited_application_number(row["cited_fulltext"])
+            # 선해석 열이 있으면 우선한다 (goldset2 파생 CSV) — 없으면 (21) 줄.
+            cited = (row.get("citedApplicationNumber") or "").strip() or None
+            if cited is not None and len(cited) != 13:
+                cited = None
+            if cited is None:
+                cited = _cited_application_number(row["cited_fulltext"])
             if cited is None:
                 print(f"  {target}: 인용 공보에서 출원번호 추출 실패 — 건너뜀")
                 continue
