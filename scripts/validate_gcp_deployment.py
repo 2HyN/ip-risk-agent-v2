@@ -388,6 +388,9 @@ def _validate_v2_namespace(deploy: Path, cloud_run: dict, errors: list[str]) -> 
             "APP_ROLE": "worker",
             "APP_PUBLIC_BASE_URL": WORKER_BASE_URL,
             "KIPRIS_API_KEY_SECRET_ID": FIXED_SECRET_IDS["kipris"],
+            "PATENT_SEARCH_STRATEGY": "fielded_v5",
+            "PATENT_COMPARE_STRATEGY": "hybrid",
+            "KIPRIS_MAX_RPS": "1.0",
         },
     }
     if canonical_environment != expected_canonical_environment:

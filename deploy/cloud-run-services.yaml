@@ -101,6 +101,12 @@ canonicalEnvironment:
     APP_ROLE: worker
     APP_PUBLIC_BASE_URL: https://ip-risk-agent-v2-worker-555102774494.asia-northeast3.run.app
     KIPRIS_API_KEY_SECRET_ID: iprisk-v2-kipris-access-key
+    # 특허 고도화 확정 조합 (docs/PATENT_RAG_ENHANCEMENT_PLAN.md E2-10) —
+    # 지우면 baseline 으로 복귀한다.
+    PATENT_SEARCH_STRATEGY: fielded_v5
+    PATENT_COMPARE_STRATEGY: hybrid
+    # 공용 키: 합산 상한 = maxInstances × 값. 실측 서버 허용 ~18rps.
+    KIPRIS_MAX_RPS: "1.0"
 secretEnvironment:
   api:
     SESSION_SECRET: iprisk-v2-session-secret
