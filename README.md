@@ -35,11 +35,11 @@ IP Risk 를 근거 기반으로 분석함으로써, 사용자가 장기적으로
 
 **PBL 최종 프로젝트 · 5조 (IP RISK)**
 
-| 이름 | 담당 |
-|---|---|
-| **윤결** (팀장) | Risk Intelligence Plane 개발 · RAG 파이프라인 구축 · License / Patent Risk 규칙 엔진 구축 · 발표 및 포트폴리오 |
-| **이현** | 초기 명세·계약 구축 · Control Plane 개발 · 통합 및 배포 · E2E 테스트 |
-| **이은우** | Source Integration Plane 개발 · 소스 별 커넥터 구축 · HITL 검토 및 구축 · 통합 보고서 문서화 |
+| 이름 | 담당 (Plane) | 역할 |
+|---|---|---|
+| **윤결** (팀장) | Risk Intelligence Plane | Risk Intelligence Plane 개발 · RAG 파이프라인 구축 · License · Patent 규칙 엔진 구축 · E2E 테스트 · 재현율 평가 Golden set 구축 · 발표 및 포트폴리오 |
+| **이현** | Control Plane | 초기 명세 · Shared Contract 확정 · Control Plane 개발 · 통합 및 배포 · Patent 파이프라인 고도화 · CI / CD 자동화 · 보안 · E2E 테스트 |
+| **이은우** | Source Integration Plane | Source Integration Plane 개발 · 소스별 Connector 구축 · UI / UX 설계 · 통합 보고서 문서화 · 정밀도 평가 Golden set 구축 · 사용자 시나리오 시연 |
 
 ## 무엇을 하는가
 
