@@ -271,7 +271,29 @@ curl -s https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app/health
 
 **주의: `main` 푸시 = 배포 행위다.** 문서 하나만 바꿔도 재빌드·재배포가 돈다.
 배포 명령(`gcloud run deploy`)은 `--image` 만 갱신하므로 서비스 env(분석 전략
-설정 포함)는 보존된다. 롤백은 이전 이미지 digest 재지정.
+설정 포함)는 보존된다.
+
+**복구(롤백)** — 배포가 잘못됐으면 **이전 digest 를 두 서비스에 재배포**한다.
+같은 digest 를 쓰는 것이 "두 서비스가 다른 버전을 서빙하는 상태가 불가능하다"는
+원칙을 롤백에서도 지키는 방법이고, env 는 그대로 보존된다 (8/25 실전에서
+수동 배포분 ↔ CD 배포분 교체로 검증):
+
+```bash
+# ① 되돌릴 digest 확인 — 직전 정상 리비전의 IMAGE_DIGEST 를 고른다
+gcloud run revisions list --service=ip-risk-agent-v2-api \
+  --region=asia-northeast3 --limit=5 \
+  --format="table(metadata.name, metadata.creationTimestamp, status.imageDigest)"
+
+# ② 그 digest 를 두 서비스에 재배포하고 헬스 확인
+IMG="asia-northeast3-docker.pkg.dev/proj-aj22-211200020328/ip-risk-agent-v2/application"
+DIGEST="sha256:여기에_되돌릴_digest"
+gcloud run deploy ip-risk-agent-v2-api    --image "$IMG@$DIGEST" --region asia-northeast3 --quiet \
+&& gcloud run deploy ip-risk-agent-v2-worker --image "$IMG@$DIGEST" --region asia-northeast3 --quiet \
+&& curl -s https://ip-risk-agent-v2-api-555102774494.asia-northeast3.run.app/health/ready
+```
+
+(롤백 후에도 `main` 은 앞선 커밋을 가리키므로, 원인 수정 커밋을 병합하면
+deploy-main 이 다시 최신으로 배포한다 — 롤백은 임시 조치, 복구는 병합이다.)
 
 **수동 경로(보조)** — 트리거를 우회해야 할 때만. 팀 프로젝트 권한(Cloud Build
 제출, `iprisk-v2-deploy` actAs, Cloud Run 배포)이 필요하다. 수동 제출은
@@ -302,7 +324,8 @@ ls apps/desktop/release/
 Scheduler 5종·Cloud Tasks 큐·색인·IAM 은 `deploy/` 의 계약 파일이 기준이다.
 v2 는 v1 과 프로젝트를 공유하므로 **v1 자원(`(default)` Firestore, `ipra-*`
 Secret 등)의 재사용·IAM 변경은 금지**이며 검증기와 프로덕션 스타트업이
-fail-closed 로 막는다. 롤백은 revision 지정 트래픽 전환.
+fail-closed 로 막는다. 롤백은 위의 **복구(롤백)** 절차 — 이전 digest 를 두
+서비스에 재배포 — 를 따른다.
 
 ---
 
