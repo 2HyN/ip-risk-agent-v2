@@ -51,14 +51,26 @@ def _candidate_numbers(number: str, key: str) -> set[str]:
     """후보 출원의 출원·공개·등록 번호 전부 (숫자만). 캐시 우선."""
     path = RAW_DIR / f"biblio-{number}.xml"
     if not path.exists():
-        response = httpx.get(
-            f"{BASE_URL}/{DETAIL_PATH}",
-            params={"applicationNumber": number, "ServiceKey": key},
-            timeout=20.0,
-        )
-        response.raise_for_status()
+        # 공용 키 수칙: 호출 간격 1인당 최소 0.7초. 간격 없이 연사하면 서버가
+        # 연결을 끊는다 (WinError 10054 실측). 일시 오류는 1회 재시도.
+        import time
+
+        for attempt in (1, 2):
+            try:
+                response = httpx.get(
+                    f"{BASE_URL}/{DETAIL_PATH}",
+                    params={"applicationNumber": number, "ServiceKey": key},
+                    timeout=20.0,
+                )
+                response.raise_for_status()
+                break
+            except (httpx.TransportError, httpx.HTTPStatusError):
+                if attempt == 2:
+                    raise
+                time.sleep(5.0)
         RAW_DIR.mkdir(parents=True, exist_ok=True)
         path.write_text(response.text, encoding="utf-8")
+        time.sleep(0.85)
     root = fromstring(path.read_text(encoding="utf-8"))
     numbers = set()
     for tag in ("applicationNumber", "openNumber", "registerNumber", "publicationNumber"):
