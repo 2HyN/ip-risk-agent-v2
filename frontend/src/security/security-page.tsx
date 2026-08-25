@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "../auth/session";
 import { useResource } from "../shared/hooks/use-resource";
+import type { LicenseProfile } from "../shared/api/types";
 import {
   Button,
   Card,
@@ -9,9 +10,27 @@ import {
   Field,
   LoadingState,
   PageHeader,
+  Select,
   Textarea,
 } from "../shared/ui";
 import { useWorkspace } from "../workspace/workspace-context";
+
+const DISTRIBUTION_FORMS: [LicenseProfile["distribution_form"], string][] = [
+  ["SAAS", "SaaS — 네트워크로 서비스 제공"],
+  ["BINARY", "바이너리 배포 — 실행 파일을 전달"],
+  ["INTERNAL_ONLY", "사내 전용 — 외부 배포 없음"],
+  ["LIBRARY_REDISTRIBUTION", "라이브러리 재배포"],
+  ["EMBEDDED", "임베디드 — 기기에 탑재"],
+];
+const MODIFICATIONS: [LicenseProfile["modification"], string][] = [
+  ["UNMODIFIED", "수정 없이 사용"],
+  ["MODIFIED", "코드를 수정해 사용"],
+];
+const LINKINGS: [LicenseProfile["linking"], string][] = [
+  ["DYNAMIC", "동적 링크"],
+  ["STATIC", "정적 링크"],
+  ["NOT_APPLICABLE", "해당 없음"],
+];
 
 export function SecurityPage() {
   const { api } = useSession();
@@ -93,6 +112,13 @@ export function SecurityPage() {
       {/* "Connected sources / Authorized collection scope" 섹션은 뺐다 —
           연결과 범위는 Files 화면이 보여 주는 것이고, 여기 남겨 두면 같은 사실이
           두 화면에서 다르게 늙는다. */}
+      <LicenseProfileCard
+        profile={settings.data.license_profile ?? null}
+        canManage={canManageSecurity}
+        onSaved={() => {
+          settings.reload();
+        }}
+      />
       <div className="security-grid">
         <Card>
           <h2>.ipriskignore</h2>
@@ -181,6 +207,163 @@ export function SecurityPage() {
         </Card>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * 라이선스 배포 프로파일 — 같은 라이선스가 배포 형태에 따라 다른 의무를 만든다.
+ *
+ * 이것이 정해지기 전에는 서버가 등급을 짐작하지 않고 라이선스 Risk 를 전부
+ * "확인 필요(INDETERMINATE)" 로 둔다. 그래서 기본값을 미리 골라 두지 않는다 —
+ * 화면을 지나쳤다고 "SaaS 로 정했다" 가 되면 안 된다. 저장하면 서버가 라이선스
+ * 재평가를 이어서 돌린다.
+ */
+function LicenseProfileCard({
+  profile,
+  canManage,
+  onSaved,
+}: {
+  profile: LicenseProfile | null;
+  canManage: boolean;
+  onSaved: () => void;
+}) {
+  const { api } = useSession();
+  const { workspace } = useWorkspace();
+  const [distribution, setDistribution] = useState<string>(
+    profile?.distribution_form ?? "",
+  );
+  const [modification, setModification] = useState<string>(
+    profile?.modification ?? "",
+  );
+  const [linking, setLinking] = useState<string>(profile?.linking ?? "");
+  const [redistributes, setRedistributes] = useState<string>(
+    profile === null ? "" : profile.redistributes ? "yes" : "no",
+  );
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const complete =
+    distribution !== "" && modification !== "" && linking !== "" && redistributes !== "";
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!complete) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.updateLicenseProfile(workspace.id, {
+        distribution_form: distribution as LicenseProfile["distribution_form"],
+        modification: modification as LicenseProfile["modification"],
+        linking: linking as LicenseProfile["linking"],
+        redistributes: redistributes === "yes",
+      });
+      setNotice(
+        "저장되었습니다. 라이선스 재평가가 진행 중입니다 — 잠시 후 Review 에서 등급이 갱신됩니다.",
+      );
+      onSaved();
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason
+          : new Error("배포 프로파일을 저장하지 못했습니다."),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="license-profile-card">
+      <h2>라이선스 배포 프로파일</h2>
+      {profile === null ? (
+        <p className="analysis-notice analysis-notice--warning" role="status">
+          배포 형태가 아직 설정되지 않아 라이선스 위험이 전부{" "}
+          <strong>확인 필요(INDETERMINATE)</strong>로 표시됩니다. 같은 라이선스라도
+          배포 형태에 따라 의무가 달라서, 정해지기 전에는 등급을 짐작하지 않습니다.
+        </p>
+      ) : (
+        <p>
+          현재 설정을 바꾸면 저장 시 라이선스 위험이 자동으로 다시 평가됩니다.
+        </p>
+      )}
+      {notice === null ? null : (
+        <p className="source-success" role="status">
+          {notice}
+        </p>
+      )}
+      {error === null ? null : <ErrorState error={error} />}
+      <form className="license-profile-form" onSubmit={(event) => void save(event)}>
+        <Field label="배포 형태">
+          <Select
+            value={distribution}
+            disabled={!canManage}
+            onChange={(event) => setDistribution(event.target.value)}
+          >
+            <option value="" disabled>
+              선택하세요
+            </option>
+            {DISTRIBUTION_FORMS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="수정 여부">
+          <Select
+            value={modification}
+            disabled={!canManage}
+            onChange={(event) => setModification(event.target.value)}
+          >
+            <option value="" disabled>
+              선택하세요
+            </option>
+            {MODIFICATIONS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="링크 방식">
+          <Select
+            value={linking}
+            disabled={!canManage}
+            onChange={(event) => setLinking(event.target.value)}
+          >
+            <option value="" disabled>
+              선택하세요
+            </option>
+            {LINKINGS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="외부 재배포 여부">
+          <Select
+            value={redistributes}
+            disabled={!canManage}
+            onChange={(event) => setRedistributes(event.target.value)}
+          >
+            <option value="" disabled>
+              선택하세요
+            </option>
+            <option value="yes">재배포함</option>
+            <option value="no">재배포하지 않음</option>
+          </Select>
+        </Field>
+        {canManage ? (
+          <Button disabled={busy || !complete}>
+            {busy ? "Saving…" : "저장하고 재평가"}
+          </Button>
+        ) : (
+          <p className="fine-print">Owner만 이 설정을 바꿀 수 있습니다.</p>
+        )}
+      </form>
+    </Card>
   );
 }
 

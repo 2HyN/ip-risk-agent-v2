@@ -5,6 +5,7 @@ import type {
   DataAccessSummary,
   HistoryEntry,
   Invitation,
+  LicenseProfile,
   Membership,
   Mount,
   NotificationInbox,
@@ -138,6 +139,11 @@ export class ControlApi {
   ) =>
     this.client.request<{ settings: SecuritySettings; changed: boolean }>(
       `/api/v1/workspaces/${id}/security/ipriskignore`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  updateLicenseProfile = (id: string, body: LicenseProfile) =>
+    this.client.request<{ changed: boolean }>(
+      `/api/v1/workspaces/${id}/security/license-profile`,
       { method: "PUT", body: JSON.stringify(body) },
     );
   notifications = (unreadOnly = false, cursor: string | null = null) =>

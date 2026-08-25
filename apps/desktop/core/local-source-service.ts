@@ -80,6 +80,8 @@ export class LocalSourceService {
       deviceId: this.device.deviceId,
       includePatterns: params.includePatterns,
       excludePatterns: params.excludePatterns,
+      // 경로는 기기 밖으로 내보내지 않는다(§25) — 화면 이름용 마지막 이름 하나만.
+      folderName: basename(canonicalRootPath),
     });
 
     // 2단계: 발급받은 값으로 로컬에 저장 + 감시 준비.

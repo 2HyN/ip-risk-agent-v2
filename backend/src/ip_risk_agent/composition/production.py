@@ -530,6 +530,12 @@ class _LocalRegistrationCallbacks:
 
     async def create_local_mount(self, request: Request, body) -> MountRegistrationResponse:
         device = await self._devices.authenticate(request)
+        # 폴더 이름이 오면 그것이 마운트 이름이다. 경로 구분자를 벗겨 이름 하나로
+        # 강제한다 — §25(경로 비노출)를 요청 검증만으로 믿지 않는다. 구버전
+        # 데스크톱(1.0.0)은 보내지 않으므로 기존 이름을 그대로 쓴다.
+        folder_name = (getattr(body, "folder_name", None) or "").strip()
+        folder_name = folder_name.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1][:200]
+        display_name = folder_name or "Local Desktop"
         scope_key = stable_key(
             "local-source-scope",
             (
@@ -549,8 +555,8 @@ class _LocalRegistrationCallbacks:
                 connection_key=device.device_id,
                 source_workspace_key=scope_key,
                 external_scope_id=f"local:{scope_key}",
-                source_workspace_display_name="Local Desktop",
-                mount_alias="Local Desktop",
+                source_workspace_display_name=display_name,
+                mount_alias=display_name,
                 provider_subject=device.device_id,
                 provider_account_label=None,
                 credential_ref=None,

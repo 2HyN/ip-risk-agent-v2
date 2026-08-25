@@ -49,6 +49,9 @@ class WorkspaceSecuritySettings:
     policy_version: str
     global_ignore_text: str
     rule_count: int
+    #: 배포 형태 축. 미설정이면 ``None`` — 그때 라이선스 4·5 단계가 돌지 않아
+    #: Risk 가 전부 "확인 필요" 로 뜬다. 화면이 이 사실을 알려면 값이 나가야 한다.
+    license_profile: LicenseDeploymentProfile | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -463,6 +466,7 @@ def _settings(workspace: RiskWorkspace) -> WorkspaceSecuritySettings:
         policy_version=workspace.security_policy_version,
         global_ignore_text=workspace.global_ignore_text,
         rule_count=len(parse_ipriskignore(workspace.global_ignore_text)),
+        license_profile=workspace.license_profile,
     )
 
 

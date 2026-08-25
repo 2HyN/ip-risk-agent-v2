@@ -33,11 +33,20 @@ from ..common import (
 from ..workspaces.router import MountResponse
 
 
+class LicenseProfileValue(StrictApiModel):
+    distribution_form: DistributionForm
+    modification: ModificationState
+    linking: LinkingMode
+    redistributes: bool
+
+
 class SecuritySettingsResponse(StrictApiModel):
     risk_workspace_id: str
     policy_version: str
     global_ignore_text: str
     rule_count: int
+    #: 배포 형태 축. 미설정이면 null — 라이선스 Risk 가 전부 "확인 필요" 인 이유다.
+    license_profile: LicenseProfileValue | None = None
 
 
 class SecurityPolicyUpdateRequest(StrictApiModel):

@@ -41,6 +41,9 @@ class MountRegistrationRequest(BaseModel):
     exclude_patterns: list[str] = []
     # canonical_root_path는 의도적으로 여기 없다 (Agent2 Spec §25: 절대
     # Cloud Contract로 canonical_root_path를 내보내지 않는다).
+    #: 폴더의 **마지막 이름 하나**만 — 경로가 아니다 (§25 유지). 화면의 마운트
+    #: 이름으로 쓰인다. 구버전 데스크톱은 보내지 않으므로 선택 필드다.
+    folder_name: str | None = None
 
 
 class MountRegistrationResponse(BaseModel):

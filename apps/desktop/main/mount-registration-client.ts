@@ -12,6 +12,8 @@ export interface RegisterMountParams {
   deviceId: string;
   includePatterns: string[];
   excludePatterns: string[];
+  /** 폴더의 마지막 이름 하나 — 경로가 아니다. 화면의 마운트 이름이 된다. */
+  folderName?: string;
 }
 
 export interface RegisterMountResult {
@@ -45,6 +47,7 @@ export class HttpMountRegistrationClient implements MountRegistrationClient {
       device_id: params.deviceId,
       include_patterns: params.includePatterns,
       exclude_patterns: params.excludePatterns,
+      ...(params.folderName === undefined ? {} : { folder_name: params.folderName }),
     })) as MountRegisterResponse;
 
     return {

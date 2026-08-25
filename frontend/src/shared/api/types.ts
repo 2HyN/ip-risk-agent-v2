@@ -142,11 +142,25 @@ export type Dashboard = {
   };
 };
 
+export type LicenseProfile = {
+  distribution_form:
+    | "SAAS"
+    | "BINARY"
+    | "INTERNAL_ONLY"
+    | "LIBRARY_REDISTRIBUTION"
+    | "EMBEDDED";
+  modification: "UNMODIFIED" | "MODIFIED";
+  linking: "DYNAMIC" | "STATIC" | "NOT_APPLICABLE";
+  redistributes: boolean;
+};
+
 export type SecuritySettings = {
   risk_workspace_id: string;
   policy_version: string;
   global_ignore_text: string;
   rule_count: number;
+  // 미설정이면 null — 라이선스 Risk 가 전부 "확인 필요" 로 뜨는 이유다.
+  license_profile?: LicenseProfile | null;
 };
 
 export type SourceAccess = {
